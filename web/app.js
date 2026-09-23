@@ -366,6 +366,12 @@ window.addEventListener("pageshow", (event) => {
   refreshHistory();
 });
 
+nodes.githubLogin.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" || event.isComposing) return;
+  event.preventDefault();
+  nodes.loginLink.click();
+});
+
 nodes.loginLink.addEventListener("click", async () => {
   nodes.loginLink.disabled = true;
   await recordGitHubLogin(true);

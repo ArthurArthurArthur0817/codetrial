@@ -1571,3 +1571,51 @@ test("a failed history load leaves no other account's attempts behind", () => {
   assert.match(shown, /reports = \[\]/);
   assert.match(shown, /progressNormalized = \[\]/);
 });
+
+
+lobbyTest("Enter in the GitHub field submits the account choice", async (page) => {
+  session = { signedIn: false, loginRequired: true };
+  await lobby(page);
+  await page.fill("#github-login", "@candidate");
+  const login = page.waitForRequest((request) => request.url().endsWith("/api/login"), { timeout: 2000 });
+  await page.press("#github-login", "Enter");
+  assert.deepEqual((await login).postDataJSON(), { login: "candidate" });
+  await page.waitForFunction(() => document.querySelector("#account-status").textContent === "Signed in as candidate");
+});
+
+lobbyTest("composition Enter does not submit a GitHub username", async (page) => {
+  session = { signedIn: false, loginRequired: true };
+  await lobby(page);
+  await page.fill("#github-login", "composing");
+  const login = page.waitForRequest((request) => request.url().endsWith("/api/login"), { timeout: 2000 });
+  await page.evaluate(() => document.querySelector("#github-login").dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", isComposing: true, bubbles: true })));
+  // The first request must carry the committed value, not the composition.
+  // A real submission also proves the request observer was listening.
+  await page.fill("#github-login", "candidate");
+  await page.press("#github-login", "Enter");
+  assert.deepEqual((await login).postDataJSON(), { login: "candidate" });
+  await page.waitForFunction(() => document.querySelector("#account-status").textContent === "Signed in as candidate");
+});
+
+lobbyTest("Enter does not submit again while the GitHub choice is pending", async (page) => {
+  session = { signedIn: false, loginRequired: true };
+  let release;
+  holdLogin = new Promise((resolve) => (release = resolve));
+  const submitted = [];
+  page.on("request", (request) => { if (request.url().endsWith("/api/login")) submitted.push(request); });
+  try {
+    await lobby(page);
+    await page.fill("#github-login", "candidate");
+    const login = page.waitForRequest((request) => request.url().endsWith("/api/login"), { timeout: 2000 });
+    await page.press("#github-login", "Enter");
+    await login;
+    assert.equal(await page.locator("#login-link").isDisabled(), true);
+    await page.press("#github-login", "Enter");
+    await page.press("#github-login", "Enter");
+    release();
+    await page.waitForFunction(() => document.querySelector("#account-status").textContent === "Signed in as candidate");
+    assert.equal(submitted.length, 1);
+  } finally {
+    release();
+  }
+});
