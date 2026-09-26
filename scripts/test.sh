@@ -287,6 +287,61 @@ gate cargo-audit cargo_audit_gate
 gate actionlint actionlint_gate
 
 gate browser-check-syntax node --check "$ROOT/scripts/browser-check.cjs"
+
+# `node --check` parses; it does not resolve. `scripts/browser-check.cjs` spent
+# months requiring `livekit-server-sdk`, which is in neither package.json nor
+# node_modules, inside a function only the credentialed lanes reach: every full
+# dispatch run died on it after spending a whole interview, and no gate here
+# could say so. Every other JS file in the tree is loaded by some gate, so a
+# missing package fails that gate; this one is the exception, because the gate
+# that runs it needs credentials and a browser.
+#
+# Resolution, not loading: the require sat behind a credential check, so even
+# importing the module would have walked past it. Needs node_modules, and says
+# so rather than failing, on the same contract as eslint above.
+script_requires()
+{
+    if [ ! -d "$ROOT/node_modules" ]; then
+        skip "script-requires: \`npm install\` enables it"
+        return 0
+    fi
+    # shellcheck disable=SC2016
+    # The `${file}` and `${spec}` below are JavaScript template placeholders,
+    # not shell expansions, so the single quotes are what has to hold.
+    (cd "$ROOT" && node -e '
+      const fs = require("fs");
+      const { isBuiltin } = require("node:module");
+      let unresolved = 0;
+      for (const file of process.argv.slice(1)) {
+        // Comments first: a `require("x")` inside one is prose, and failing
+        // the gate on it would teach people to delete the comment. Only a
+        // marker that opens its own line, because one mid-line is as likely
+        // to be inside a string: `browser-check.cjs` holds `"    /* setup {"`
+        // as a fixture, and a strip that started there ran to a `*/` six
+        // lines below it and took a real require with it. The block strip
+        // ends at the first `*/` and is not anchored to the line end either,
+        // because anchoring it there forced the lazy body past that `*/` to
+        // find one that did end a line, which is the same miss again. Every
+        // shape left over errs towards a false alarm, which is visible and
+        // one line to fix, rather than a miss, which is what the gate is for.
+        const source = fs
+          .readFileSync(file, "utf8")
+          .replace(/^[ \t]*\/\*[\s\S]*?\*\//gm, "")
+          .replace(/^[ \t]*\/\/.*$/gm, "");
+        for (const [, , spec] of source.matchAll(/require\s*\((["\x27])([^"\x27]+)\1\)/g)) {
+          if (spec.startsWith(".") || isBuiltin(spec)) continue;
+          try {
+            require.resolve(spec, { paths: [process.cwd()] });
+          } catch {
+            console.error(`${file}: cannot resolve "${spec}"`);
+            unresolved = 1;
+          }
+        }
+      }
+      process.exit(unresolved);
+    ' scripts/*.cjs)
+}
+gate script-requires script_requires
 gate ruff ruff_gate
 
 # The hooks are the one part of this tree that runs on a contributor's machine
