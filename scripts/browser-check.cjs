@@ -116,7 +116,12 @@ function redact(text) {
   // can find, because what is exported is the whole URL and what reaches a log
   // is some substring of it. `validate_livekit_url` accepts userinfo, and a
   // `fetch` refusal quotes the URL it refused.
-  output = output.replace(/([a-z][a-z0-9+.-]*:\/\/)[^/\s@]+@/gi, "$1[redacted]@");
+  //
+  // The authority ends at `/`, `?` or `#`, and userinfo is everything before
+  // the last `@` inside it: the same reading `livekitHttpBase` in
+  // livekit-room-service.cjs takes with `lastIndexOf("@")`, so a password
+  // containing an `@` is masked whole here rather than left half in the log.
+  output = output.replace(/([a-z][a-z0-9+.-]*:\/\/)[^/?#\s]+@/gi, "$1[redacted]@");
   return output.replace(/[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}/g, "[jwt]");
 }
 

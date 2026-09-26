@@ -38,6 +38,8 @@ function livekitHttpBase(url = process.env.LIVEKIT_URL) {
   const authorityEnd = rest.indexOf("/");
   const authority = authorityEnd === -1 ? rest : rest.slice(0, authorityEnd);
   const path = authorityEnd === -1 ? "" : rest.slice(authorityEnd);
+  // The last `@`, because a password may contain one. `redact` in
+  // browser-check.cjs masks the same span for the same reason.
   const at = authority.lastIndexOf("@");
   return `${scheme}${authority.slice(at + 1)}${path}`;
 }
