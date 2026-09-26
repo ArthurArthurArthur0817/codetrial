@@ -37,13 +37,13 @@ use super::{
     WRAP_UP_WAIT, browser_packet, output_settled,
 };
 
-/// The door every text sent over the live socket goes through, so that what
-/// the session spent is measured where it is spent rather than at whichever
-/// call sites somebody remembered. Tool answers have the other door, on their
-/// way out of [`execute_tool_call`], which the behaviour harness drives without
-/// a socket. The two fields are taken separately rather than as a
-/// context, because the watch loop, the greeting and the cold restart each hold
-/// a different pair.
+/// The door every realtime-input text goes through, so that what the session
+/// spent is measured where it is spent rather than at whichever call sites
+/// somebody remembered. The system instruction is counted when its Live socket
+/// opens, and tool answers have the other door, on their way out of
+/// [`execute_tool_call`], which the behaviour harness drives without a socket.
+/// The two fields are taken separately rather than as a context, because the
+/// watch loop, the greeting and the cold restart each hold a different pair.
 pub(super) async fn send_model_text(
     gemini: &mut GeminiLiveSession,
     state: &mut RuntimeState,

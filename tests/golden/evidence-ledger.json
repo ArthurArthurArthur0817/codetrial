@@ -400,6 +400,8 @@
   "metrics": {
     "raw_events_received": 15,
     "code_events_emitted": 10,
+    "live_setup_count": 0,
+    "live_setup_bytes": 0,
     "watch_prompt_count": 0,
     "watch_prompt_bytes": 0,
     "turn_prompt_count": 0,

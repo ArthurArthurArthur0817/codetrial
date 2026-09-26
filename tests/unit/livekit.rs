@@ -185,6 +185,32 @@ fn a_published_packet_carries_its_topic_and_arrives_reliably() {
     }
 }
 
+/// Every Live socket that opens is counted, from both places one opens.
+///
+/// The counting itself is tested against the ledger, and the cost line is
+/// tested against its format, but neither notices if a call site stops
+/// calling: deleting both recordings leaves the whole suite green, because a
+/// room that really connected is the only other witness. Read as source for
+/// the reason the interview clock is, one test below.
+#[test]
+fn both_ways_a_live_socket_opens_count_its_instruction() {
+    let source = include_str!("../../src/livekit.rs");
+    for opener in ["async fn open_session", "async fn replace_gemini_session"] {
+        let body = source
+            .split(opener)
+            .nth(1)
+            .unwrap_or_else(|| panic!("{opener} is still defined here"));
+
+        // To the next item at column zero, so a later function's recording
+        // cannot stand in for this one's.
+        let body = body.split("\n}\n").next().unwrap_or_default();
+        assert!(
+            body.contains("ModelInputKind::LiveSetup"),
+            "{opener} must count the instruction its socket was opened with"
+        );
+    }
+}
+
 /// The interview starts once, when the candidate joined.
 ///
 /// Stamping a second `Instant::now()` after the room and the Gemini session
@@ -570,8 +596,8 @@ fn runtime_activity_emits_periodic_prompts_and_updates_gates() {
     // No counter assertion here any more, and deliberately: a prompt is counted
     // where it is handed to the socket, so `watch_prompt` hands its caller a
     // string and nothing else. `send_model_text` is what counts it, alongside
-    // every other text this server sends, and `record_model_input` is what
-    // tests the counting.
+    // every other realtime-input text this server sends, and
+    // `record_model_input` is what tests the counting.
 }
 
 /// Every timestamp the watcher reads as activity, set to one instant.

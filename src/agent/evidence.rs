@@ -277,6 +277,11 @@ pub struct StuckSignals {
 pub struct EvidenceMetrics {
     pub raw_events_received: u64,
     pub code_events_emitted: u64,
+    /// The system instruction sent when each Live socket opens. Reconnects
+    /// send it again, including resumptions, so the count is also the number
+    /// of successfully opened Live sessions represented by these metrics.
+    pub live_setup_count: u32,
+    pub live_setup_bytes: u64,
     pub watch_prompt_count: u32,
     pub watch_prompt_bytes: u64,
     /// The conversational sends that are not the watch loop: the greeting, a
@@ -318,9 +323,11 @@ impl EvidenceMetrics {
     /// Built as a value rather than printed, so a test can read it: the one
     /// part of a line written with `eprintln!` alone that nothing can check is
     /// the format string, which is the whole of what this is. Destructured
-    /// rather than passed positionally for the same reason -- twelve `{}` in
+    /// rather than passed positionally for the same reason: a line of `{}` in
     /// bytes/count pairs put the correctness of the line in the argument order,
-    /// where swapping two adjacent ones compiles and reads wrong.
+    /// where swapping two adjacent ones compiles and reads wrong. A count of
+    /// them in this sentence would be one more thing to bump per field, and
+    /// the one that was here had already gone stale.
     ///
     /// Stderr and never the report or the projection, for the reason the
     /// counters exist under: a model handed its own byte count is being told
@@ -329,6 +336,8 @@ impl EvidenceMetrics {
         let Self {
             raw_events_received,
             code_events_emitted,
+            live_setup_count,
+            live_setup_bytes,
             watch_prompt_count,
             watch_prompt_bytes,
             turn_prompt_count,
@@ -343,7 +352,8 @@ impl EvidenceMetrics {
             tool_response_bytes,
             model_input_digest: _,
         } = self;
-        let total = watch_prompt_bytes
+        let total = live_setup_bytes
+            + watch_prompt_bytes
             + turn_prompt_bytes
             + interim_prompt_bytes
             + final_report_prompt_bytes
@@ -351,6 +361,7 @@ impl EvidenceMetrics {
             + tool_response_bytes;
         format!(
             "codetrial model_input_bytes total={total} \
+             setup={live_setup_bytes}/{live_setup_count} \
              watch={watch_prompt_bytes}/{watch_prompt_count} \
              turn={turn_prompt_bytes}/{turn_prompt_count} \
              interim={interim_prompt_bytes}/{interim_prompt_count} \
@@ -364,6 +375,7 @@ impl EvidenceMetrics {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ModelInputKind {
+    LiveSetup,
     Watch,
     Turn,
     Interim,
@@ -706,32 +718,46 @@ impl EvidenceLedger {
 
     pub(crate) fn record_model_input(&mut self, kind: ModelInputKind, text: &str) {
         let bytes = text.len() as u64;
-        match kind {
-            ModelInputKind::Watch => {
-                self.metrics.watch_prompt_count += 1;
-                self.metrics.watch_prompt_bytes += bytes;
+
+        // The pair this kind is counted in, picked once. Seven arms that each
+        // bumped their own two fields was the same statement written seven
+        // times, and the arm that forgot one of its two was a counter that
+        // silently disagreed with its own byte total. Still exhaustive, so a
+        // new kind is a compile error here rather than a silently uncounted
+        // send.
+        let metrics = &mut self.metrics;
+        let (count, total) = match kind {
+            ModelInputKind::LiveSetup => {
+                (&mut metrics.live_setup_count, &mut metrics.live_setup_bytes)
             }
-            ModelInputKind::Turn => {
-                self.metrics.turn_prompt_count += 1;
-                self.metrics.turn_prompt_bytes += bytes;
-            }
-            ModelInputKind::Interim => {
-                self.metrics.interim_prompt_count += 1;
-                self.metrics.interim_prompt_bytes += bytes;
-            }
-            ModelInputKind::FinalReport => {
-                self.metrics.final_report_prompt_count += 1;
-                self.metrics.final_report_prompt_bytes += bytes;
-            }
-            ModelInputKind::ReadEditor => {
-                self.metrics.read_editor_calls += 1;
-                self.metrics.read_editor_bytes += bytes;
-            }
-            ModelInputKind::ToolResponse => {
-                self.metrics.tool_response_count += 1;
-                self.metrics.tool_response_bytes += bytes;
-            }
-        }
+            ModelInputKind::Watch => (
+                &mut metrics.watch_prompt_count,
+                &mut metrics.watch_prompt_bytes,
+            ),
+            ModelInputKind::Turn => (
+                &mut metrics.turn_prompt_count,
+                &mut metrics.turn_prompt_bytes,
+            ),
+            ModelInputKind::Interim => (
+                &mut metrics.interim_prompt_count,
+                &mut metrics.interim_prompt_bytes,
+            ),
+            ModelInputKind::FinalReport => (
+                &mut metrics.final_report_prompt_count,
+                &mut metrics.final_report_prompt_bytes,
+            ),
+            ModelInputKind::ReadEditor => (
+                &mut metrics.read_editor_calls,
+                &mut metrics.read_editor_bytes,
+            ),
+            ModelInputKind::ToolResponse => (
+                &mut metrics.tool_response_count,
+                &mut metrics.tool_response_bytes,
+            ),
+        };
+        *count += 1;
+        *total += bytes;
+
         let mut hasher = Sha256::new();
         hasher.update(self.metrics.model_input_digest.as_bytes());
         hasher.update(format!("{kind:?}").as_bytes());

@@ -143,20 +143,20 @@ change to any of the above visible as a diff. Regenerate it with
 
 The reducer also measures raw packets received separately from accepted code
 events, and measures what the session handed the models: bytes and a count for
-the watch prompts, the conversational turns (greeting, cold restart, the reply
-a data event asks for, and the wrap-up), the interim reviews, the final report
-prompt, the `read_editor` responses and every other tool answer, refusals
-included; an HTTP prompt is counted with the system instruction it is sent
-behind. Every model-bound text falls into exactly one of them. They are bytes
-rather than tokens because the tokenizer belongs to the provider, they are
-written to stderr once at the end of a session beside the `live_usage` line,
-which sums the token counts the Live session reported for each of its turns
-(each billed on the whole context it ran in), and each report and interim call
-logs its own reported usage, and they are deliberately
-absent from the prompt: a model handed its own byte count is being told
-something no interview should turn on. Beside them, every model-bound text is
-folded in order into one SHA-256, so two runs of a session sent the same prompts
-exactly when that digest matches.
+each Live socket's system instruction, the watch prompts, the conversational
+turns (greeting, cold restart, the reply a data event asks for, and the
+wrap-up), the interim reviews, the final report prompt, the `read_editor`
+responses and every other tool answer, refusals included; an HTTP prompt is
+counted with the system instruction it is sent behind. Every model-bound text
+falls into exactly one of them. They are bytes rather than tokens because the
+tokenizer belongs to the provider, they are written to stderr once at the end
+of a session beside the `live_usage` line, which sums the token counts the
+Live session reported for each of its turns (each billed on the whole context
+it ran in), and each report and interim call logs its own reported usage, and
+they are deliberately absent from the prompt: a model handed its own byte
+count is being told something no interview should turn on. Beside them, every
+model-bound text is folded in order into one SHA-256, so two runs of a session
+sent the same prompts exactly when that digest matches.
 
 The interim review and the final report sample with a fixed seed. Measured on
 the report model at its temperature, four calls with one prompt and the seed

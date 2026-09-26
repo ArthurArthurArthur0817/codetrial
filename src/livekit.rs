@@ -454,6 +454,10 @@ async fn replace_gemini_session(
         leave_room(room).await;
         return Ok(ControlFlow::Break(()));
     };
+    context
+        .state
+        .evidence_ledger
+        .record_model_input(ModelInputKind::LiveSetup, &interview.boot.instructions);
 
     *context.gemini = session;
 
@@ -781,6 +785,9 @@ async fn open_session<'a>(
         activity: RuntimeActivity::with_interim_review_cap(started_at, config.max_interim_reviews),
         turns: SpeakerTurns::default(),
     };
+    turn.state
+        .evidence_ledger
+        .record_model_input(ModelInputKind::LiveSetup, &boot.instructions);
     let mut media = CandidateMedia::new();
 
     // Before the greeting, not after: these arrived while we were waiting for

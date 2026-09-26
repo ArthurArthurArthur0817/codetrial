@@ -425,6 +425,7 @@ fn evidence_ledger_counts_received_packets_separately_from_evidence() {
 #[test]
 fn evidence_ledger_counts_model_bytes_without_claiming_tokens() {
     let mut ledger = EvidenceLedger::default();
+    ledger.record_model_input(ModelInputKind::LiveSetup, "system");
     ledger.record_model_input(ModelInputKind::Watch, "watch");
     ledger.record_model_input(ModelInputKind::Turn, "greeting");
     ledger.record_model_input(ModelInputKind::Turn, "wrap");
@@ -432,6 +433,8 @@ fn evidence_ledger_counts_model_bytes_without_claiming_tokens() {
     ledger.record_model_input(ModelInputKind::FinalReport, "report");
     ledger.record_model_input(ModelInputKind::ReadEditor, "editor");
     ledger.record_model_input(ModelInputKind::ToolResponse, "hint");
+    assert_eq!(ledger.metrics.live_setup_count, 1);
+    assert_eq!(ledger.metrics.live_setup_bytes, 6);
     assert_eq!(ledger.metrics.watch_prompt_count, 1);
     assert_eq!(ledger.metrics.watch_prompt_bytes, 5);
     assert_eq!(ledger.metrics.interim_prompt_bytes, 7);
@@ -457,6 +460,7 @@ fn evidence_ledger_counts_model_bytes_without_claiming_tokens() {
     // what its own advice costs.
     let slice = every_view(&ledger);
     for field in [
+        "live_setup_bytes",
         "watch_prompt_bytes",
         "turn_prompt_bytes",
         "interim_prompt_bytes",
@@ -2710,8 +2714,8 @@ fn a_fix_with_a_baseline_is_still_classified_against_it() {
 }
 
 /// The one line the counters ever reach a person through, and the only part of
-/// it nothing else can check: the format string and the order of the twelve
-/// fields in it.
+/// it nothing else can check: the format string and the order of the fields
+/// in it.
 #[test]
 fn the_session_cost_is_written_somewhere_a_person_can_read_it() {
     let mut ledger = EvidenceLedger::default();
@@ -2722,6 +2726,7 @@ fn the_session_cost_is_written_somewhere_a_person_can_read_it() {
     // Distinct sizes also mean two fields swapped in the line cannot read the
     // same.
     ledger.record_model_input(ModelInputKind::Watch, "watch");
+    ledger.record_model_input(ModelInputKind::LiveSetup, "system prompt");
     ledger.record_model_input(ModelInputKind::Turn, "greeting");
     ledger.record_model_input(ModelInputKind::Interim, "interim");
     ledger.record_model_input(ModelInputKind::FinalReport, "finalrept");
@@ -2732,7 +2737,7 @@ fn the_session_cost_is_written_somewhere_a_person_can_read_it() {
     let line = ledger.metrics.cost_line();
     assert_eq!(
         line,
-        "codetrial model_input_bytes total=39 watch=5/1 turn=8/1 interim=7/1 \
+        "codetrial model_input_bytes total=52 setup=13/1 watch=5/1 turn=8/1 interim=7/1 \
          report=9/1 read_editor=6/1 tool=4/1 events_received=1 code_events=0"
     );
 }
@@ -3056,15 +3061,17 @@ fn the_model_input_digest_tells_identical_sends_from_different_ones() {
         ledger.metrics.model_input_digest
     };
     let session = [
+        (ModelInputKind::LiveSetup, "system"),
         (ModelInputKind::Turn, "hello"),
         (ModelInputKind::Watch, "review"),
     ];
     assert_eq!(send(&session), send(&session));
     assert_eq!(send(&session).len(), 64);
-    assert_ne!(send(&session), send(&[session[1], session[0]]));
+    assert_ne!(send(&session), send(&[session[2], session[1], session[0]]));
     assert_ne!(
         send(&session),
         send(&[
+            session[0],
             (ModelInputKind::Turn, "hello"),
             (ModelInputKind::Interim, "review")
         ])
@@ -3072,6 +3079,7 @@ fn the_model_input_digest_tells_identical_sends_from_different_ones() {
     assert_ne!(
         send(&session),
         send(&[
+            session[0],
             (ModelInputKind::Turn, "hello"),
             (ModelInputKind::Watch, "reviews")
         ])
