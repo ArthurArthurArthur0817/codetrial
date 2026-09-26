@@ -895,10 +895,19 @@ async fn on_watch_tick(
         );
 
         // `shutdown` rather than `close`: it is the same teardown for a caller
-        // holding a borrow, which is what every handler here has.
-        context.gemini.shutdown().await?;
+        // holding a borrow, which is what every handler here has. Not `?`: a
+        // socket that fails its close is no reason to stay in the room.
+        if let Err(error) = context.gemini.shutdown().await {
+            eprintln!("Gemini close failed ({error}); leaving anyway");
+        }
         leave_room(room).await;
         return Ok(ControlFlow::Break(()));
+    }
+
+    // Not `?`, for the reason the nudge below gives. A ping that times out has
+    // already ended the reader, so the close it found is reported next.
+    if let Err(error) = context.gemini.keep_alive().await {
+        eprintln!("Gemini ping failed ({error}); waiting for the close to be reported");
     }
 
     if let Some(review) = loops.interim_review.finished() {
@@ -1716,8 +1725,16 @@ async fn handle_data_packet(
             .await?;
     }
     if let Some(prompt) = result.generate_reply {
-        send_model_text(context.gemini, context.state, ModelInputKind::Turn, &prompt).await?;
-        context.activity.mark_speaking();
+        // Not `?`: a failed write here ended the interview with no report, and
+        // the socket it failed on is replaced when the close is reported.
+        match send_model_text(context.gemini, context.state, ModelInputKind::Turn, &prompt).await {
+            Ok(()) => context.activity.mark_speaking(),
+            Err(error) => {
+                eprintln!(
+                    "Gemini reply request failed ({error}); waiting for the close to be reported"
+                );
+            }
+        }
     }
     let Some(reason) = result.finish_interview else {
         return Ok(ControlFlow::Continue(()));
@@ -1730,7 +1747,14 @@ async fn handle_data_packet(
     // rather than for both. The farewell stays out of what is assessed: all it
     // can add is the skips a started behavioral round leaves to it, and the
     // report scores those steps as unassessed with or without them.
-    close_turns(room, context).await?;
+    //
+    // Not `?`, and neither is anything else between here and `publish_report`.
+    // The turns go out as a LiveKit text stream and the report as a data
+    // packet, so the one failing says nothing about the other, and a final
+    // segment the panel never saw is cosmetic where a missing report is not.
+    if let Err(error) = close_turns(room, context).await {
+        eprintln!("closing the last turns failed ({error}); writing the report anyway");
+    }
     let prompt = freeze_report_prompt(
         interview.boot,
         context.state,
@@ -1738,26 +1762,28 @@ async fn handle_data_packet(
     );
     let api_key = &**interview.keys;
     let farewell = async {
-        if should_send_wrap_up(&reason) {
-            send_wrap_up_and_wait(room, context, &reason).await?;
+        // The goodbye is the only part of the ending that needs the Live
+        // socket. The report is written over HTTP from what this process
+        // already holds, so a socket that died under the goodbye costs the
+        // goodbye and nothing else; propagating here dropped the report call
+        // and left the candidate waiting on a report nobody was writing.
+        if should_send_wrap_up(&reason)
+            && let Err(error) = send_wrap_up_and_wait(room, context, &reason).await
+        {
+            eprintln!("wrap-up failed ({error}); writing the report without it");
         }
 
         // The goodbye is the last turn there will be. Closing here keeps the
         // panel from leaving it rendered as still-in-progress for the rest of
         // the page's life, and costs one publish.
-        close_turns(room, context).await
+        if let Err(error) = close_turns(room, context).await {
+            eprintln!("closing the goodbye failed ({error}); writing the report anyway");
+        }
     };
-
-    // `try_join`, so a farewell that fails drops the report call with it rather
-    // than holding teardown for the call's whole deadline to publish nothing.
-    let (generated, ()) = tokio::try_join!(
-        async {
-            Ok::<_, Box<dyn std::error::Error + Send + Sync>>(
-                generate_report_bounded(interview.boot, &prompt, api_key).await,
-            )
-        },
+    let (generated, ()) = tokio::join!(
+        generate_report_bounded(interview.boot, &prompt, api_key),
         farewell
-    )?;
+    );
     publish_report(
         room,
         interview.boot,
@@ -1773,7 +1799,12 @@ async fn handle_data_packet(
         context.activity.live_turns,
         context.activity.live_usage.log_fields()
     );
-    context.gemini.shutdown().await?;
+
+    // The report is out; a close that fails now changes nothing but whether the
+    // agent leaves, and it has to.
+    if let Err(error) = context.gemini.shutdown().await {
+        eprintln!("Gemini close failed ({error}); leaving anyway");
+    }
     // Give the report packet a moment to leave before the agent goes.
     tokio::time::sleep(Duration::from_millis(250)).await;
     leave_room(room).await;
