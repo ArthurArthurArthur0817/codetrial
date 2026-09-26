@@ -16,7 +16,8 @@ import {
   pickerEntry,
   progressModelFrom,
 } from "./progress.js";
-import { reportMarkup } from "./render.js";
+import { reportMarkdown, reportMarkup } from "./render.js";
+import { downloadMarkdown, reportFilename } from "./download.js";
 import { loadPageMap } from "./problem-data.js";
 import {
   parseGroundingFile,
@@ -1108,6 +1109,14 @@ function renderAttemptHistory(attempts) {
     const open = document.createElement("button");
     open.type = "button";
     open.textContent = "Open report";
+    const download = document.createElement("button");
+    download.type = "button";
+    download.textContent = "Download report (.md)";
+    download.setAttribute(
+      "aria-label",
+      `Download report (.md) for ${attempt.problemTitle}, ${new Date(attempt.at).toLocaleString()}`,
+    );
+    download.addEventListener("click", () => downloadSavedReport(attempt));
     const retry = document.createElement("button");
     retry.type = "button";
     retry.textContent = "Try again";
@@ -1140,7 +1149,7 @@ function renderAttemptHistory(attempts) {
       setDuration(suggestedDuration(new Set([card.difficulty])));
       nodes.recommendation.textContent = `Selected problem: ${title(card)}.`;
     });
-    item.append(label, open, retry);
+    item.append(label, open, download, retry);
     // A row with no id has nothing both stores and the account agree on, and
     // deleting by anything weaker could take a different report than this one.
     if (attempt.id) {
@@ -1168,6 +1177,25 @@ function renderAttemptHistory(attempts) {
     item.append(report);
     nodes.attemptHistory.append(item);
   }
+}
+
+function downloadSavedReport(attempt) {
+  const markdown = reportMarkdown({
+    report: {
+      ...attempt.report,
+      incomplete:
+        attempt.report.incomplete || attempt.recordedDecision === null,
+    },
+    problemTitle: attempt.problemTitle,
+    language: attempt.language,
+    code: null,
+    transcript: null,
+    at: new Date(attempt.at).toLocaleString(),
+  });
+  downloadMarkdown(
+    markdown,
+    reportFilename(attempt.problemId, new Date(attempt.at)),
+  );
 }
 
 // How many weaknesses a phase row lists before folding the rest away. A

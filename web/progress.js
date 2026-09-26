@@ -85,6 +85,9 @@ export function normalizeProgressEntry(raw) {
       : null,
     language: allowedLanguages.has(entry.language) ? entry.language : null,
     durationMin,
+    recordedDecision: ["HIRE", "NO_HIRE"].includes(entry.report?.decision)
+      ? entry.report.decision
+      : null,
     report,
   };
 }

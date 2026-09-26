@@ -402,6 +402,52 @@ test("markdown export of an empty session carries no verdict either", () => {
   assert.match(markdown, /\(no speech captured\)/);
 });
 
+for (const missing of [null, undefined]) {
+  test(`markdown distinguishes unsaved fields (${missing}) from empty captures`, () => {
+    const session = {
+      report: sanitizeReport({ decision: "HIRE" }),
+      problemTitle: "Saved report",
+      language: "python",
+      at: "2026-01-02",
+    };
+    const unsaved = reportMarkdown({
+      ...session,
+      code: missing,
+      transcript: missing,
+    });
+    assert.match(
+      unsaved,
+      /## Final code \(python\)\n\(final code was not saved\)\n/,
+    );
+    assert.match(
+      unsaved,
+      /## Conversation transcript\n\(transcript was not saved\)/,
+    );
+    assert.doesNotMatch(unsaved, /```|editor was empty|no speech captured/);
+
+    const empty = reportMarkdown({ ...session, code: "", transcript: [] });
+    assert.match(empty, /```python\n\(editor was empty\)\n```/);
+    assert.match(empty, /## Conversation transcript\n\(no speech captured\)/);
+    assert.doesNotMatch(empty, /was not saved/);
+  });
+
+  test(`markdown leaves unknown language (${missing}) fences untagged`, () => {
+    const markdown = reportMarkdown({
+      report: sanitizeReport({ decision: "HIRE" }),
+      problemTitle: "Legacy report",
+      language: missing,
+      code: "print(42)",
+      transcript: [],
+      at: "2026-01-02",
+    });
+    assert.match(
+      markdown,
+      /## Final code \(not recorded\)\n```\nprint\(42\)\n```/,
+    );
+    assert.doesNotMatch(markdown, /```(?:notrecorded|null|undefined)/);
+  });
+}
+
 test("report markup renders scores, verdict, and escaped feedback", () => {
   const body = reportMarkup({
     report: {

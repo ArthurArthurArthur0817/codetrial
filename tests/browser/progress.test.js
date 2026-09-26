@@ -624,3 +624,18 @@ test("the picker keeps saved verdicts that the progress panel cannot score", () 
     "ungraded sessions read as failures",
   );
 });
+
+test("progress retains whether a verdict was actually stored for export", () => {
+  for (const decision of ["HIRE", "NO_HIRE", null, undefined, "MAYBE"]) {
+    for (const account of [false, true]) {
+      const row = { date: "2026-01-02", report: { decision } };
+      const normalized = normalizeProgressEntry(
+        account ? { payload: row } : row,
+      );
+      assert.equal(
+        normalized.recordedDecision,
+        decision === "HIRE" || decision === "NO_HIRE" ? decision : null,
+      );
+    }
+  }
+});

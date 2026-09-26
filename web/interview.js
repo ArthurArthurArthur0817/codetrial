@@ -1,4 +1,5 @@
 import { loadJudge, loadProblem } from "./problem-data.js";
+import { downloadMarkdown, reportFilename } from "./download.js";
 import { consumeSharedFocus } from "./problem-picker.js";
 import {
   outputUsable,
@@ -2364,28 +2365,18 @@ function saveHistory() {
 }
 
 function downloadReport() {
-  const markdown = buildMarkdown();
-  const url = URL.createObjectURL(
-    new Blob([markdown], { type: "text/markdown" }),
-  );
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  // Named for the scenario the candidate saw: the id is the published slug.
-  anchor.download = `interview-report-${problem.page}-${new Date().toISOString().slice(0, 10)}.md`;
-  document.body.append(anchor);
-  anchor.click();
-  anchor.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 0);
+  const at = new Date();
+  downloadMarkdown(buildMarkdown(at), reportFilename(problem.page, at));
 }
 
-function buildMarkdown() {
+function buildMarkdown(at) {
   return reportMarkdown({
     report: state.report,
     problemTitle: problem.title,
     language: state.language,
     code: currentCode(),
     transcript: state.transcript.values(),
-    at: new Date().toLocaleString(),
+    at: at.toLocaleString(),
   });
 }
 
