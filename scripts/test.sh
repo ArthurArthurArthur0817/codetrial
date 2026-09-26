@@ -314,15 +314,19 @@ script_requires()
       let unresolved = 0;
       for (const file of process.argv.slice(1)) {
         // Comments first: a `require("x")` inside one is prose, and failing
-        // the gate on it would teach people to delete the comment. Whole-line
-        // comments only, because a `//` mid-line is as likely to be inside a
-        // URL in a string as to start a comment, and erasing the rest of that
-        // line would hide a real require. This errs towards a false alarm,
-        // which is visible, over a miss, which is the failure the gate exists
-        // to catch.
+        // the gate on it would teach people to delete the comment. Only a
+        // marker that opens its own line, because one mid-line is as likely
+        // to be inside a string: `browser-check.cjs` holds `"    /* setup {"`
+        // as a fixture, and a strip that started there ran to a `*/` six
+        // lines below it and took a real require with it. The block strip
+        // ends at the first `*/` and is not anchored to the line end either,
+        // because anchoring it there forced the lazy body past that `*/` to
+        // find one that did end a line, which is the same miss again. Every
+        // shape left over errs towards a false alarm, which is visible and
+        // one line to fix, rather than a miss, which is what the gate is for.
         const source = fs
           .readFileSync(file, "utf8")
-          .replace(/\/\*[\s\S]*?\*\//g, "")
+          .replace(/^[ \t]*\/\*[\s\S]*?\*\//gm, "")
           .replace(/^[ \t]*\/\/.*$/gm, "");
         for (const [, , spec] of source.matchAll(/require\s*\((["\x27])([^"\x27]+)\1\)/g)) {
           if (spec.startsWith(".") || isBuiltin(spec)) continue;
