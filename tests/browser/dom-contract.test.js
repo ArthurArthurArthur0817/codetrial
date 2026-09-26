@@ -229,11 +229,14 @@ test("a judge that cannot be fetched is not a problem without tests", async () =
   });
   try {
     const { runBrowserTests } = await import(`${join(web, "runners.js")}?judge-unreachable`);
-    const summary = await runBrowserTests("two-sum", "", "python");
+    const summary = await runBrowserTests("two-sum", "x = 1", "python");
 
     assert.match(summary.setupError, /could not be loaded/);
     assert.doesNotMatch(summary.setupError, /No test cases are defined/);
     assert.equal(summary.total, 0);
+    // Not the candidate's error: the agent may take a hand trace for Test.
+    assert.equal(summary.runnerUnavailable, true);
+    assert.equal(summary.code, "x = 1");
   } finally {
     restore();
   }
@@ -281,6 +284,12 @@ test("the interview page keeps the structure the script drives", () => {
 
 test("a late judge response does not replace the active editor buffer", () => {
   const script = read("interview.js");
+  // Test is credited from the results message alone, so a send that fails
+  // has to reach the candidate rather than an unhandled rejection.
+  assert.match(
+    functionBody(script, "runTests"),
+    /publish\(topics\.tests, testPayload\(summary\)\)\?\.catch\([^]*?not sent to the interviewer/,
+  );
   const applyLanguages = functionBody(script, "applyLanguages");
   const setLanguage = functionBody(script, "setLanguage");
   const updateRunAvailability = functionBody(script, "updateRunAvailability");

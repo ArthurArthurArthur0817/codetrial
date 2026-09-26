@@ -1623,7 +1623,12 @@ async function runTests() {
   state.latestSummary = summary;
   state.testStatus = finalRunnerStatus(summary, state.testStatus);
   renderResults(summary);
-  publish(topics.tests, testPayload(summary));
+  // Test is credited from this message alone, so one that fails to send (a
+  // buffer past the data channel's limit, a dropped link) has to say so: the
+  // candidate sees results the interviewer never received.
+  publish(topics.tests, testPayload(summary))?.catch(() => {
+    nodes.resultsLabel.textContent = "Test results (not sent to the interviewer; run again)";
+  });
   recordReplay("tests", {
     passed: summary.passed,
     failed: Math.max(0, summary.total - summary.passed),

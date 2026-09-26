@@ -43,6 +43,24 @@ pub(super) fn test_output_audio() -> (OutputAudio, mpsc::Receiver<QueuedOutputFr
     )
 }
 
+/// A run that executed one case against the code in the editor now. The
+/// integration tests keep the same helper in tests/agent.rs, which this crate
+/// cannot reach; change the two together.
+pub(crate) fn receive_test_run(state: &mut RuntimeState) {
+    let run = serde_json::json!({"passed": 1, "total": 1,
+        "code": state.code, "language": state.language});
+    crate::agent::apply_data_event(state, crate::runtime::TOPIC_TEST_RESULTS, &run, 99.0);
+}
+
+/// The source an observation of `phase` is recorded from: Test is the run's.
+pub(crate) fn observed_source(phase: &str) -> &'static str {
+    if phase == "test" {
+        "test_event"
+    } else {
+        "candidate_speech"
+    }
+}
+
 /// The interview starts from the plan its token was minted for.
 ///
 /// None of this can be recovered once it is missed: the clock the round

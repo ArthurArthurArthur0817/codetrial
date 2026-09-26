@@ -152,6 +152,18 @@ pub fn sanitize_test_run(payload: &serde_json::Value) -> serde_json::Value {
         .filter(|category| super::evidence::DiagnosticCategory::from_wire(category).is_some())
         .map(|category| serde_json::json!({ "category": category }));
 
+    // A truthy error the bound leaves nothing of (a bare `true`, a lone line
+    // break) is still an error. Dropping it read as a clean run and handed the
+    // candidate the congratulation for code that never executed.
+    let setup_error = match payload.get("setupError") {
+        Some(error) if python_truthy(error) => Some(
+            text(Some(error))
+                .filter(|text| !text.is_empty())
+                .unwrap_or_else(|| "The runner reported a setup error.".to_string()),
+        ),
+        other => text(other),
+    };
+
     serde_json::json!({
         "passed": passed,
         "total": total,
@@ -167,7 +179,7 @@ pub fn sanitize_test_run(payload: &serde_json::Value) -> serde_json::Value {
             .and_then(serde_json::Value::as_str)
             .and_then(spoken_language)
             .unwrap_or("?"),
-        "setupError": text(payload.get("setupError")),
+        "setupError": setup_error,
         "diagnostic": diagnostic,
         "failures": failures,
     })

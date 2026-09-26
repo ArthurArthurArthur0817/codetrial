@@ -262,6 +262,11 @@ export function testPayload(summary) {
     language: summary.language,
     setupError: summary.setupError || null,
     diagnostic: summary.diagnostic || null,
+    runnerUnavailable: Boolean(summary.runnerUnavailable),
+    // The code this run executed, which the agent credits Test to. The whole
+    // buffer plus the results, so a little larger than the code update before
+    // it; a run too large to send is reported to the candidate by `runTests`.
+    code: summary.code ?? null,
     failures: summary.cases.filter((item) => !item.candidate && !item.pass).slice(0, 4).map((item) => ({ label: item.label, expected: item.expected, got: item.got, error: item.error || null })),
     candidateCases: summary.cases.filter((item) => item.candidate).slice(0, CANDIDATE_CASE_LIMIT).map((item) => ({ label: item.label, input: item.input, expected: item.expected ?? null, got: item.got, error: item.error || null })),
     at: Date.now(),
@@ -450,8 +455,8 @@ const textEncoder = new TextEncoder();
 /// function-local, moving it left the whole suite green with the supported-card
 /// branch no longer rendering, which is the defect a local constant invites.
 export const ACTIVE_CONTRACT = {
-  bundleVersion: 16,
-  livePromptVersion: 8,
+  bundleVersion: 17,
+  livePromptVersion: 9,
   reportPromptVersion: 13,
   reportSchemaVersion: 2,
   rubricVersion: 1,
