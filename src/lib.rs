@@ -62,6 +62,40 @@ pub fn exe_dir() -> std::path::PathBuf {
         .unwrap_or_else(|| std::path::PathBuf::from("."))
 }
 
+/// Encode one URI component using only RFC 3986 unreserved bytes verbatim.
+/// Both object paths and credential query values must escape slashes and
+/// pluses.
+pub(crate) fn percent_encode_component(value: &str) -> String {
+    use std::fmt::Write as _;
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                encoded.push(byte as char);
+            }
+            _ => {
+                let _ = write!(encoded, "%{byte:02X}");
+            }
+        }
+    }
+    encoded
+}
+
+/// Hash ordered byte slices without allocating a concatenated input. Evidence
+/// and integrity records share this encoding because their digests persist.
+pub(crate) fn sha256_hex(parts: &[&[u8]]) -> String {
+    use std::fmt::Write as _;
+    let mut context = ring::digest::Context::new(&ring::digest::SHA256);
+    for part in parts {
+        context.update(part);
+    }
+    let mut hex = String::with_capacity(64);
+    for byte in context.finish().as_ref() {
+        let _ = write!(hex, "{byte:02x}");
+    }
+    hex
+}
+
 /// One shared client so repeated Gemini and LiveKit RoomService calls reuse
 /// connections instead of renegotiating TLS per request. `reqwest::Client` is
 /// already an `Arc` internally and is meant to be reused.

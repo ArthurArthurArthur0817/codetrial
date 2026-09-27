@@ -29,7 +29,7 @@ async fn a_minted_room_name_routes_the_agent_to_the_provider_that_signed_it() {
     };
     let pool = config.pool.clone();
     let (base, server) = spawn_web_server(config).await;
-    let client = reqwest::Client::new();
+    let client = http_client();
 
     let mut served = Vec::new();
     for _ in 0..6 {
@@ -83,7 +83,7 @@ async fn a_fixed_room_name_pins_the_provider_it_names() {
         ],
     };
     let (base, server) = spawn_web_server(config).await;
-    let client = reqwest::Client::new();
+    let client = http_client();
 
     for _ in 0..3 {
         let body = client
@@ -310,7 +310,7 @@ async fn the_quota_stub_refuses_a_probe_that_carries_the_wrong_credential() {
         "available-secret",
     )
     .await;
-    let client = reqwest::Client::new();
+    let client = http_client();
 
     // The pool entry is the `ws://` URL a LiveKit project would be configured
     // with, and the probe reaches the same server over `http://`;
@@ -392,7 +392,7 @@ async fn a_stalled_quota_probe_does_not_delay_token_issuance() {
     let (base, server) = spawn_web_server(config).await;
 
     let started = std::time::Instant::now();
-    let response = reqwest::Client::new()
+    let response = http_client()
         .post(format!("{base}/api/token"))
         .header("cookie", &cookie)
         .header("content-type", "application/json")
@@ -455,7 +455,7 @@ async fn a_provider_out_of_connection_minutes_is_passed_over() {
     };
     let (base, server) = spawn_web_server(config).await;
 
-    let response = reqwest::Client::new()
+    let response = http_client()
         .post(format!("{base}/api/token"))
         .header("cookie", &cookie)
         .header("content-type", "application/json")
@@ -536,7 +536,7 @@ async fn a_pinned_room_on_an_exhausted_project_falls_back_to_the_pool() {
     };
     let (base, server) = spawn_web_server(config).await;
 
-    let response = reqwest::Client::new()
+    let response = http_client()
         .post(format!("{base}/api/token"))
         .header("cookie", &cookie)
         .header("content-type", "application/json")
@@ -579,7 +579,7 @@ async fn a_pinned_room_on_a_healthy_project_is_kept() {
     config.pool = primary_pool(&healthy, "key", "secret");
     let (base, server) = spawn_web_server(config).await;
 
-    let response = reqwest::Client::new()
+    let response = http_client()
         .post(format!("{base}/api/token"))
         .header("cookie", &cookie)
         .header("content-type", "application/json")
@@ -620,7 +620,7 @@ async fn every_provider_out_of_minutes_is_refused_with_the_reason() {
     config.pool = primary_pool(&exhausted, "spent-key", "spent-secret");
     let (base, server) = spawn_web_server(config).await;
 
-    let response = reqwest::Client::new()
+    let response = http_client()
         .post(format!("{base}/api/token"))
         .header("cookie", &cookie)
         .header("content-type", "application/json")
@@ -656,7 +656,7 @@ async fn every_credential_refused_provider_is_refused_with_the_reason() {
     config.pool = primary_pool(&provider, "current-key", "rotated-secret");
     let (base, server) = spawn_web_server(config).await;
 
-    let response = reqwest::Client::new()
+    let response = http_client()
         .post(format!("{base}/api/token"))
         .header("cookie", &cookie)
         .header("content-type", "application/json")
@@ -743,7 +743,7 @@ async fn a_dead_project_does_not_skew_the_rotation() {
     };
     let (base, server) = spawn_web_server(config).await;
 
-    let client = reqwest::Client::new();
+    let client = http_client();
     let mut served = std::collections::HashMap::new();
     for _ in 0..6 {
         let body = client

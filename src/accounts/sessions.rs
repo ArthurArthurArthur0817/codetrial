@@ -202,8 +202,7 @@ pub fn sweep_expired_sessions(accounts: &Accounts, now: i64) -> rusqlite::Result
 /// the row `create_session` would have written, rather than keeping a second
 /// copy of this rule that drifts.
 pub fn session_key(token: &str) -> String {
-    use sha2::Digest;
-    URL_SAFE_NO_PAD.encode(sha2::Sha256::digest(token.as_bytes()))
+    URL_SAFE_NO_PAD.encode(ring::digest::digest(&ring::digest::SHA256, token.as_bytes()).as_ref())
 }
 
 pub fn random_token(bytes: usize) -> std::io::Result<String> {

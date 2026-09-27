@@ -12,6 +12,7 @@ use tokio_tungstenite::{
     MaybeTlsStream, WebSocketStream, connect_async, tungstenite::protocol::Message,
 };
 
+use crate::percent_encode_component;
 use crate::runtime::{
     RuntimeBootstrap, TOOL_END_INTERVIEW, TOOL_LOG_HINT, TOOL_READ_EDITOR,
     TOOL_RECORD_FRAMEWORK_EVIDENCE,
@@ -1085,7 +1086,7 @@ pub(crate) fn gemini_live_websocket_url(api_key: &str) -> String {
 }
 
 fn live_websocket_url_at(endpoint: &str, api_key: &str) -> String {
-    format!("{endpoint}?key={}", percent_encode_query_value(api_key))
+    format!("{endpoint}?key={}", percent_encode_component(api_key))
 }
 
 /// No `?key=` here on purpose. A `reqwest` error Displays the URL it was built
@@ -1124,7 +1125,7 @@ pub fn redact_api_key(text: &str, api_key: &str) -> String {
         return text.to_string();
     }
     text.replace(api_key, "[REDACTED]")
-        .replace(&percent_encode_query_value(api_key), "[REDACTED]")
+        .replace(&percent_encode_component(api_key), "[REDACTED]")
 }
 
 fn redact_api_keys(text: &str, api_keys: &[String]) -> String {
@@ -1528,19 +1529,6 @@ fn parse_server_message(text: &str) -> ServerMessage {
         events,
         resumption_handle,
     }
-}
-
-fn percent_encode_query_value(value: &str) -> String {
-    let mut encoded = String::new();
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
-                encoded.push(byte as char);
-            }
-            _ => encoded.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    encoded
 }
 
 #[cfg(test)]

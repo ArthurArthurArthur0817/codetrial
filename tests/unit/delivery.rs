@@ -26,11 +26,14 @@ fn object_names_survive_their_slashes() {
     // The JSON API takes the whole object name as one path segment, so a prefix
     // that arrived unescaped would name a different object, or none.
     assert_eq!(
-        encode_path("codetrial/abc123.mp4"),
+        percent_encode_component("codetrial/abc123.mp4"),
         "codetrial%2Fabc123.mp4"
     );
-    assert_eq!(encode_path("a b"), "a%20b");
-    assert_eq!(encode_path("plain-name_1.mp4"), "plain-name_1.mp4");
+    assert_eq!(percent_encode_component("a b"), "a%20b");
+    assert_eq!(
+        percent_encode_component("plain-name_1.mp4"),
+        "plain-name_1.mp4"
+    );
 }
 
 #[test]

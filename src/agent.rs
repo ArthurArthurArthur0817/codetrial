@@ -526,13 +526,6 @@ fn bounded_profile_text(value: Option<&serde_json::Value>, max_chars: usize) -> 
     normalized.chars().take(max_chars).collect()
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TranscriptItem<'a> {
-    pub item_type: &'a str,
-    pub role: &'a str,
-    pub text: &'a str,
-}
-
 /// What Gemini's transcription emits where the audio carried no such word.
 ///
 /// One string rather than a list, because one is what has actually been
@@ -1876,26 +1869,6 @@ fn tail_within(line: &str, budget: usize) -> &str {
         .map(|(start, _)| &line[start..])
         .find(|suffix| suffix.len() <= budget)
         .unwrap_or("")
-}
-
-pub fn format_transcript(items: &[TranscriptItem<'_>]) -> String {
-    items
-        .iter()
-        .filter(|item| item.item_type == "message")
-        .filter_map(|item| {
-            if item.text.trim().is_empty() || item.text.starts_with("[SYSTEM EVENT]") {
-                return None;
-            }
-            let text = item.text.trim();
-            let speaker = if item.role == "assistant" {
-                INTERVIEWER_SPEAKER
-            } else {
-                CANDIDATE_SPEAKER
-            };
-            Some(format!("{speaker}: {text}"))
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 pub fn spoken_minutes_from_remaining_seconds(remaining_seconds: i64) -> i64 {

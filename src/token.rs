@@ -11,11 +11,8 @@ use base64::{
     Engine as _,
     engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
 };
-use hmac::{Hmac, Mac};
+use ring::{digest, hmac};
 use serde_json::{Value, json};
-use sha2::{Digest as _, Sha256};
-
-type HmacSha256 = Hmac<Sha256>;
 
 /// HMAC-SHA256 over `value`, base64url without padding.
 ///
@@ -23,25 +20,20 @@ type HmacSha256 = Hmac<Sha256>;
 /// cookies in `web` both go through it, because two copies of a signing step
 /// are two chances for one of them to drift into something weaker.
 pub fn sign_hs256(secret: &str, value: &str) -> String {
-    // The only documented failure is a key length HMAC rejects, and HMAC
-    // accepts every length: it hashes keys longer than the block size and pads
-    // shorter ones.
-    let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC accepts any key");
-    mac.update(value.as_bytes());
-    URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes())
+    let key = hmac::Key::new(hmac::HMAC_SHA256, secret.as_bytes());
+    URL_SAFE_NO_PAD.encode(hmac::sign(&key, value.as_bytes()).as_ref())
 }
 
 /// Whether `signature` is `sign_hs256(secret, value)`.
 ///
-/// The comparison is `Mac::verify_slice`, which is constant time. A byte-wise
+/// The comparison is `ring::hmac::verify`, which is constant time. A byte-wise
 /// `==` on the base64 would leak how much of a forged signature was right.
 pub fn verify_hs256(secret: &str, value: &str, signature: &str) -> bool {
     let Ok(signature) = URL_SAFE_NO_PAD.decode(signature) else {
         return false;
     };
-    let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC accepts any key");
-    mac.update(value.as_bytes());
-    mac.verify_slice(&signature).is_ok()
+    let key = hmac::Key::new(hmac::HMAC_SHA256, secret.as_bytes());
+    hmac::verify(&key, value.as_bytes(), &signature).is_ok()
 }
 
 pub const TOKEN_TTL_SECONDS: u64 = 2 * 60 * 60;
@@ -304,9 +296,10 @@ pub fn verify_livekit_webhook(
     //
     // Compared with `==` rather than in constant time. The digest is a public
     // function of a body the sender already holds, and the one secret-dependent
-    // comparison happened in `verified_claims`, which uses `Mac::verify_slice`.
-    // There is no secret here to leak the prefix length of.
-    let digest = STANDARD.encode(Sha256::digest(body));
+    // comparison happened in `verified_claims`, which uses
+    // `ring::hmac::verify`. There is no secret here to leak the prefix length
+    // of.
+    let digest = STANDARD.encode(digest::digest(&digest::SHA256, body).as_ref());
     if claims.get("sha256").and_then(Value::as_str) != Some(digest.as_str()) {
         return Err(WebhookRejection::BodyMismatch);
     }

@@ -74,9 +74,17 @@ fn integrity_event_with_source_ids(
     if !source_event_ids.is_empty() {
         body["sourceEventIds"] = json!(source_event_ids);
     }
-    let digest = Sha256::digest(canonical_json(&body).as_bytes());
-    event["hash"] = Value::String(digest.iter().map(|byte| format!("{byte:02x}")).collect());
+    event["hash"] = Value::String(sha256_hex(canonical_json(&body).as_bytes()));
     event
+}
+
+/// Lowercase hex SHA-256 from the `sha2` crate, independent of the ring-backed
+/// digest the code under test uses.
+fn sha256_hex(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 fn canonical_json(value: &Value) -> String {

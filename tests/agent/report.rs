@@ -616,43 +616,6 @@ fn an_improvement_plan_may_carry_eight_entries() {
     );
 }
 
-/// A turn with no words in it is not a speaker who said nothing.
-///
-/// The empty-text half of the filter is never reached: the golden fixture
-/// covers the `[SYSTEM EVENT]` half and every other item carries real text. An
-/// empty turn renders as a bare "Candidate: " line, which the grader reading
-/// the report prompt takes as a candidate who was asked and answered nothing.
-#[test]
-fn a_turn_with_no_words_is_dropped_from_the_report_transcript() {
-    let lines = format_transcript(&[
-        TranscriptItem {
-            item_type: "message",
-            role: "user",
-            text: "I will use a map.",
-        },
-        TranscriptItem {
-            item_type: "message",
-            role: "user",
-            text: "   ",
-        },
-        TranscriptItem {
-            item_type: "message",
-            role: "assistant",
-            text: "",
-        },
-        TranscriptItem {
-            item_type: "message",
-            role: "assistant",
-            text: "Why a map?",
-        },
-    ]);
-
-    assert_eq!(
-        lines,
-        "Candidate: I will use a map.\nInterviewer: Why a map?"
-    );
-}
-
 /// A plan weakness that differs from its improvement only in case, spacing or
 /// a closing full stop is the same improvement, and is written back as it; one
 /// that matches two improvements that way, or paraphrases one, is refused.

@@ -29,7 +29,7 @@
 //! browser-authored events as a candidate's own account of the session, and
 //! anything corroborated by the room as evidence.
 
-use sha2::{Digest, Sha256};
+use crate::sha256_hex;
 
 use super::{
     MAX_INTEGRITY_TEXT, MAX_TEST_CASES, MAX_TEST_FAILURES, MAX_TEST_TEXT, json_int, python_truthy,
@@ -349,8 +349,7 @@ pub(crate) fn integrity_hash(event: &serde_json::Value) -> String {
             .cloned()
             .unwrap_or(serde_json::Value::Null);
     }
-    let digest = Sha256::digest(canonical_json(&body).as_bytes());
-    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+    sha256_hex(&[canonical_json(&body).as_bytes()])
 }
 
 fn canonical_json(value: &serde_json::Value) -> String {

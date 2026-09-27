@@ -21,9 +21,9 @@ use crate::accounts::{
 
 use super::{
     AppState, MAX_BODY_BYTES, WebServerConfig, client_ip, json_response,
-    oauth_not_configured_response, query_escape, query_pairs, rate_limited_response,
-    unauthorized_response,
+    oauth_not_configured_response, query_pairs, rate_limited_response, unauthorized_response,
 };
+use crate::percent_encode_component;
 
 pub(crate) const SESSION_COOKIE: &str = "codetrial_session";
 const OAUTH_STATE_COOKIE: &str = "codetrial_oauth_state";
@@ -115,9 +115,9 @@ pub(crate) async fn login_handler(State(state): State<AppState>) -> Response {
     let location = format!(
         "{}/login/oauth/authorize?client_id={}&state={}&scope={}",
         accounts.config().oauth_base_url.trim_end_matches('/'),
-        query_escape(&oauth.client_id),
-        query_escape(&state_token),
-        query_escape(github_oauth_scope(state.config.recording.is_some()))
+        percent_encode_component(&oauth.client_id),
+        percent_encode_component(&state_token),
+        percent_encode_component(github_oauth_scope(state.config.recording.is_some()))
     );
 
     (

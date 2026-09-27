@@ -39,7 +39,7 @@ async fn a_refused_code_exchange_names_the_token_leg_not_the_profile_leg() {
     // builds the router directly has to do what `main` does.
     initialize_account_database(&path).unwrap();
     let (base, server) = spawn_web_server(config).await;
-    let client = reqwest::Client::builder()
+    let client = http_client_builder()
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .unwrap();
@@ -95,7 +95,7 @@ async fn the_oauth_callback_requires_the_state_it_minted() {
     config.github_oauth_base_url = Some(github_base.clone());
     config.github_api_base_url = Some(github_base);
     let (base, server) = spawn_web_server(config).await;
-    let client = reqwest::Client::builder()
+    let client = http_client_builder()
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .unwrap();
@@ -234,7 +234,9 @@ async fn the_oauth_callback_requires_the_state_it_minted() {
 async fn a_server_that_does_not_record_caps_nothing_beyond_the_range() {
     let (base, server) = spawn_web_server(web_config()).await;
 
-    let session = reqwest::get(format!("{base}/api/session"))
+    let session = http_client()
+        .get(format!("{base}/api/session"))
+        .send()
         .await
         .unwrap()
         .json::<Value>()

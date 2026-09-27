@@ -15,3 +15,21 @@ fn exe_dir_names_the_folder_the_running_binary_sits_in() {
         exe.parent().expect("an executable sits in a folder")
     );
 }
+
+#[test]
+fn sha256_hex_matches_known_vectors_and_concatenates_parts() {
+    assert_eq!(
+        super::sha256_hex(&[]),
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    );
+    assert_eq!(
+        super::sha256_hex(&[b"39"]),
+        "0b918943df0962bc7a1824c0555a389347b4febdc7cf9d1254406d80ce44e3f9"
+    );
+    for parts in [vec![b"abc".as_slice()], vec![b"a".as_slice(), b"", b"bc"]] {
+        assert_eq!(
+            super::sha256_hex(&parts),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
+}

@@ -26,7 +26,14 @@ async fn static_home_markup_matches_frontend_contract() {
         probe_provider_quota: false,
     })
     .await;
-    let html = reqwest::get(base).await.unwrap().text().await.unwrap();
+    let html = http_client()
+        .get(base)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
 
     for text in [
         "Practice a live technical interview",
@@ -73,7 +80,9 @@ async fn static_interview_markup_exposes_offline_surface() {
         probe_provider_quota: false,
     })
     .await;
-    let html = reqwest::get(format!("{base}/interview"))
+    let html = http_client()
+        .get(format!("{base}/interview"))
+        .send()
         .await
         .unwrap()
         .text()

@@ -1,0 +1,13 @@
+name: WebRTC C++ compiler
+description: Install the Clang that webrtc-sys requires and export it as CXX.
+
+# Not cached: the unpacked toolchain is about 390 MB against a download of
+# seconds, and a cache entry that size would evict the cargo entries the gates
+# depend on.
+runs:
+  using: composite
+  steps:
+    - shell: sh
+      run: |
+        sh scripts/fetch-clang.sh "$RUNNER_TEMP/clang"
+        echo "CXX=$RUNNER_TEMP/clang/bin/clang++" >> "$GITHUB_ENV"

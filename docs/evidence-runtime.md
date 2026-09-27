@@ -29,7 +29,7 @@ costs about 1 ms at fifty lines and 12 ms at five hundred, down from 3.6 ms and
 39 ms, and it stays inline on the agent's task; a buffer past 64 KiB is recorded
 as not parsed instead.
 
-Code observations use Tree-sitter 0.25.10 with pinned C, C++, Java,
+Code observations use Tree-sitter 0.27.0 with pinned C, C++, Java,
 JavaScript and Python grammars. A successful parse classifies only stable
 syntax facts, and those facts are the named structure, the identifiers and
 every leaf token, compared in document order. The tokens and the order are both

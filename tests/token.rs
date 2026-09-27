@@ -395,3 +395,21 @@ fn the_algorithm_a_token_claims_changes_nothing() {
         Ok(())
     );
 }
+
+#[test]
+fn hs256_matches_rfc4231_and_independent_key_length_cases() {
+    use hmac::{Hmac, KeyInit, Mac};
+    let key = "\x0b".repeat(20);
+    let signature = "sDRMYdjbOFNcqK_OrwvxK4gdwgDJgz2nJuk3bC4yz_c";
+    assert_eq!(sign_hs256(&key, "Hi There"), signature);
+    assert!(verify_hs256(&key, "Hi There", signature));
+    for key in [String::new(), "k".repeat(64), "k".repeat(131)] {
+        let mut mac = Hmac::<Sha256>::new_from_slice(key.as_bytes()).unwrap();
+        mac.update(b"payload");
+        let expected = URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
+        assert_eq!(sign_hs256(&key, "payload"), expected);
+        assert!(verify_hs256(&key, "payload", &expected));
+        let truncated = URL_SAFE_NO_PAD.encode(&URL_SAFE_NO_PAD.decode(&expected).unwrap()[..31]);
+        assert!(!verify_hs256(&key, "payload", &truncated));
+    }
+}

@@ -237,7 +237,7 @@ async fn an_unmigratable_account_database_refuses_rather_than_disabling_login() 
     config.session_secret = Some("session-secret".to_string());
     config.db_path = Some(path.clone());
     let (base, server) = spawn_web_server(config).await;
-    let client = reqwest::Client::new();
+    let client = http_client();
 
     let session = client
         .get(format!("{base}/api/session"))
@@ -277,7 +277,7 @@ async fn an_unopenable_account_database_refuses_rather_than_disabling_login() {
     config.session_secret = Some("session-secret".to_string());
     config.db_path = Some(path.clone());
     let (base, server) = spawn_web_server(config).await;
-    let client = reqwest::Client::new();
+    let client = http_client();
 
     let session = client
         .get(format!("{base}/api/session"))
@@ -321,7 +321,7 @@ async fn an_unopenable_account_database_refuses_rather_than_disabling_login() {
     // offered accounts, so the browser is told login is not on offer and the
     // session row says so too.
     let (base, server) = spawn_web_server(web_config()).await;
-    let client = reqwest::Client::new();
+    let client = http_client();
 
     let token = client
         .post(format!("{base}/api/token"))
@@ -441,7 +441,7 @@ async fn github_callback_sets_session_and_clears_oauth_state() {
     // builds the router directly has to do what `main` does.
     initialize_account_database(&path).unwrap();
     let (base, server) = spawn_web_server(config).await;
-    let client = reqwest::Client::builder()
+    let client = http_client_builder()
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .unwrap();
@@ -482,7 +482,7 @@ async fn github_callback_sets_session_and_clears_oauth_state() {
         "callback should clear oauth state cookie"
     );
 
-    let session = reqwest::Client::new()
+    let session = http_client()
         .get(format!("{base}/api/session"))
         .header("cookie", session_cookie)
         .send()
@@ -516,7 +516,7 @@ async fn github_callback_sets_session_and_clears_oauth_state() {
 async fn a_forged_session_cookie_is_not_a_session() {
     let (config, cookie, db_path) = signed_in_web_config("forged-session");
     let (base, server) = spawn_web_server(config).await;
-    let client = reqwest::Client::new();
+    let client = http_client();
 
     // The payload out of the genuine cookie, so every forgery below names a
     // session row that really exists and only the signature can refuse it.
@@ -611,7 +611,7 @@ async fn anonymous_requests_cannot_spend_the_signed_in_budget() {
     config.db_path = Some(path.clone());
     let (base, server) = spawn_web_server(config).await;
     let url = format!("{base}/api/token");
-    let client = reqwest::Client::new();
+    let client = http_client();
 
     // Twice the whole budget, all of it unauthenticated.
     for _ in 0..(TOKEN_RATE_LIMIT * 2) {
@@ -701,7 +701,7 @@ async fn account_reports_are_scoped_to_the_signed_in_user() {
     config.session_secret = Some("session-secret".to_string());
     config.db_path = Some(path.clone());
     let (base, server) = spawn_web_server(config).await;
-    let client = reqwest::Client::new();
+    let client = http_client();
     let user_one_cookie = format!(
         "codetrial_session={}",
         signed_cookie("session-one", "session-secret")
@@ -837,7 +837,7 @@ async fn a_full_account_cannot_grow_the_report_database() {
         }
     }
     let (base, server) = spawn_web_server(config).await;
-    let client = reqwest::Client::new();
+    let client = http_client();
 
     let refused = client
         .post(format!("{base}/api/reports"))
@@ -892,7 +892,7 @@ async fn a_full_account_cannot_grow_the_report_database() {
 async fn a_report_is_bounded_by_its_own_ceiling_rather_than_the_session_one() {
     let (config, cookie, path) = signed_in_web_config("report-size");
     let (base, server) = spawn_web_server(config).await;
-    let client = reqwest::Client::new();
+    let client = http_client();
     let url = format!("{base}/api/reports");
     let report = |id: &str, bytes: usize| {
         let summary = "s".repeat(bytes);
@@ -997,7 +997,7 @@ async fn self_declared_handle_cannot_authorize_delivery() {
     config.db_path = Some(db_path.clone());
     config.recording = Some(recording_config());
     let (base, server) = spawn_web_server(config).await;
-    let client = reqwest::Client::new();
+    let client = http_client();
 
     let cookie = record_login(&client, &base, "octocat").await;
     let refused = client
@@ -1062,7 +1062,7 @@ async fn github_callback_stores_only_the_primary_verified_email() {
     config.recording = Some(recording_config());
     let (base, server) = spawn_web_server(config).await;
 
-    let client = reqwest::Client::builder()
+    let client = http_client_builder()
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .unwrap();
@@ -1107,7 +1107,7 @@ async fn github_callback_stores_only_the_primary_verified_email() {
     assert_eq!(verified, 1);
 
     // And that account can now start a recorded interview.
-    let client = reqwest::Client::new();
+    let client = http_client();
     let interview = start_interview(&client, &base, &session_cookie).await;
     let allowed = client
         .post(format!("{base}/api/token"))
@@ -1140,7 +1140,7 @@ async fn login_requests_the_email_scope_it_later_reads() {
     let (base, server) = spawn_web_server(config).await;
 
     let authorize_url = |base: String| async move {
-        let response = reqwest::Client::builder()
+        let response = http_client_builder()
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .unwrap()
@@ -1192,7 +1192,9 @@ async fn the_session_reports_how_long_a_recorded_interview_may_run() {
     config.recording = Some(recording_config());
     let (base, server) = spawn_web_server(config).await;
 
-    let session = reqwest::get(format!("{base}/api/session"))
+    let session = http_client()
+        .get(format!("{base}/api/session"))
+        .send()
         .await
         .unwrap()
         .json::<Value>()
@@ -1225,7 +1227,7 @@ async fn a_failed_email_lookup_does_not_unverify_an_account() {
     config.github_api_base_url = Some(good_github);
     config.recording = Some(recording_config());
     let (base, server) = spawn_web_server(config.clone()).await;
-    let client = reqwest::Client::builder()
+    let client = http_client_builder()
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .unwrap();

@@ -144,6 +144,8 @@ jobs:
       # installing it here is the whole configuration.
       - name: Install native build dependency
         run: sudo apt-get update && sudo apt-get install -y libglib2.0-dev mold shellcheck shfmt
+      - name: Install WebRTC C++ compiler
+        uses: ./.github/actions/webrtc-clang
 
       # The runner image ships a stable toolchain, but not necessarily one new
       # enough for edition 2024, and clippy and rustfmt are gates rather than
@@ -463,6 +465,8 @@ jobs:
 
       - name: Install native build dependency
         run: sudo apt-get update && sudo apt-get install -y libglib2.0-dev mold
+      - name: Install WebRTC C++ compiler
+        uses: ./.github/actions/webrtc-clang
 
       - name: Install Rust
         id: rust
@@ -679,6 +683,9 @@ jobs:
       # `CARGO_HOME` is the runner's, mounted in. It is what the cache restored
       # a step ago, and the container cannot see it otherwise: without this
       # every release re-downloads the registry and the prebuilt libwebrtc.
+      - name: Install Linux WebRTC C++ compiler
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/webrtc-clang
       - name: Build Linux executable against the compatibility baseline
         if: runner.os == 'Linux'
         shell: bash
@@ -687,8 +694,10 @@ jobs:
             --user "$(id -u):$(id -g)" \
             --volume "$GITHUB_WORKSPACE:/workspace" \
             --volume "$HOME/.cargo:/cargo" \
+            --volume "$RUNNER_TEMP/clang:/clang:ro" \
             --workdir /workspace \
             --env CARGO_HOME=/cargo \
+            --env CXX=/clang/bin/clang++ \
             ${{ matrix.image }} \
             cargo build --release --locked --target ${{ matrix.target }}
       # A successful link does not prove the Objective-C categories survived.

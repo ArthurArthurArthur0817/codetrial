@@ -22,6 +22,7 @@ use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use serde_json::{Value, json};
 use tokio::sync::Mutex;
 
+use crate::percent_encode_component;
 use crate::recording::{BoxFuture, DeliveryProvider};
 
 /// Chunks are a multiple of 256 KiB, which the resumable protocol requires, and
@@ -304,7 +305,7 @@ impl GoogleDelivery {
             .get(format!(
                 "https://storage.googleapis.com/storage/v1/b/{}/o/{}",
                 self.bucket,
-                encode_path(gcs_object)
+                percent_encode_component(gcs_object)
             ))
             .bearer_auth(token)
             .send()
@@ -337,7 +338,7 @@ impl GoogleDelivery {
             .get(format!(
                 "https://storage.googleapis.com/storage/v1/b/{}/o/{}?alt=media",
                 self.bucket,
-                encode_path(gcs_object)
+                percent_encode_component(gcs_object)
             ))
             .bearer_auth(token)
             .header(reqwest::header::RANGE, format!("bytes={start}-{end}"))
@@ -490,24 +491,6 @@ fn sign_rs256(pkcs8: &[u8], message: &[u8]) -> Result<Vec<u8>, String> {
     )
     .map_err(|error| format!("the assertion could not be signed: {error}"))?;
     Ok(signature)
-}
-
-/// Percent-encoding for one path segment.
-///
-/// A GCS object name contains slashes, and the JSON API takes it as a single
-/// path segment, so those slashes have to arrive as `%2F` or the request names
-/// a different object.
-fn encode_path(value: &str) -> String {
-    let mut encoded = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                encoded.push(byte as char);
-            }
-            _ => encoded.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    encoded
 }
 
 async fn read_json(response: reqwest::Response, what: &str) -> Result<Value, String> {
@@ -753,7 +736,7 @@ impl DeliveryProvider for GoogleDelivery {
                 .delete(format!(
                     "https://storage.googleapis.com/storage/v1/b/{}/o/{}",
                     self.bucket,
-                    encode_path(gcs_object)
+                    percent_encode_component(gcs_object)
                 ))
                 .bearer_auth(&token)
                 .send()
