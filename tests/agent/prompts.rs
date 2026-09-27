@@ -53,8 +53,8 @@ fn prompt_golden_digest_matches_versions() {
     // its hash is a string nothing checks. The pair is still asserted, because
     // the failure worth catching is a version bumped with the golden left
     // alone, which a digest comparison on its own reads as fine.
-    let recorded_versions = (9, 13);
-    let recorded_digest = "c0a758f511f707966cc7b76cf5a8b728db2f22226625678968dabc63f45b13b6";
+    let recorded_versions = (10, 13);
+    let recorded_digest = "6ec471a71b0639674f3c0ca7b78f69ec93f34c30f4486fbaaba51caa532cd72d";
 
     assert_eq!(
         (LIVE_PROMPT_VERSION, REPORT_PROMPT_VERSION),
@@ -88,7 +88,7 @@ fn unpausing_delivers_the_cold_brief_the_pause_deferred() {
     );
 
     let reply = resumed.generate_reply.expect("resuming makes Jim speak");
-    assert!(reply.contains("everything said so far is gone from your memory"));
+    assert!(reply.contains("Any restored memory may predate the latest local events"));
     assert!(reply.contains("def two_sum"));
     assert!(
         !state.needs_cold_brief,
@@ -178,7 +178,7 @@ fn interview_prompt_pins_reacto_star_and_safety_boundaries() {
     // The platform closes the STAR steps of a round that never opened itself,
     // so neither prompt spends a tool round trip on them before the candidate
     // hears anything.
-    assert!(!time_warning(false).contains("record_framework_evidence"));
+    assert!(!time_warning(false, &RuntimeState::default()).contains("record_framework_evidence"));
     assert!(!wrap_up("candidate_ended", false).contains("record_framework_evidence"));
 
     // The timing skip is the rule and the refusal the one exception to it. A
@@ -191,8 +191,8 @@ fn interview_prompt_pins_reacto_star_and_safety_boundaries() {
     // Both coding watchers speak only during coding, which is exactly where a
     // stray behavioral question was being revived.
     for watcher in [
-        silence_nudge("  1| x = 1", None),
-        proactive_review("  1| x = 1", None),
+        silence_nudge(&RuntimeState::default(), "  1| x = 1", None),
+        proactive_review(&RuntimeState::default(), "  1| x = 1", None),
     ] {
         assert!(
             watcher
@@ -215,12 +215,30 @@ fn interview_prompt_pins_reacto_star_and_safety_boundaries() {
         greeting(problem),
         language_choice("C++", LanguageChoiceContext::Start),
         language_choice("Java", LanguageChoiceContext::SwitchWithCode),
-        silence_nudge("(the editor is currently empty)", None),
-        proactive_review("1| answer = []", None),
-        time_warning(false),
+        silence_nudge(
+            &RuntimeState::default(),
+            "(the editor is currently empty)",
+            None,
+        ),
+        proactive_review(&RuntimeState::default(), "1| answer = []", None),
+        time_warning(false, &RuntimeState::default()),
         wrap_up("time_up", false),
-        test_results_reaction("2/3 passed", false, TestRecord::Record, None),
-        test_results_reaction("3/3 passed", true, TestRecord::Record, None),
+        test_results_reaction(
+            "2/3 passed",
+            false,
+            TestRecord::Record,
+            None,
+            &RuntimeState::default(),
+            SincePrevious::Other,
+        ),
+        test_results_reaction(
+            "3/3 passed",
+            true,
+            TestRecord::Record,
+            None,
+            &RuntimeState::default(),
+            SincePrevious::Other,
+        ),
     ]
     .join("\n");
     assert!(
@@ -947,16 +965,16 @@ fn interview_contract_versions_are_one_closed_bundle() {
         "the bundle table has no row for {INTERVIEW_CONTRACT_BUNDLE_VERSION}"
     );
 
-    assert_eq!(INTERVIEW_CONTRACT_BUNDLE_VERSION, 17);
-    assert_eq!(LIVE_PROMPT_VERSION, 9);
+    assert_eq!(INTERVIEW_CONTRACT_BUNDLE_VERSION, 18);
+    assert_eq!(LIVE_PROMPT_VERSION, 10);
     assert_eq!(REPORT_PROMPT_VERSION, 13);
     assert_eq!(RUBRIC_VERSION, 1);
     assert_eq!(REPORT_SCHEMA_VERSION, 2);
     assert_eq!(
         interview_contract_json(),
         json!({
-            "bundleVersion": 17,
-            "livePromptVersion": 9,
+            "bundleVersion": 18,
+            "livePromptVersion": 10,
             "reportPromptVersion": 13,
             "rubricVersion": 1,
             "reportSchemaVersion": 2,
@@ -1052,13 +1070,13 @@ fn a_watch_prompt_carries_the_code_instead_of_a_read() {
     assert!(excerpt.contains("4|         total -= n"));
     assert!(excerpt.contains("1| def f(nums):") && excerpt.contains("5|     return total"));
 
-    let review = proactive_review("code: python", Some(&excerpt));
+    let review = proactive_review(&RuntimeState::default(), "code: python", Some(&excerpt));
     assert!(review.contains(&excerpt));
     assert!(review.contains("`read_editor` shows anything it leaves out"));
 
     // Without an excerpt the model already holds the code, so the prompt says
     // so instead of sending it to read the editor again.
-    let without = proactive_review("code: python", None);
+    let without = proactive_review(&RuntimeState::default(), "code: python", None);
     assert!(without.contains("The editor is unchanged since you last saw it."));
     assert!(!without.contains("read_editor"), "{without}");
 

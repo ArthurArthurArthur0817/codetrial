@@ -3,7 +3,7 @@
 //! items are in scope.
 
 use super::{
-    MIN_WRITTEN_CHARS, RuntimeState, changed_characters, code_written, edited_within,
+    MIN_WRITTEN_CHARS, RuntimeState, changed_characters, code_written, edited_within, rewritten,
     uncommented_chars,
 };
 
@@ -182,5 +182,30 @@ fn uncommented_chars_drops_comments_and_keeps_literals() {
     assert_eq!(
         kept("javascript", "s = 'open // still string"),
         "s='open//stillstring"
+    );
+}
+
+/// Where a passing run stops trusting an earlier complexity answer: more than
+/// 80 characters of content either way, or three lines, each alone enough.
+/// Pinned at both edges, since a threshold off by one is the whole decision.
+#[test]
+fn a_rewrite_is_eighty_one_characters_or_three_lines() {
+    let base = "x = 1";
+    let longer = |extra: usize| format!("{base}{}", "y".repeat(extra));
+    assert!(
+        !rewritten(base, &longer(80)),
+        "eighty characters is an edit"
+    );
+    assert!(rewritten(base, &longer(81)), "eighty-one is a rewrite");
+    assert!(rewritten(&longer(81), base), "either way");
+
+    // Few characters, but three more lines, is still a rewrite on its own.
+    assert!(
+        !rewritten(base, &format!("{base}\na\nb")),
+        "two lines is an edit"
+    );
+    assert!(
+        rewritten(base, &format!("{base}\na\nb\nc")),
+        "three lines is a rewrite"
     );
 }

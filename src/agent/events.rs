@@ -7,13 +7,13 @@
 
 use super::{
     DataEventResult, INTERVIEWER_SPEAKER, InterviewLoop, LanguageChoiceContext,
-    LifecycleTransition, MAX_INTEGRITY_EVENTS, ROUND_TRANSITION_SKEW, RuntimeState, TIME_WARNING_S,
-    TestRecord, TestSource, analyze_code, analyze_code_cached, behavioral_time_warning,
-    changed_excerpt, cold_restart, format_test_run_for_reaction, integrity_hash, language_choice,
-    observe_code, observe_code_cached, python_truthy, resume, round_skipped, round_started,
-    sanitize_integrity_event, sanitize_test_run, spoken_language, test_reaction_decision,
-    test_results_reaction, test_runner_unavailable_reaction, test_setup_error_reaction,
-    time_warning,
+    LifecycleTransition, MAX_INTEGRITY_EVENTS, ROUND_TRANSITION_SKEW, RuntimeState, SincePrevious,
+    TIME_WARNING_S, TestRecord, TestSource, analyze_code, analyze_code_cached,
+    behavioral_time_warning, changed_excerpt, cold_restart, format_test_run_for_reaction,
+    integrity_hash, language_choice, observe_code, observe_code_cached, python_truthy, resume,
+    round_skipped, round_started, sanitize_integrity_event, sanitize_test_run, spoken_language,
+    test_reaction_decision, test_results_reaction, test_runner_unavailable_reaction,
+    test_setup_error_reaction, time_warning,
 };
 use crate::runtime::{TOPIC_CODE_UPDATE, TOPIC_CONTROL, TOPIC_INTEGRITY, TOPIC_TEST_RESULTS};
 
@@ -411,10 +411,14 @@ fn apply_test_results(
         .and_then(serde_json::Value::as_str)
         .zip(raw.get("language").and_then(serde_json::Value::as_str))
         .filter(|(_, language)| offered_language(language).is_some());
+
+    // Read before a credited run replaces it: a rerun of unchanged code is a
+    // repeat of the result already reacted to, not a new reason to open
+    // Optimizations.
+    let previous = state.tested_code.clone();
     let mut credited = false;
     if let Some((code, language)) = submitted
-        && !setup_error
-        && total > 0
+        && super::real_test_run(payload)
         && super::written_in(state, language, code)
     {
         state.tested_code = Some(super::TestedCode {
@@ -449,6 +453,20 @@ fn apply_test_results(
     {
         state.tested_code = None;
     }
+    let now = state.tested_code.as_ref().filter(|_| credited);
+    let since_previous = match (&previous, now) {
+        (Some(before), Some(now))
+            if before.language == now.language
+                && (before.code == now.code
+                    || super::edited_within(&now.language, &before.code, &now.code)) =>
+        {
+            SincePrevious::Unchanged
+        }
+        (Some(before), Some(now)) if super::rewritten(&before.code, &now.code) => {
+            SincePrevious::Rewritten
+        }
+        _ => SincePrevious::Other,
+    };
     state.last_test_run = Some(payload.clone());
     state.test_runs += 1;
     state
@@ -497,7 +515,14 @@ fn apply_test_results(
         } else if setup_error {
             test_setup_error_reaction(&summary, excerpt.as_deref())
         } else {
-            test_results_reaction(&summary, all_passed, record, excerpt.as_deref())
+            test_results_reaction(
+                &summary,
+                all_passed,
+                record,
+                excerpt.as_deref(),
+                state,
+                since_previous,
+            )
         }),
         ..DataEventResult::default()
     }
@@ -654,6 +679,7 @@ fn control_time_warning(state: &mut RuntimeState) -> DataEventResult {
             time_warning(
                 super::test_source(state) == TestSource::Trace
                     && !super::phases_evidenced(state, &[super::FrameworkPhase::Test]),
+                state,
             )
         }),
         ..DataEventResult::default()

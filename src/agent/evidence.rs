@@ -2113,7 +2113,7 @@ fn failure_signature(payload: &serde_json::Value) -> Option<String> {
 /// The browser publishes a setup error and case outcomes as alternatives: the
 /// paths that fill one return an empty `cases` array, so a run carrying this
 /// graded nothing however many cases the judge spec holds.
-fn run_failed_to_start(payload: &serde_json::Value) -> bool {
+pub(crate) fn run_failed_to_start(payload: &serde_json::Value) -> bool {
     payload
         .get("setupError")
         .and_then(serde_json::Value::as_str)

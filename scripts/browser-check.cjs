@@ -246,6 +246,7 @@ const HANDOVER_SIGNALS = {
   goAway: "Gemini requested a transport restart in",
   resumed: "Gemini session resumed; the interview continues where it left off",
   degraded: "Gemini session restart degraded",
+  expired: "goaway expired:",
 };
 
 function redact(text) {
@@ -368,7 +369,12 @@ async function soakInterview(page, roomName, agentIdentity, agentOutput) {
   // Latched on the way past rather than read at the end: agentOutput is a
   // rolling window, so whatever the agent logs over the rest of the soak can
   // evict the line this is looking for.
-  const seen = { goAway: false, resumed: false, degraded: false };
+  const seen = {
+    goAway: false,
+    resumed: false,
+    degraded: false,
+    expired: false,
+  };
   let turnsAtHandover = null;
 
   while (Date.now() < deadline) {
@@ -390,6 +396,15 @@ async function soakInterview(page, roomName, agentIdentity, agentOutput) {
     if (seen.degraded) {
       throw new Error(
         `Gemini restarted cold during ${soakSeconds}s soak; the conversation was lost`,
+      );
+    }
+
+    // A held GoAway the server outran: the resume then starts from an older
+    // checkpoint than the handover would have used, which is how a test run or
+    // an answer goes missing across the swap (issue #66).
+    if (seen.expired) {
+      throw new Error(
+        `the server closed the socket before a held GoAway was spent during ${soakSeconds}s soak`,
       );
     }
 

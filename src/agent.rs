@@ -46,15 +46,15 @@ use problems::variant_for;
 pub use problems::{DEFAULT_PROBLEM_ID, PROBLEMS, find_problem, get_problem, topics_for};
 pub use prompts::{
     InterimReviewInput, LanguageChoiceContext, MAX_EXCERPT_LINE_CHARS, MAX_NUMBERED_BYTES,
-    ReportPromptInput, TestRecord, behavioral_silence_nudge, behavioral_time_warning,
-    build_instructions_for_plan, changed_excerpt, cold_restart, format_test_run,
-    format_test_run_for_reaction, greeting, hint_ladder_used_text, hint_rung_text,
+    ReportPromptInput, SincePrevious, TestRecord, behavioral_silence_nudge,
+    behavioral_time_warning, build_instructions_for_plan, changed_excerpt, cold_restart,
+    format_test_run, format_test_run_for_reaction, greeting, hint_ladder_used_text, hint_rung_text,
     hint_rung_withheld_text, interim_review_prompt, interim_system_instruction, language_choice,
     log_hint_text, numbered, numbered_from, proactive_review, read_editor_text,
-    released_follow_ups, report_prompt, report_system_instruction, resume, rolling_assessment,
-    round_skipped, round_started, silence_nudge, spoken_language, test_results_reaction,
-    test_runner_unavailable_reaction, test_setup_error_reaction, time_warning,
-    unrecorded_earlier_phases, wrap_up,
+    released_follow_ups, report_prompt, report_system_instruction, resume, resumed_context,
+    rolling_assessment, round_skipped, round_started, silence_nudge, spoken_language,
+    test_results_reaction, test_runner_unavailable_reaction, test_setup_error_reaction,
+    time_warning, unrecorded_earlier_phases, wrap_up,
 };
 pub(crate) use report::sanitize_report_candidate;
 pub use report::{
@@ -143,8 +143,8 @@ const ROUND_TRANSITION_SKEW: std::time::Duration = std::time::Duration::from_sec
 /// `the_time_warning_threshold_is_the_same_number_on_both_sides`.
 pub const TIME_WARNING_S: u64 = 300;
 
-pub const INTERVIEW_CONTRACT_BUNDLE_VERSION: u32 = 17;
-pub const LIVE_PROMPT_VERSION: u32 = 9;
+pub const INTERVIEW_CONTRACT_BUNDLE_VERSION: u32 = 18;
+pub const LIVE_PROMPT_VERSION: u32 = 10;
 pub const REPORT_PROMPT_VERSION: u32 = 13;
 pub const RUBRIC_VERSION: u32 = 1;
 pub const REPORT_SCHEMA_VERSION: u32 = 2;
@@ -790,10 +790,12 @@ pub struct RuntimeState {
     ///
     /// Set when a Gemini socket is replaced by a session that remembers nothing
     /// while the interview is paused, which is the one moment the briefing
-    /// cannot simply be spoken: the reply would be discarded on the way out.
-    /// Resuming is what clears it, because that is when Jim speaks again, and
-    /// the line resuming sends otherwise assumes an interviewer who was here
-    /// for the whole interview.
+    /// cannot simply be spoken: the reply would be discarded on the way out,
+    /// and when a cold briefing failed to send. Resuming is what clears it,
+    /// because that is when Jim speaks again, and the line resuming sends
+    /// otherwise assumes an interviewer who was here for the whole interview.
+    /// A socket resumed from the cold one inherits the debt, since its memory
+    /// starts from that cold session.
     pub needs_cold_brief: bool,
     /// Observations a reviewer recorded in the pauses, while the interview was
     /// still running. Held apart from `framework_evidence`, which is the
@@ -1233,7 +1235,7 @@ pub(crate) fn test_record_after_run(state: &RuntimeState, credited: bool) -> Tes
 /// exercised, which changes what runs without typing anything. A change too
 /// long to compare is not current: a same-length rewrite of a long solution
 /// would otherwise count as the code that ran.
-fn tested_code_is_current(state: &RuntimeState) -> bool {
+pub(crate) fn tested_code_is_current(state: &RuntimeState) -> bool {
     state.tested_code.as_ref().is_some_and(|tested| {
         tested.language == state.language
             && (tested.code == state.code
@@ -1245,7 +1247,7 @@ fn tested_code_is_current(state: &RuntimeState) -> bool {
 /// one table: the common subsequence is the same either way round. Comments
 /// are left out, so noting the complexity after a run, or deleting the
 /// starter's prompt line, does not void a run of code that did not change.
-fn edited_within(language: &str, before: &str, code: &str) -> bool {
+pub(crate) fn edited_within(language: &str, before: &str, code: &str) -> bool {
     let before = uncommented_chars(language, before);
     let code = uncommented_chars(language, code);
     changed_characters(&before, &code)
@@ -1314,6 +1316,28 @@ fn uncommented_chars(language: &str, code: &str) -> Vec<char> {
     kept
 }
 
+/// Changed by enough that an analysis of the old code may not describe the
+/// new: more than 80 characters of content either way, or three lines. A
+/// size measure, deliberately coarse; it only decides whether a passing run
+/// asks if an earlier complexity answer still holds.
+pub(crate) fn rewritten(old: &str, new: &str) -> bool {
+    content_chars(old)
+        .count()
+        .abs_diff(content_chars(new).count())
+        > 80
+        || old.lines().count().abs_diff(new.lines().count()) >= 3
+}
+
+/// A test run that ran something: not a runner setup error, and not the 0/0
+/// record a packet with no counts is sanitized into.
+pub(crate) fn real_test_run(run: &serde_json::Value) -> bool {
+    !run.get("setupError").is_some_and(python_truthy)
+        && run
+            .get("total")
+            .and_then(serde_json::Value::as_i64)
+            .is_some_and(|total| total > 0)
+}
+
 /// The characters of a piece of code that are content rather than layout.
 pub(crate) fn content_chars(code: &str) -> impl Iterator<Item = char> + '_ {
     code.chars().filter(|character| !character.is_whitespace())
@@ -1328,7 +1352,8 @@ pub(crate) fn content_chars(code: &str) -> impl Iterator<Item = char> + '_ {
 /// most of a one-line answer, so `return sqrt(x);` did not count as code. The
 /// shared prefix and suffix, the signature and its closing lines, are trimmed
 /// first so the quadratic table covers only the body that changed. It runs on
-/// an evidence call and on a received test run, a few times a minute at most.
+/// an evidence call, a received test run and a prompt that states test
+/// progress: every few seconds at most, on code that rarely changes much.
 fn changed_characters(before: &[char], code: &[char]) -> Option<(usize, usize)> {
     let prefix = before
         .iter()

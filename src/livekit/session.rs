@@ -84,6 +84,33 @@ enum OutputDisposition {
     EndsTheDiscard,
 }
 
+/// Minutes and seconds since the interview started, on every line a #66
+/// timeline is read from, so the server log lines up with the interview timer
+/// a candidate reports against.
+pub(super) fn log_clock(state: &RuntimeState) -> String {
+    let seconds = state.started_at.elapsed().as_secs();
+    format!("{}:{:02}", seconds / 60, seconds % 60)
+}
+
+/// Whether an event is Gemini actually answering what it was prompted with.
+///
+/// Not every output event is. A `TurnComplete` or `Interrupted` can belong to
+/// the generation before the prompt, empty audio and blank text say nothing,
+/// and usage is billing; letting any of those settle a prompt leaves no reply
+/// owed when the socket is replaced before the real answer.
+pub(super) fn answers_prompt(event: &GeminiEvent) -> bool {
+    match event {
+        GeminiEvent::Audio { bytes, .. } => !bytes.is_empty(),
+        GeminiEvent::ToolCall(_) => true,
+        GeminiEvent::Text(text) | GeminiEvent::OutputTranscript(text) => !text.trim().is_empty(),
+        GeminiEvent::Usage(_)
+        | GeminiEvent::InputTranscript(_)
+        | GeminiEvent::TurnComplete
+        | GeminiEvent::Interrupted
+        | GeminiEvent::GoAway { .. } => false,
+    }
+}
+
 /// Split out of `handle_gemini_event` because it is the whole of what that
 /// function decides before dispatching, and none of it needs a room, a socket
 /// or an await. It is also the rule a restart has to get right: the discard
@@ -94,7 +121,7 @@ fn output_disposition(event: &GeminiEvent, discarding: bool, paused: bool) -> Ou
         event,
         GeminiEvent::Audio { .. } | GeminiEvent::OutputTranscript(_)
     );
-    let ends_turn = matches!(event, GeminiEvent::TurnComplete | GeminiEvent::Interrupted);
+    let ends_turn = ends_turn(event);
 
     if discarding {
         if is_output {
@@ -114,6 +141,11 @@ fn output_disposition(event: &GeminiEvent, discarding: bool, paused: bool) -> Ou
     OutputDisposition::Deliver
 }
 
+/// A turn ending, whichever way it ends.
+fn ends_turn(event: &GeminiEvent) -> bool {
+    matches!(event, GeminiEvent::TurnComplete | GeminiEvent::Interrupted)
+}
+
 /// Gemini said something. One arm each, because the arms share only the socket
 /// they arrived on: what a tool call has to do and what a cut-off turn has to
 /// undo have no step in common, and reading either one used to mean scrolling
@@ -130,8 +162,22 @@ pub(super) async fn handle_gemini_event(
         context.state.paused,
     ) {
         OutputDisposition::Drop => return Ok(()),
+
+        // The turn a discard ends belongs to the generation the pause cut off,
+        // so it answers nothing sent since; only delivered output settles a
+        // prompt.
+        //
+        // So it touches no prompt state: `note_turn_boundary` would read it as
+        // the resume prompt's own answer. The pause that armed the discard ran
+        // `cut_off_turn`, which already cleared anything the old turn owed.
         OutputDisposition::EndsTheDiscard => context.activity.discarding_output = false,
-        OutputDisposition::Deliver => {}
+        OutputDisposition::Deliver => {
+            if answers_prompt(&event) {
+                context.activity.note_output();
+            } else if ends_turn(&event) {
+                context.activity.note_turn_boundary();
+            }
+        }
     }
     match event {
         GeminiEvent::ToolCall(calls) => on_tool_calls(room, context, calls).await,
@@ -174,6 +220,27 @@ async fn on_tool_calls(
         .into_iter()
         .map(|call| {
             let response = execute_tool_call(context.state, &call);
+
+            // The phase as the checklist spells it, and only when it is one:
+            // the argument is model text, and the rest of the call stays out of
+            // the log for the reason the checklist carries no summary.
+            if call.name == TOOL_RECORD_FRAMEWORK_EVIDENCE {
+                let phase = call
+                    .args
+                    .get("phase")
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|phase| {
+                        crate::agent::REACTO_PHASE_IDS.contains(phase)
+                            || crate::agent::STAR_PHASE_IDS.contains(phase)
+                    })
+                    .unwrap_or("?");
+                eprintln!(
+                    "evidence: at={} phase={phase} accepted={} room={}",
+                    log_clock(context.state),
+                    response.get("error").is_none(),
+                    room.name()
+                );
+            }
             (call, response)
         })
         .collect::<Vec<_>>();
@@ -677,7 +744,7 @@ pub(super) async fn send_wrap_up_and_wait(
         &farewell,
     )
     .await?;
-    context.activity.mark_speaking();
+    context.activity.mark_prompted(Instant::now());
     let deadline = Instant::now() + WRAP_UP_WAIT;
     loop {
         if Instant::now() >= deadline {
@@ -761,6 +828,9 @@ pub(super) fn cut_off_turn(
     // without its own transcript measured from it: the same lie this field was
     // split out of `last_user_speech` to stop telling, one turn later.
     activity.awaiting_reply_since = None;
+
+    activity.prompted_at = None;
+    activity.prompt_behind_turn = false;
 
     // The generation this was waiting for died with the turn.
     activity.tool_response_outstanding = false;

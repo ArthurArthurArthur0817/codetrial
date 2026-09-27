@@ -700,6 +700,7 @@ async fn only_a_delivered_behavioral_nudge_spends_the_round() {
     let coding = WatchPrompt {
         text: String::new(),
         behavioral_nudge: false,
+        allows_silence: false,
     };
     send_watched_prompt(&mut activity, &coding, async {
         Ok::<(), std::io::Error>(())
@@ -708,6 +709,28 @@ async fn only_a_delivered_behavioral_nudge_spends_the_round() {
     .unwrap();
     assert!(!activity.behavioral_nudged);
     assert_eq!(activity.floor, Floor::Speaking);
+    assert!(
+        activity.owes_reply(),
+        "a nudge is a question the candidate is owed an answer to"
+    );
+
+    // An editor review may rightly get nothing back, so a socket replaced
+    // before it answers owes nothing for it, though it still holds the floor.
+    let review = WatchPrompt {
+        text: String::new(),
+        behavioral_nudge: false,
+        allows_silence: true,
+    };
+    activity.floor = Floor::Listening;
+    activity.prompted_at = None;
+    send_watched_prompt(&mut activity, &review, async {
+        Ok::<(), std::io::Error>(())
+    })
+    .await
+    .unwrap();
+    assert_eq!(activity.floor, Floor::Speaking);
+    assert!(activity.prompted_at.is_some());
+    assert!(!activity.owes_reply());
     activity.floor = Floor::Listening;
 
     let prompt = activity.watch_prompt(&mut state, now).unwrap();
@@ -1962,4 +1985,354 @@ fn a_rename_or_code_that_does_not_parse_holds_the_review() {
         activity.watch_prompt(&mut state, now).is_none(),
         "a review fired on a buffer that was never parsed"
     );
+}
+
+/// A checkpoint handshake must not be the last message the replacement gets:
+/// the browser result and the spoken answer can both postdate that checkpoint.
+/// Driven through `brief_replacement`, the branch `replace_gemini_session`
+/// takes, so a resumed socket that is sent nothing fails here.
+#[tokio::test]
+async fn replacement_sockets_receive_local_progress_before_continuing() {
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::Message;
+
+    /// What the replacement socket should receive, stated per case rather than
+    /// derived, so a wrong rule in `send_recovery_brief` cannot also be the
+    /// rule that predicts it.
+    #[derive(Clone, Copy, PartialEq, Debug)]
+    enum Expect {
+        /// Nothing now; the cold briefing goes out on unpause.
+        Deferred,
+        /// Context only, and whether it asks for the owed reply.
+        Context { reply: bool },
+        /// The spoken cold briefing.
+        Spoken,
+    }
+    use Replacement::{Cold, Resumed};
+
+    fn unpause(state: &mut RuntimeState) -> String {
+        crate::agent::apply_data_event(
+            state,
+            crate::runtime::TOPIC_CONTROL,
+            &serde_json::json!({"type": "pause_interview", "paused": false}),
+            0.0,
+        )
+        .generate_reply
+        .unwrap()
+    }
+
+    let mut tool_activity = RuntimeActivity::new(Instant::now());
+    tool_activity.mark_prompted(Instant::now());
+    tool_activity.note_output();
+    tool_activity.tool_response_outstanding = true;
+    let tool_continuation = Resumed {
+        owed: tool_activity.owes_reply(),
+    };
+
+    // (replacement, paused, a cold briefing already owed, expected)
+    for (replacement, paused, pending, expect) in [
+        (Cold, false, false, Expect::Spoken),
+        (Cold, true, false, Expect::Deferred),
+        (
+            tool_continuation,
+            false,
+            false,
+            Expect::Context { reply: true },
+        ),
+        (
+            Resumed { owed: false },
+            false,
+            false,
+            Expect::Context { reply: false },
+        ),
+        (
+            Resumed { owed: true },
+            false,
+            false,
+            Expect::Context { reply: true },
+        ),
+        (
+            Resumed { owed: false },
+            true,
+            false,
+            Expect::Context { reply: false },
+        ),
+        (
+            Resumed { owed: true },
+            true,
+            false,
+            Expect::Context { reply: false },
+        ),
+        (Resumed { owed: false }, true, true, Expect::Deferred),
+        (Resumed { owed: false }, false, true, Expect::Spoken),
+    ] {
+        let resumed = matches!(replacement, Resumed { .. });
+        let config = load_from_pairs([
+            ("LIVEKIT_URL", "wss://example.livekit.cloud"),
+            ("LIVEKIT_API_KEY", "devkey"),
+            ("LIVEKIT_API_SECRET", "devsecret"),
+            ("GOOGLE_API_KEY", "recovery-test-key"),
+        ])
+        .unwrap();
+        let keys = GeminiKeys::from_config(&config);
+        let boot = crate::runtime::bootstrap(&config, "interview-fixed", Some("two-sum"), 45);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("ws://{}/", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let mut socket = tokio_tungstenite::accept_async(socket).await.unwrap();
+            let setup: serde_json::Value =
+                serde_json::from_str(socket.next().await.unwrap().unwrap().to_text().unwrap())
+                    .unwrap();
+            assert_eq!(
+                setup["setup"]["sessionResumption"]["handle"].as_str(),
+                resumed.then_some("old-checkpoint")
+            );
+            socket
+                .send(Message::Text(r#"{"setupComplete":{}}"#.into()))
+                .await
+                .unwrap();
+            let message = socket.next().await.unwrap().unwrap();
+            if expect == Expect::Deferred {
+                assert!(message.is_close(), "a paused replacement must stay silent");
+                return None;
+            }
+            let message: serde_json::Value =
+                serde_json::from_str(message.to_text().unwrap()).unwrap();
+            let text = if let Expect::Context { reply } = expect {
+                assert_eq!(message["clientContent"]["turnComplete"], reply);
+                &message["clientContent"]["turns"][0]["parts"][0]["text"]
+            } else {
+                &message["realtimeInput"]["text"]
+            };
+            Some(text.as_str().unwrap().to_string())
+        });
+        let mut gemini = crate::gemini::live_session_with_keys_at(
+            &url,
+            &keys,
+            &boot,
+            resumed.then_some(("recovery-test-key", "old-checkpoint")),
+        )
+        .await
+        .unwrap();
+        let mut state = RuntimeState {
+            paused,
+            needs_cold_brief: pending,
+            code: "return [0, 1]".to_string(),
+            transcript: vec![
+                "Candidate: Constant time and space for these two entries.".to_string(),
+            ],
+            last_test_run: Some(serde_json::json!({"language": "python", "passed": 3, "total": 3})),
+            test_runs: 1,
+            ..RuntimeState::default()
+        };
+        let mut activity = RuntimeActivity::new(Instant::now());
+        brief_replacement(&mut gemini, &mut state, &mut activity, replacement).await;
+        let speaks = matches!(expect, Expect::Spoken | Expect::Context { reply: true });
+        assert_eq!(activity.floor == Floor::Speaking, speaks, "{expect:?}");
+        assert_eq!(activity.owes_reply(), speaks, "{expect:?}");
+        assert_eq!(state.needs_cold_brief, expect == Expect::Deferred);
+        let _ = gemini.close().await;
+        let sent = tokio::time::timeout(Duration::from_secs(5), server)
+            .await
+            .unwrap()
+            .unwrap();
+        let text = match expect {
+            Expect::Deferred => {
+                assert!(sent.is_none());
+                unpause(&mut state)
+            }
+            _ => sent.unwrap(),
+        };
+        assert!(text.contains("3/3 cases passed"));
+        assert!(text.contains("Candidate: Constant time and space"));
+        assert!(text.contains("return [0, 1]"));
+        assert_eq!(text.matches("TIMER: about").count(), 1);
+        assert!(!state.needs_cold_brief);
+        if let Expect::Context { reply } = expect {
+            assert!(text.contains("Your connection resumed from a checkpoint"));
+            assert!(!text.contains("Do not mention the interruption, apologize, re-introduce"));
+            assert_eq!(text.contains("was lost with the connection"), reply);
+            assert_eq!(text.contains("not a request to speak"), !reply);
+            if paused {
+                let unpaused = unpause(&mut state);
+                assert!(unpaused.starts_with("The interview has resumed."));
+                assert!(!unpaused.contains("checkpoint"));
+            }
+        }
+    }
+}
+
+/// What the replaced socket owed survives the teardown that clears it, and
+/// the teardown leaves nothing of the old socket's turn behind.
+#[test]
+fn a_replaced_socket_reports_the_reply_it_owed_before_clearing_it() {
+    let (mut output_audio, _frames) = test_output_audio();
+    let now = Instant::now();
+    type Setup = fn(&mut RuntimeActivity, Instant);
+    let cases: [(&str, Setup, bool); 5] = [
+        ("idle", |_, _| {}, false),
+        ("prompt", |activity, now| activity.mark_prompted(now), true),
+        (
+            "editor review",
+            |activity, now| activity.mark_prompted_allowing_silence(now),
+            false,
+        ),
+        (
+            "candidate finished",
+            |activity, now| activity.note_candidate_finished(now),
+            true,
+        ),
+        (
+            "tool continuation",
+            |activity, _| activity.tool_response_outstanding = true,
+            true,
+        ),
+    ];
+    for (name, setup, owed) in cases {
+        let mut activity = RuntimeActivity::new(now);
+        let mut state = RuntimeState {
+            end_requested: true,
+            ..RuntimeState::default()
+        };
+        setup(&mut activity, now);
+        assert_eq!(
+            settle_replaced_socket(&mut state, &mut activity, &mut output_audio),
+            owed,
+            "{name}"
+        );
+        assert!(!activity.owes_reply(), "{name}");
+        assert!(activity.prompted_at.is_none(), "{name}");
+        assert_eq!(activity.floor, Floor::Listening, "{name}");
+        assert!(!state.end_requested, "{name}");
+    }
+}
+
+/// Only output that could be the answer settles a prompt. A turn boundary may
+/// belong to the generation before the prompt, and blank text says nothing.
+#[test]
+fn only_real_output_answers_a_prompt() {
+    let cases = [
+        (
+            GeminiEvent::Audio {
+                bytes: vec![0; 4],
+                mime_type: "audio/pcm;rate=24000".to_string(),
+            },
+            true,
+        ),
+        (
+            GeminiEvent::Audio {
+                bytes: Vec::new(),
+                mime_type: "audio/pcm;rate=24000".to_string(),
+            },
+            false,
+        ),
+        (GeminiEvent::ToolCall(Vec::new()), true),
+        (
+            GeminiEvent::OutputTranscript("Looks good.".to_string()),
+            true,
+        ),
+        (GeminiEvent::Text("Next question.".to_string()), true),
+        (GeminiEvent::OutputTranscript("  ".to_string()), false),
+        (GeminiEvent::Text(String::new()), false),
+        (GeminiEvent::TurnComplete, false),
+        (GeminiEvent::Interrupted, false),
+        (GeminiEvent::InputTranscript("hello".to_string()), false),
+        (
+            GeminiEvent::GoAway {
+                time_left: "50s".to_string(),
+            },
+            false,
+        ),
+    ];
+    for (event, answers) in cases {
+        assert_eq!(session::answers_prompt(&event), answers, "{event:?}");
+    }
+}
+
+/// A briefing that failed to send hands its debt to the next replacement:
+/// a cold one is retried as a cold briefing, an owed reply stays owed.
+#[test]
+fn a_failed_briefing_keeps_its_debt_for_the_next_socket() {
+    let now = Instant::now();
+    for (replacement, cold_owed, reply_owed) in [
+        (Replacement::Cold, true, false),
+        (Replacement::Resumed { owed: true }, false, true),
+        (Replacement::Resumed { owed: false }, false, false),
+    ] {
+        let mut state = RuntimeState::default();
+        let mut activity = RuntimeActivity::new(now);
+        keep_recovery_debt(&mut state, &mut activity, replacement);
+        assert_eq!(state.needs_cold_brief, cold_owed);
+        assert_eq!(activity.owes_reply(), reply_owed);
+    }
+}
+
+/// A briefing whose send fails leaves its debt for the next socket, through
+/// the same function a replacement calls. The socket is closed before the
+/// briefing, which is the state a replacement that died again is found in.
+#[tokio::test]
+async fn a_briefing_that_fails_to_send_keeps_its_debt() {
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::Message;
+
+    use Replacement::{Cold, Resumed};
+    for (replacement, cold_owed, reply_owed) in
+        [(Cold, true, false), (Resumed { owed: true }, false, true)]
+    {
+        let config = load_from_pairs([
+            ("LIVEKIT_URL", "wss://example.livekit.cloud"),
+            ("LIVEKIT_API_KEY", "devkey"),
+            ("LIVEKIT_API_SECRET", "devsecret"),
+            ("GOOGLE_API_KEY", "recovery-test-key"),
+        ])
+        .unwrap();
+        let keys = GeminiKeys::from_config(&config);
+        let boot = crate::runtime::bootstrap(&config, "interview-fixed", Some("two-sum"), 45);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("ws://{}/", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let mut socket = tokio_tungstenite::accept_async(socket).await.unwrap();
+            let _ = socket.next().await;
+            socket
+                .send(Message::Text(r#"{"setupComplete":{}}"#.into()))
+                .await
+                .unwrap();
+            while socket.next().await.is_some() {}
+        });
+        let mut gemini = crate::gemini::live_session_with_keys_at(&url, &keys, &boot, None)
+            .await
+            .unwrap();
+        gemini.shutdown().await.unwrap();
+
+        let mut state = RuntimeState::default();
+        let mut activity = RuntimeActivity::new(Instant::now());
+        brief_replacement(&mut gemini, &mut state, &mut activity, replacement).await;
+        assert_eq!(state.needs_cold_brief, cold_owed, "{cold_owed}");
+        assert_eq!(activity.owes_reply(), reply_owed);
+        assert_eq!(activity.floor, Floor::Listening);
+        server.await.unwrap();
+    }
+}
+
+/// The clock on the #66 log lines reads as the interview timer does.
+#[test]
+fn the_log_clock_reads_minutes_and_seconds_since_the_start() {
+    let state = RuntimeState {
+        started_at: Instant::now() - Duration::from_secs(125),
+        ..RuntimeState::default()
+    };
+    assert_eq!(session::log_clock(&state), "2:05");
+}
+
+/// Whether a `GoAway` is still held, which is what names an expired one.
+#[test]
+fn a_deferred_restart_reports_whether_it_is_held() {
+    let mut restart = DeferredRestart::default();
+    assert!(!restart.is_armed());
+    assert!(!restart.request(Floor::Speaking, false, false, false));
+    assert!(restart.is_armed());
+    restart.cancel();
+    assert!(!restart.is_armed());
 }

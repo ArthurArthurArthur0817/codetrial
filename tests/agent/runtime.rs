@@ -372,15 +372,26 @@ fn a_stage_direction_carries_the_countdown_the_model_cannot_see() {
 
 #[test]
 fn leetcode_reactions_preserve_stage_transitions() {
-    let empty = silence_nudge("(the editor is currently empty)", None);
+    let empty = silence_nudge(
+        &RuntimeState::default(),
+        "(the editor is currently empty)",
+        None,
+    );
     assert!(empty.contains("understanding, example, or planned algorithm"));
     assert!(empty.contains("Do not restart them"));
 
-    let code = proactive_review("1| answer = []", None);
+    let code = proactive_review(&RuntimeState::default(), "1| answer = []", None);
     assert!(code.contains("a predicted test"));
     assert!(code.contains("`log_hint` with `requested` false"));
 
-    let failed = test_results_reaction("1/3 passed", false, TestRecord::Record, None);
+    let failed = test_results_reaction(
+        "1/3 passed",
+        false,
+        TestRecord::Record,
+        None,
+        &RuntimeState::default(),
+        SincePrevious::Other,
+    );
     assert!(failed.contains("still counts as testing"));
     assert!(failed.contains("go back to diagnosis"));
     assert!(failed.contains("choose one failing case"));
@@ -392,11 +403,21 @@ fn leetcode_reactions_preserve_stage_transitions() {
     assert!(setup.contains("prevents loading the tests, compilation, or execution"));
     assert!(setup.contains("Do not identify the error's cause, location, or fix"));
 
-    let passed = test_results_reaction("3/3 passed", true, TestRecord::Record, None);
+    let passed = test_results_reaction(
+        "3/3 passed",
+        true,
+        TestRecord::Record,
+        None,
+        &RuntimeState::default(),
+        SincePrevious::Other,
+    );
     assert!(passed.contains("move to Optimizations"));
     assert!(passed.contains("do not start a behavioral question"));
 
-    assert!(time_warning(false).contains("Do not start a behavioral question"));
+    assert!(
+        time_warning(false, &RuntimeState::default())
+            .contains("Do not start a behavioral question")
+    );
     assert!(
         wrap_up("candidate_ended", false)
             .contains("Do not ask a new coding or behavioral question")
@@ -412,11 +433,29 @@ fn leetcode_reactions_preserve_stage_transitions() {
     for neutral in [
         greeting(get_problem(Some("two-sum"))),
         language_choice("Python", LanguageChoiceContext::Start),
-        silence_nudge("(the editor is currently empty)", None),
-        time_warning(false),
+        silence_nudge(
+            &RuntimeState::default(),
+            "(the editor is currently empty)",
+            None,
+        ),
+        time_warning(false, &RuntimeState::default()),
         wrap_up("time_up", false),
-        test_results_reaction("1/3 passed", false, TestRecord::Record, None),
-        test_results_reaction("3/3 passed", true, TestRecord::Record, None),
+        test_results_reaction(
+            "1/3 passed",
+            false,
+            TestRecord::Record,
+            None,
+            &RuntimeState::default(),
+            SincePrevious::Other,
+        ),
+        test_results_reaction(
+            "3/3 passed",
+            true,
+            TestRecord::Record,
+            None,
+            &RuntimeState::default(),
+            SincePrevious::Other,
+        ),
         test_setup_error_reaction("The runner could not start.", None),
     ] {
         assert!(
