@@ -156,6 +156,12 @@ fn a_discard_lasts_exactly_one_turn() {
         OutputDisposition::EndsTheDiscard
     );
 
+    // Only the turn's end serves it: other input passes while it lasts.
+    assert_eq!(
+        output_disposition(&GeminiEvent::InputTranscript("hi".to_string()), true, false),
+        OutputDisposition::Deliver
+    );
+
     // Nothing to serve once it is spent.
     assert_eq!(
         output_disposition(&audio, false, false),

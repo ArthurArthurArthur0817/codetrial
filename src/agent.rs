@@ -44,17 +44,18 @@ use integrity::integrity_hash;
 pub use integrity::{sanitize_integrity_event, sanitize_test_run};
 use problems::variant_for;
 pub use problems::{DEFAULT_PROBLEM_ID, PROBLEMS, find_problem, get_problem, topics_for};
+pub(crate) use prompts::end_interview_refusal;
 pub use prompts::{
     InterimReviewInput, LanguageChoiceContext, MAX_EXCERPT_LINE_CHARS, MAX_NUMBERED_BYTES,
-    ReportPromptInput, TestRecord, behavioral_silence_nudge, behavioral_time_warning,
-    build_instructions_for_plan, changed_excerpt, cold_restart, format_test_run,
-    format_test_run_for_reaction, greeting, hint_ladder_used_text, hint_rung_text,
+    ReportPromptInput, SincePrevious, TestRecord, behavioral_silence_nudge,
+    behavioral_time_warning, build_instructions_for_plan, changed_excerpt, cold_restart,
+    format_test_run, format_test_run_for_reaction, greeting, hint_ladder_used_text, hint_rung_text,
     hint_rung_withheld_text, interim_review_prompt, interim_system_instruction, language_choice,
-    log_hint_text, numbered, numbered_from, proactive_review, read_editor_text,
-    released_follow_ups, report_prompt, report_system_instruction, resume, rolling_assessment,
-    round_skipped, round_started, silence_nudge, spoken_language, test_results_reaction,
-    test_runner_unavailable_reaction, test_setup_error_reaction, time_warning,
-    unrecorded_earlier_phases, wrap_up,
+    log_hint_text, numbered, numbered_from, owed_reply, proactive_review, read_editor_text,
+    released_follow_ups, report_prompt, report_system_instruction, resume, resumed_context,
+    rolling_assessment, round_skipped, round_started, silence_nudge, spoken_language,
+    test_results_reaction, test_runner_unavailable_reaction, test_setup_error_reaction,
+    time_warning, unrecorded_earlier_phases, wrap_up,
 };
 pub(crate) use report::sanitize_report_candidate;
 pub use report::{
@@ -143,8 +144,8 @@ const ROUND_TRANSITION_SKEW: std::time::Duration = std::time::Duration::from_sec
 /// `the_time_warning_threshold_is_the_same_number_on_both_sides`.
 pub const TIME_WARNING_S: u64 = 300;
 
-pub const INTERVIEW_CONTRACT_BUNDLE_VERSION: u32 = 17;
-pub const LIVE_PROMPT_VERSION: u32 = 9;
+pub const INTERVIEW_CONTRACT_BUNDLE_VERSION: u32 = 18;
+pub const LIVE_PROMPT_VERSION: u32 = 10;
 pub const REPORT_PROMPT_VERSION: u32 = 13;
 pub const RUBRIC_VERSION: u32 = 1;
 pub const REPORT_SCHEMA_VERSION: u32 = 2;
@@ -679,6 +680,17 @@ impl SpeakerTurn {
     }
 }
 
+/// What a recorded complexity analysis describes; see
+/// `RuntimeState::analysis`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Analysis {
+    /// Given with no run of the code on screen, so possibly over a draft: the
+    /// next credited run's code is what it describes.
+    AwaitingRun,
+    /// The code it describes.
+    Of(TestedCode),
+}
+
 /// Code a test run executed; see `RuntimeState::tested_code`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TestedCode {
@@ -747,6 +759,10 @@ pub struct RuntimeState {
     /// early stub, or of another language's buffer, does not vouch for code
     /// written after it.
     pub tested_code: Option<TestedCode>,
+    /// What the complexity analysis last recorded describes, so a later run is
+    /// judged against the solution that analysis described rather than against
+    /// whatever ran before it.
+    pub analysis: Option<Analysis>,
     /// The language whose latest run said the platform could not run tests at
     /// all: the judge is missing or the execution service could not start a
     /// run. A trace of the written code in that language can complete Test
@@ -790,11 +806,18 @@ pub struct RuntimeState {
     ///
     /// Set when a Gemini socket is replaced by a session that remembers nothing
     /// while the interview is paused, which is the one moment the briefing
-    /// cannot simply be spoken: the reply would be discarded on the way out.
-    /// Resuming is what clears it, because that is when Jim speaks again, and
-    /// the line resuming sends otherwise assumes an interviewer who was here
-    /// for the whole interview.
+    /// cannot simply be spoken: the reply would be discarded on the way out,
+    /// and when a cold briefing failed to send. Resuming is what clears it,
+    /// because that is when Jim speaks again, and the line resuming sends
+    /// otherwise assumes an interviewer who was here for the whole interview.
+    /// A socket resumed from the cold one inherits the debt, since its memory
+    /// starts from that cold session.
     pub needs_cold_brief: bool,
+    /// A resumed socket replaced a session that owed a reply while the
+    /// interview was paused. The reply cannot be asked for then, since it
+    /// would be discarded, so this request for it, owed event included, is
+    /// spoken after the resume line on unpause.
+    pub owed_reply_on_resume: Option<String>,
     /// Observations a reviewer recorded in the pauses, while the interview was
     /// still running. Held apart from `framework_evidence`, which is the
     /// interviewer's own bookkeeping about which phase happened: these are the
@@ -877,6 +900,7 @@ impl Default for RuntimeState {
             last_test_run: None,
             test_runs: 0,
             tested_code: None,
+            analysis: None,
             runner_unavailable: None,
             hints_used: 0,
             volunteered_hints: 0,
@@ -888,6 +912,7 @@ impl Default for RuntimeState {
             integrity_first_heartbeat: None,
             integrity_last_heartbeat: None,
             needs_cold_brief: false,
+            owed_reply_on_resume: None,
             interim_notes: Vec::new(),
             interim_transcript_lines: 0,
             interim_code: String::new(),
@@ -1233,12 +1258,20 @@ pub(crate) fn test_record_after_run(state: &RuntimeState, credited: bool) -> Tes
 /// exercised, which changes what runs without typing anything. A change too
 /// long to compare is not current: a same-length rewrite of a long solution
 /// would otherwise count as the code that ran.
-fn tested_code_is_current(state: &RuntimeState) -> bool {
-    state.tested_code.as_ref().is_some_and(|tested| {
-        tested.language == state.language
-            && (tested.code == state.code
-                || edited_within(&state.language, &tested.code, &state.code))
-    })
+pub(crate) fn tested_code_is_current(state: &RuntimeState) -> bool {
+    state
+        .tested_code
+        .as_ref()
+        .is_some_and(|tested| covers(tested, &state.language, &state.code))
+}
+
+/// Whether `code` in `language` is still the code `tested` holds, by the Test
+/// gate's rule: the same language, with less than a short expression added or
+/// removed. The one definition every comparison of two runs, or of a run and
+/// the editor, goes through.
+pub(crate) fn covers(tested: &TestedCode, language: &str, code: &str) -> bool {
+    tested.language == language
+        && (tested.code == code || edited_within(language, &tested.code, code))
 }
 
 /// Whether fewer than `MIN_WRITTEN_CHARS` were added and fewer removed, from
@@ -1314,6 +1347,45 @@ fn uncommented_chars(language: &str, code: &str) -> Vec<char> {
     kept
 }
 
+/// Changed by enough that an analysis of `before` may not describe `code`:
+/// another language, more than 80 characters of code added and removed
+/// together, comments aside, or a change too long to compare. Counting what
+/// changed rather than the net size is what catches a new algorithm of about
+/// the same length, which an unchanged size would pass as the same solution.
+pub(crate) fn rewritten(before: &TestedCode, language: &str, code: &str) -> bool {
+    if before.language != language {
+        return true;
+    }
+    let old = uncommented_chars(language, &before.code);
+    let new = uncommented_chars(language, code);
+    changed_characters(&old, &new).is_none_or(|(added, removed)| added + removed > 80)
+}
+
+/// Records which code a complexity analysis just given describes. One given
+/// over a run of the code on screen describes that code. One given ahead of
+/// any such run may describe a draft, and finishing the same algorithm is not
+/// a rewrite, so the first credited run after it is what it describes.
+fn anchor_analysis(state: &mut RuntimeState) {
+    state.analysis = Some(if tested_code_is_current(state) {
+        Analysis::Of(TestedCode {
+            language: state.language.clone(),
+            code: state.code.clone(),
+        })
+    } else {
+        Analysis::AwaitingRun
+    });
+}
+
+/// A test run that ran something: not a runner setup error, and not the 0/0
+/// record a packet with no counts is sanitized into.
+pub(crate) fn real_test_run(run: &serde_json::Value) -> bool {
+    !evidence::run_failed_to_start(run)
+        && run
+            .get("total")
+            .and_then(serde_json::Value::as_i64)
+            .is_some_and(|total| total > 0)
+}
+
 /// The characters of a piece of code that are content rather than layout.
 pub(crate) fn content_chars(code: &str) -> impl Iterator<Item = char> + '_ {
     code.chars().filter(|character| !character.is_whitespace())
@@ -1328,7 +1400,8 @@ pub(crate) fn content_chars(code: &str) -> impl Iterator<Item = char> + '_ {
 /// most of a one-line answer, so `return sqrt(x);` did not count as code. The
 /// shared prefix and suffix, the signature and its closing lines, are trimmed
 /// first so the quadratic table covers only the body that changed. It runs on
-/// an evidence call and on a received test run, a few times a minute at most.
+/// an evidence call, a received test run and a prompt that states test
+/// progress: every few seconds at most, on code that rarely changes much.
 fn changed_characters(before: &[char], code: &[char]) -> Option<(usize, usize)> {
     let prefix = before
         .iter()
@@ -1433,6 +1506,13 @@ pub fn record_framework_evidence(
         .filter(|summary| !summary.is_empty())
         .ok_or("invalid summary")
         .map(|summary| bounded_model_text(summary, MAX_FRAMEWORK_SUMMARY_CHARS))?;
+
+    // Before the duplicate check, since a repeat is still the analysis given
+    // again, now: "still O(n log n)" for rewritten code comes back under the
+    // summary it had before. Nothing below refuses an Optimizations record.
+    if phase == FrameworkPhase::Optimizations && kind != EvidenceKind::Skipped {
+        anchor_analysis(state);
+    }
     if let Some(index) = state.framework_evidence.iter().position(|item| {
         item.phase == phase && item.source == source && item.kind == kind && item.summary == summary
     }) {
@@ -1785,6 +1865,20 @@ pub struct DataEventResult {
     pub pause_changed: Option<bool>,
     /// Agent-owned round transition result: `started` or `skipped`.
     pub round_changed: Option<&'static str>,
+    /// How a test result was judged, for the room log; see `TestRunNote`.
+    /// `None` is a packet dropped before it was judged. Nothing reads it to
+    /// decide anything.
+    pub test_run: Option<TestRunNote>,
+}
+
+/// The one fact about a test result only its judging knows: whether the run
+/// earned credit, and if so how its code compares with the previous credited
+/// run's. Whether a reaction followed, and whether the credited run still
+/// covers the editor, the log reads from the result and the state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TestRunNote {
+    /// `None` when the run earned no credit, so there is nothing to compare.
+    pub credited: Option<SincePrevious>,
 }
 
 /// How much conversation the report prompt may carry. A 90-minute interview

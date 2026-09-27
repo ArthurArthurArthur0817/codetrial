@@ -265,3 +265,165 @@ fn no_interim_review_starts_that_the_end_would_abort() {
     assert!(!activity.interim_review_due(&state, last_call));
     assert!(activity.interim_review_due(&state, last_call - Duration::from_secs(1)));
 }
+
+#[test]
+fn a_tool_continuation_stays_owed_after_prompt_output() {
+    let start = Instant::now();
+    let mut activity = RuntimeActivity::new(start);
+    activity.mark_prompted(start, None, false);
+    activity.note_output();
+    activity.tool_response_outstanding = true;
+
+    assert!(activity.prompted_at.is_none());
+    assert!(activity.awaiting_reply_since.is_none());
+    assert!(activity.owes_reply());
+
+    activity.tool_response_outstanding = false;
+    activity.mark_listening();
+    assert!(!activity.owes_reply());
+}
+
+/// A prompt Gemini never answers must not hold the floor forever: a held floor
+/// silences every nudge and keeps a `GoAway` waiting until the server drops the
+/// socket from an older checkpoint. Releasing it keeps the reply owed, so the
+/// replacement socket still answers.
+#[test]
+fn a_prompt_with_no_output_returns_the_floor_but_stays_owed() {
+    let quiet = Stalls {
+        prompt_released: false,
+        spend_restart: false,
+    };
+    let start = Instant::now();
+    let mut activity = RuntimeActivity::new(start);
+    assert!(!activity.owes_reply());
+
+    activity.mark_prompted(start, None, false);
+    assert!(activity.owes_reply());
+    assert_eq!(
+        activity.settle_stalls(start + PROMPT_STALL - Duration::from_millis(1), false),
+        quiet
+    );
+    assert_eq!(activity.floor, Floor::Speaking);
+
+    assert_eq!(
+        activity.settle_stalls(start + PROMPT_STALL, false),
+        Stalls {
+            prompt_released: true,
+            spend_restart: true,
+        }
+    );
+    assert_eq!(activity.floor, Floor::Listening);
+    assert!(activity.owes_reply(), "the reply was never given");
+    assert_eq!(
+        activity.settle_stalls(start + PROMPT_STALL * 2, false),
+        quiet,
+        "a floor already returned is not returned again"
+    );
+
+    activity.mark_prompted(start, None, false);
+    activity.note_output();
+    assert!(!activity.owes_reply());
+    assert_eq!(
+        activity.settle_stalls(start + PROMPT_STALL, false),
+        quiet,
+        "a prompt that produced output is being answered, however slowly it plays"
+    );
+}
+
+/// The candidate's own turn stalls too: they finish, Gemini sends nothing, and
+/// a held `GoAway` has no later event to be spent on. The floor is already
+/// theirs, so only the restart is released.
+#[test]
+fn an_unanswered_candidate_turn_lets_a_held_restart_go() {
+    let start = Instant::now();
+    let mut activity = RuntimeActivity::new(start);
+    activity.note_candidate_finished(start);
+    assert!(
+        !activity
+            .settle_stalls(start + PROMPT_STALL - Duration::from_millis(1), false)
+            .spend_restart
+    );
+    assert_eq!(
+        activity.settle_stalls(start + PROMPT_STALL, false),
+        Stalls {
+            prompt_released: false,
+            spend_restart: true,
+        }
+    );
+    assert!(activity.owes_reply(), "their turn is still unanswered");
+}
+
+/// A candidate who speaks after a prompt went unanswered has moved on: their
+/// turn is what is owed, not the stale prompt.
+#[test]
+fn speaking_again_retires_an_unanswered_prompt() {
+    let start = Instant::now();
+    let mut activity = RuntimeActivity::new(start);
+    activity.mark_prompted(start, None, false);
+    activity.settle_stalls(start + PROMPT_STALL, false);
+    activity.note_candidate_finished(start + PROMPT_STALL * 2);
+    assert!(activity.prompted_at.is_none());
+    assert!(activity.reply_in_flight());
+
+    // A prompt that has produced nothing yet is not a reply under way, so the
+    // candidate speaking over it is their turn to answer.
+    let mut waiting = RuntimeActivity::new(start);
+    waiting.mark_prompted(start, None, false);
+    waiting.note_candidate_finished(start + Duration::from_secs(1));
+    assert!(waiting.prompted_at.is_none());
+    assert!(waiting.reply_in_flight());
+
+    // While Gemini is producing, a lagging transcript fragment retires nothing:
+    // the prompt went out behind that turn, and its answer may still be on its
+    // way.
+    let mut speaking = RuntimeActivity::new(start);
+    speaking.note_output();
+    speaking.mark_prompted(start, None, false);
+    speaking.note_candidate_finished(start + Duration::from_secs(1));
+    assert!(speaking.prompted_at.is_some());
+    assert!(!speaking.reply_in_flight());
+}
+
+/// Output that follows a prompt sent mid-generation is the earlier
+/// generation's tail until that turn ends, so it cannot settle the prompt.
+#[test]
+fn output_behind_a_prompt_belongs_to_the_earlier_turn() {
+    let start = Instant::now();
+    let mut activity = RuntimeActivity::new(start);
+    activity.note_output();
+    activity.mark_prompted(start, None, false);
+    activity.note_output();
+    assert!(
+        activity.owes_reply(),
+        "the old sentence's tail answers nothing"
+    );
+    activity.note_turn_boundary();
+    assert!(
+        activity.owes_reply(),
+        "the old turn ending is not the answer"
+    );
+    activity.note_output();
+    assert!(!activity.owes_reply());
+}
+
+/// A prompt's own turn ending with nothing said is Gemini answering with
+/// silence, and replaying it later would ask what it chose not to.
+#[test]
+fn a_prompt_answered_with_silence_is_not_owed() {
+    let start = Instant::now();
+    let mut activity = RuntimeActivity::new(start);
+    activity.mark_prompted(start, None, false);
+    activity.note_turn_boundary();
+    assert!(!activity.owes_reply());
+}
+
+/// A briefing that never reached the socket is still owed, without taking
+/// the floor from a watcher that has nothing generating to wait for.
+#[test]
+fn an_owed_briefing_leaves_the_floor_alone() {
+    let start = Instant::now();
+    let mut activity = RuntimeActivity::new(start);
+    activity.owe_prompt(start, None);
+    assert!(activity.owes_reply());
+    assert_eq!(activity.floor, Floor::Listening);
+}

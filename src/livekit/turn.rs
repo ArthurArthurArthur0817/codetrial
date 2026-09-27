@@ -58,6 +58,14 @@ pub(super) const INTERIM_CODE_UNCHANGED: &str =
 /// paused. Give them a beat before a periodic review tries to take the floor.
 pub(super) const CODE_SETTLE: Duration = Duration::from_secs(10);
 
+/// How long a prompt may go without Gemini producing anything for it before the
+/// floor goes back to the candidate. Gemini starts a reply within a couple of
+/// seconds; a prompt still unanswered after this is one it will not answer.
+/// Holding `Floor::Speaking` for it keeps every silence nudge quiet, and holds
+/// back the replacement a `GoAway` asked for until the server closes the socket
+/// itself, from an older checkpoint than an orderly replacement resumes.
+pub(super) const PROMPT_STALL: Duration = Duration::from_secs(20);
+
 pub(super) struct RuntimeActivity {
     pub(super) last_code_change: Instant,
     pub(super) last_user_speech: Instant,
@@ -73,6 +81,37 @@ pub(super) struct RuntimeActivity {
     ///
     /// Read as liveness as well as latency; see `reply_in_flight`.
     pub(super) awaiting_reply_since: Option<Instant>,
+    /// When a prompt went out that Gemini has produced nothing for yet. The
+    /// other half of what the interviewer owes: `awaiting_reply_since` covers a
+    /// candidate who finished speaking, this covers a test result, nudge or
+    /// briefing sent in text. Outlives the stall release in `settle_stalls`,
+    /// which gives the floor back without pretending the reply arrived.
+    pub(super) prompted_at: Option<Instant>,
+    /// The prompt behind `prompted_at` accepts silence as an answer, as an
+    /// editor review does. It still holds the floor until output or a stall,
+    /// but a replacement socket does not owe the candidate anything for it.
+    pub(super) prompt_allows_silence: bool,
+    /// The prompt behind `prompted_at` went out while an earlier generation
+    /// was still producing, so the output that follows belongs to that one
+    /// until its turn ends. Without this, the tail of Jim's previous sentence
+    /// settles a test result he has not reacted to yet.
+    pub(super) prompt_behind_turn: bool,
+    /// The text of the prompt behind `prompted_at`, so a replacement asked to
+    /// give the reply it owed is told which one. Kept past the teardown that
+    /// clears `prompted_at`, since that is exactly when it is read.
+    pub(super) prompt_text: Option<String>,
+    /// Gemini has produced output in the turn now under way. Set by output and
+    /// cleared at a turn boundary, which is what "an earlier generation is
+    /// still producing" means; the floor alone cannot say it, since a prompt
+    /// takes the floor before anything is produced.
+    pub(super) generating: bool,
+    /// When the tool response behind `tool_response_outstanding` went out, so
+    /// a continuation Gemini never produces stalls like a prompt does.
+    pub(super) tool_response_at: Option<Instant>,
+    /// How many prompts have gone out in this interview, so a replacement's
+    /// log line can name the one it found still owed. The briefing that asks a
+    /// new socket for that reply is a prompt too and gets its own number.
+    pub(super) prompt_sequence: u64,
     pub(super) last_agent_speech: Instant,
     pub(super) last_nudge: Instant,
     pub(super) last_review: Instant,
@@ -118,6 +157,18 @@ pub(super) struct RuntimeActivity {
 pub(super) struct WatchPrompt {
     pub(super) text: String,
     pub(super) behavioral_nudge: bool,
+    /// An editor review, which may rightly get no answer at all.
+    pub(super) allows_silence: bool,
+}
+
+/// What a watch tick found stalled. See `RuntimeActivity::settle_stalls`.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct Stalls {
+    /// A prompt got no output in time and the floor went back to the
+    /// candidate.
+    pub(super) prompt_released: bool,
+    /// A held `GoAway` may be spent now rather than waiting on output.
+    pub(super) spend_restart: bool,
 }
 
 /// Whether a pause landing now leaves output still on its way.
@@ -153,6 +204,13 @@ impl RuntimeActivity {
             last_code_change: now,
             last_user_speech: now,
             awaiting_reply_since: None,
+            prompted_at: None,
+            prompt_allows_silence: false,
+            prompt_behind_turn: false,
+            prompt_text: None,
+            generating: false,
+            tool_response_at: None,
+            prompt_sequence: 0,
             last_agent_speech: now,
             last_nudge: now,
             last_review: now,
@@ -188,6 +246,142 @@ impl RuntimeActivity {
         self.floor = Floor::Speaking;
     }
 
+    /// A prompt just went out: the floor is the agent's, and a reply is owed
+    /// until Gemini produces something for it. `allows_silence` is a prompt,
+    /// like an editor review, that may rightly be answered with nothing.
+    ///
+    /// `text` is what a replacement would be told is owed if this goes
+    /// unanswered: the prompt itself, or `None` for one with nothing of its own
+    /// to name.
+    pub(super) fn mark_prompted(&mut self, now: Instant, text: Option<&str>, allows_silence: bool) {
+        self.prompt_sequence += 1;
+        self.prompt_behind_turn = self.generating;
+        self.mark_speaking();
+        self.prompted_at = Some(now);
+        self.prompt_allows_silence = allows_silence;
+        self.prompt_text = text.map(str::to_string);
+    }
+
+    /// A tool response just went out, and Gemini owes its continuation.
+    pub(super) fn note_tool_response(&mut self, now: Instant) {
+        self.tool_response_outstanding = true;
+        self.tool_response_at = Some(now);
+    }
+
+    /// A reply is owed for a prompt that is not on the wire any more, as when
+    /// a recovery briefing failed to send. The floor is left alone: nothing is
+    /// generating, and holding it would only silence the watcher until the
+    /// dead socket's close is reported.
+    ///
+    /// `text` is what is owed, when known. It replaces whatever an earlier,
+    /// answered prompt left, which the next briefing would otherwise present
+    /// as unanswered.
+    pub(super) fn owe_prompt(&mut self, now: Instant, text: Option<String>) {
+        self.prompt_text = text;
+        self.prompted_at = Some(now);
+        self.prompt_allows_silence = false;
+        self.prompt_behind_turn = false;
+    }
+
+    /// What a prompt still owes, to hold across an event that must not settle
+    /// it; see `restore_prompt_debt`.
+    ///
+    /// Whether silence answers it is not held: nothing it is held across
+    /// changes that.
+    pub(super) fn prompt_debt(&self) -> (Option<Instant>, Floor) {
+        (self.prompted_at, self.floor)
+    }
+
+    /// Puts back what `prompt_debt` held, when the event it was held across
+    /// belonged to an earlier generation.
+    ///
+    /// The floor comes back with an owed prompt: one that took the floor can
+    /// only stall while it holds it.
+    pub(super) fn restore_prompt_debt(&mut self, (prompted_at, floor): (Option<Instant>, Floor)) {
+        self.prompted_at = prompted_at;
+        if prompted_at.is_some() {
+            self.floor = floor;
+        }
+    }
+
+    /// A prompt is still owed an answer: one went out, got no output, and was
+    /// not one silence answers.
+    pub(super) fn owes_prompt(&self) -> bool {
+        self.prompted_at.is_some() && !self.prompt_allows_silence
+    }
+
+    /// Gemini produced output, so whatever it was prompted with is answered,
+    /// unless the output still belongs to the generation before the prompt.
+    ///
+    /// Output also disarms a tool continuation's stall: the continuation has
+    /// begun, and releasing it mid-turn would let a pending close start the
+    /// wrap-up before the continuation finishes.
+    pub(super) fn note_output(&mut self) {
+        self.generating = true;
+        self.tool_response_at = None;
+        if !self.prompt_behind_turn {
+            self.prompted_at = None;
+        }
+    }
+
+    /// A generation ended. One the prompt went out behind is simply over, and
+    /// the next is the prompt's own. The prompt's own ending with nothing said
+    /// is Gemini answering with silence: no reply is owed for it, and replaying
+    /// it on a replacement would repeat the question it chose not to ask.
+    pub(super) fn note_turn_boundary(&mut self) {
+        self.generating = false;
+        if std::mem::take(&mut self.prompt_behind_turn) {
+            return;
+        }
+        self.prompted_at = None;
+    }
+
+    /// Whether a replaced socket leaves the interviewer owing a reply: the
+    /// candidate finished and heard nothing back, a prompt got no output, or
+    /// a tool response still needs its continuation.
+    pub(super) fn owes_reply(&self) -> bool {
+        self.reply_in_flight() || self.owes_prompt() || self.tool_response_outstanding
+    }
+
+    /// Hands the floor back when a prompt has gone `PROMPT_STALL` without any
+    /// output, and says what the watch tick may do about it. The reply stays
+    /// owed either way: a replacement socket answers it. Not while earlier
+    /// audio still plays, which is the floor's business, not the prompt's.
+    ///
+    /// The candidate's own turn stalls the same way without any prompt: they
+    /// finish, Gemini sends nothing, and a `GoAway` deferred on that pending
+    /// reply has no later event to be spent on. So does a tool response Gemini
+    /// never continues from, which `take_if_due` would otherwise wait on until
+    /// the socket drops; it becomes an owed prompt, so the replacement still
+    /// answers. All of them let a held advisory go, which is what keeps the
+    /// socket from being dropped by the server from an older checkpoint.
+    pub(super) fn settle_stalls(&mut self, now: Instant, audio_playing: bool) -> Stalls {
+        let stalled =
+            |at: Option<Instant>| at.is_some_and(|at| now.duration_since(at) >= PROMPT_STALL);
+
+        // A candidate turn that superseded the prompt is owed the same way:
+        // with nothing generating, the floor the prompt took is held for it,
+        // and only this releases it.
+        let owed_at = self
+            .prompted_at
+            .or(self.awaiting_reply_since.filter(|_| !self.generating));
+        let prompt_released = self.floor == Floor::Speaking && !audio_playing && stalled(owed_at);
+        if prompt_released {
+            self.mark_listening();
+        }
+        let tool_released = self.tool_response_outstanding && stalled(self.tool_response_at);
+        if tool_released {
+            self.tool_response_outstanding = false;
+            if let Some(at) = self.tool_response_at.take() {
+                self.owe_prompt(at, None);
+            }
+        }
+        Stalls {
+            prompt_released,
+            spend_restart: prompt_released || tool_released || stalled(self.awaiting_reply_since),
+        }
+    }
+
     /// Gemini owes a reply it has not begun to deliver.
     ///
     /// The second reader of `awaiting_reply_since`, and the reason its
@@ -214,15 +408,22 @@ impl RuntimeActivity {
     /// every fragment. `awaiting_reply_since` is the start of a measurable
     /// wait, and it exists only while there is a wait to measure.
     ///
-    /// Not armed while the agent holds the floor. Input transcription lags the
+    /// Not armed while Gemini is producing. Input transcription lags the
     /// audio it describes, so a fragment covering the tail of what the
     /// candidate said can land after the reply has already begun. Arming on
     /// that one made the next chunk of a turn already in progress announce
     /// itself as the reply starting, measured from a moment nobody waited from.
+    /// A prompt that has produced nothing yet is not a reply under way, so the
+    /// candidate speaking over it is their turn to answer.
     pub(super) fn note_candidate_finished(&mut self, now: Instant) {
         self.last_user_speech = now;
-        if self.floor != Floor::Speaking {
+        if !self.generating {
             self.awaiting_reply_since = Some(now);
+
+            // The candidate has moved on past a prompt that went unanswered, so
+            // their turn is what is owed now. Left set, a replacement minutes
+            // later is told to answer a prompt nobody is waiting on.
+            self.prompted_at = None;
         }
     }
 
@@ -344,6 +545,7 @@ impl RuntimeActivity {
             return Some(WatchPrompt {
                 text: with_timer(state, behavioral_silence_nudge()),
                 behavioral_nudge: true,
+                allows_silence: false,
             });
         }
         let excerpt = changed_excerpt(&state.language, &state.code_shown, &state.code);
@@ -375,14 +577,18 @@ impl RuntimeActivity {
         // both are one-shot HTTP calls, and the interim prompt is handed to a
         // spawned task that never sees the ledger.
         self.unsent_watch = Some(unsent);
-        let text = if decision.silence_nudge {
-            silence_nudge(&evidence, excerpt.as_deref())
+
+        // Named by the branch that wrote the text, so the flag cannot describe
+        // a different prompt from the one sent.
+        let (text, allows_silence) = if decision.silence_nudge {
+            (silence_nudge(state, &evidence, excerpt.as_deref()), false)
         } else {
-            proactive_review(&evidence, excerpt.as_deref())
+            (proactive_review(state, &evidence, excerpt.as_deref()), true)
         };
         Some(WatchPrompt {
             text: with_timer(state, text),
             behavioral_nudge: false,
+            allows_silence,
         })
     }
 

@@ -20,7 +20,7 @@ use ::livekit::data_stream::api::StreamTextOptions;
 use ::livekit::prelude::Room;
 
 use crate::agent::{
-    CANDIDATE_SPEAKER, INTERVIEWER_SPEAKER, ModelInputKind, RuntimeState, SpeakerTurn,
+    CANDIDATE_SPEAKER, INTERVIEWER_SPEAKER, ModelInputKind, RuntimeState, SpeakerTurn, TestRunNote,
     framework_progress, phase_id, read_editor_text, record_framework_evidence, released_follow_ups,
     unrecorded_earlier_phases, with_timer, wrap_up,
 };
@@ -59,6 +59,20 @@ pub(super) async fn send_model_text(
     gemini.send_text(text).await
 }
 
+/// `send_model_text` for ordered context rather than realtime text: counted
+/// the same way, sent as a `clientContent` turn that asks for a reply only
+/// when `turn_complete`.
+pub(super) async fn send_model_context(
+    gemini: &mut GeminiLiveSession,
+    state: &mut RuntimeState,
+    kind: ModelInputKind,
+    text: &str,
+    turn_complete: bool,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    state.evidence_ledger.record_model_input(kind, text);
+    gemini.send_context(text, turn_complete).await
+}
+
 pub(super) struct GeminiEventContext<'a> {
     pub(super) output_audio: &'a mut OutputAudio,
     pub(super) gemini: &'a mut GeminiLiveSession,
@@ -84,6 +98,115 @@ enum OutputDisposition {
     EndsTheDiscard,
 }
 
+/// Time since the interview started, on every line a repeated-step timeline
+/// is read from, so the server log lines up with the interview timer a
+/// candidate reports against. To the millisecond, because a test result, a
+/// `GoAway` and a replacement can all land inside one second, and their order
+/// is the question.
+pub(super) fn log_clock(state: &RuntimeState) -> String {
+    clock(state.started_at.elapsed())
+}
+
+/// `m:ss.mmm`, split from the reading of the clock so a test can pin it.
+pub(super) fn clock(elapsed: Duration) -> String {
+    let seconds = elapsed.as_secs();
+    format!(
+        "{}:{:02}.{:03}",
+        seconds / 60,
+        seconds % 60,
+        elapsed.subsec_millis()
+    )
+}
+
+/// What a `tests:` log line reports about one result: the counts, whether it
+/// earned credit and how it compares, whether the credited run still covers
+/// the editor, and whether a reaction was asked for. `None` is a packet
+/// dropped before it was judged, during a pause, in the behavioral round, or
+/// one that ran nothing; the counts on record are then the previous run's, so
+/// none are printed.
+pub(super) struct TestRunLine<'a> {
+    pub(super) run: Option<&'a serde_json::Value>,
+    pub(super) note: Option<TestRunNote>,
+    pub(super) credited_run_is_current: bool,
+    pub(super) reacted: bool,
+    pub(super) ended: bool,
+}
+
+impl std::fmt::Display for TestRunLine<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Some(note) = self.note else {
+            return f.write_str("outcome=dropped");
+        };
+        let count = |key| {
+            self.run
+                .and_then(|run| run.get(key))
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(0)
+        };
+        let outcome = if self.reacted {
+            "reaction_requested"
+        } else if self.ended {
+            "ended"
+        } else {
+            "cooldown"
+        };
+        write!(
+            f,
+            "passed={} total={} credited={} credited_run_is_current={} outcome={outcome}",
+            count("passed"),
+            count("total"),
+            note.credited
+                .map_or_else(|| "no".to_string(), |since| format!("{since:?}")),
+            self.credited_run_is_current,
+        )
+    }
+}
+
+/// The `prompt:` line for a prompt that reached the socket, `source` naming
+/// what sent it.
+pub(super) fn prompt_line(
+    state: &RuntimeState,
+    activity: &RuntimeActivity,
+    source: &str,
+    room: &str,
+) -> String {
+    format!(
+        "prompt: at={} {source} {} room={room}",
+        log_clock(state),
+        prompt_fields(state, activity)
+    )
+}
+
+/// The shared fields of every `prompt:` log line, after the caller's label:
+/// its number, and the progress it was sent against.
+pub(super) fn prompt_fields(state: &RuntimeState, activity: &RuntimeActivity) -> String {
+    format!(
+        "id={} test_runs={} evidenced={}",
+        activity.prompt_sequence,
+        state.test_runs,
+        framework_progress(state).join(",")
+    )
+}
+
+/// Whether an event is Gemini actually answering what it was prompted with.
+///
+/// Not every output event is. A `TurnComplete` or `Interrupted` can belong to
+/// the generation before the prompt, empty audio and blank text say nothing,
+/// and usage is billing; letting any of those settle a prompt leaves no reply
+/// owed when the socket is replaced before the real answer.
+pub(super) fn answers_prompt(event: &GeminiEvent) -> bool {
+    match event {
+        GeminiEvent::Audio { bytes, .. } => !bytes.is_empty(),
+        GeminiEvent::ToolCall(_) => true,
+        GeminiEvent::Text(text) | GeminiEvent::OutputTranscript(text) => !text.trim().is_empty(),
+        GeminiEvent::Usage(_)
+        | GeminiEvent::InputTranscript(_)
+        | GeminiEvent::TurnComplete
+        | GeminiEvent::Interrupted
+        | GeminiEvent::GoAway { .. } => false,
+    }
+}
+
 /// Split out of `handle_gemini_event` because it is the whole of what that
 /// function decides before dispatching, and none of it needs a room, a socket
 /// or an await. It is also the rule a restart has to get right: the discard
@@ -94,7 +217,7 @@ fn output_disposition(event: &GeminiEvent, discarding: bool, paused: bool) -> Ou
         event,
         GeminiEvent::Audio { .. } | GeminiEvent::OutputTranscript(_)
     );
-    let ends_turn = matches!(event, GeminiEvent::TurnComplete | GeminiEvent::Interrupted);
+    let ends_turn = ends_turn(event);
 
     if discarding {
         if is_output {
@@ -114,6 +237,11 @@ fn output_disposition(event: &GeminiEvent, discarding: bool, paused: bool) -> Ou
     OutputDisposition::Deliver
 }
 
+/// A turn ending, whichever way it ends.
+fn ends_turn(event: &GeminiEvent) -> bool {
+    matches!(event, GeminiEvent::TurnComplete | GeminiEvent::Interrupted)
+}
+
 /// Gemini said something. One arm each, because the arms share only the socket
 /// they arrived on: what a tool call has to do and what a cut-off turn has to
 /// undo have no step in common, and reading either one used to mean scrolling
@@ -124,16 +252,31 @@ pub(super) async fn handle_gemini_event(
     event: GeminiEvent,
     interruptible: Interruptible,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // The turn a discard ends belongs to the generation the pause cut off, so
+    // it answers nothing sent since; only delivered output settles a prompt. It
+    // is still dispatched, and an `Interrupted` there runs `cut_off_turn`,
+    // which would clear a resume prompt sent after the pause. That debt is held
+    // across the dispatch and put back.
+    let mut held_debt = None;
     match output_disposition(
         &event,
         context.activity.discarding_output,
         context.state.paused,
     ) {
         OutputDisposition::Drop => return Ok(()),
-        OutputDisposition::EndsTheDiscard => context.activity.discarding_output = false,
-        OutputDisposition::Deliver => {}
+        OutputDisposition::EndsTheDiscard => {
+            context.activity.discarding_output = false;
+            held_debt = Some(context.activity.prompt_debt());
+        }
+        OutputDisposition::Deliver => {
+            if answers_prompt(&event) {
+                context.activity.note_output();
+            } else if ends_turn(&event) {
+                context.activity.note_turn_boundary();
+            }
+        }
     }
-    match event {
+    let handled = match event {
         GeminiEvent::ToolCall(calls) => on_tool_calls(room, context, calls).await,
         GeminiEvent::OutputTranscript(text) => on_output_transcript(room, context, &text).await,
         GeminiEvent::InputTranscript(text) => {
@@ -156,7 +299,11 @@ pub(super) async fn handle_gemini_event(
         // `WRAP_UP_WAIT` and there is no socket left to replace.
         GeminiEvent::GoAway { .. } => Ok(()),
         _ => Ok(()),
+    };
+    if let Some(debt) = held_debt {
+        context.activity.restore_prompt_debt(debt);
     }
+    handled
 }
 
 /// Answers every call in the batch in one message, and republishes the
@@ -174,6 +321,27 @@ async fn on_tool_calls(
         .into_iter()
         .map(|call| {
             let response = execute_tool_call(context.state, &call);
+
+            // The phase as the checklist spells it, and only when it is one:
+            // the argument is model text, and the rest of the call stays out of
+            // the log for the reason the checklist carries no summary.
+            if call.name == TOOL_RECORD_FRAMEWORK_EVIDENCE {
+                let phase = call
+                    .args
+                    .get("phase")
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|phase| {
+                        crate::agent::REACTO_PHASE_IDS.contains(phase)
+                            || crate::agent::STAR_PHASE_IDS.contains(phase)
+                    })
+                    .unwrap_or("?");
+                eprintln!(
+                    "evidence: at={} phase={phase} accepted={} room={}",
+                    log_clock(context.state),
+                    response.get("error").is_none(),
+                    room.name()
+                );
+            }
             (call, response)
         })
         .collect::<Vec<_>>();
@@ -184,7 +352,7 @@ async fn on_tool_calls(
     match context.gemini.send_tool_responses(&answers).await {
         // Gemini now owes a generation for this, and will deliver it on this
         // socket or not at all.
-        Ok(()) => context.activity.tool_response_outstanding = true,
+        Ok(()) => context.activity.note_tool_response(Instant::now()),
         Err(error) => {
             eprintln!(
                 "Gemini tool response failed ({error}); waiting for the close to be reported"
@@ -559,17 +727,8 @@ fn tool_response(state: &mut RuntimeState, call: &GeminiFunctionCall) -> serde_j
         // clock.
         TOOL_END_INTERVIEW => {
             if !crate::agent::coding_round_complete(state) {
-                // The way to Test named for the state the gate is in: a Run
-                // button is no help while the runner is reported missing.
-                let way_to_test = if crate::agent::test_source(state)
-                    == crate::agent::TestSource::Trace
-                {
-                    "The runner cannot provide tests for this language, so ask the candidate to trace their code by hand and record Test from that trace"
-                } else {
-                    "If the candidate has not run the code now in the editor, invite them to click Run and wait for the results"
-                };
                 return serde_json::json!({
-                    "error": format!("The coding round has no Test and Optimizations evidence yet, so the interview is not finished. {way_to_test}; otherwise continue, and record evidence when the candidate earns it.")
+                    "error": crate::agent::end_interview_refusal(state)
                 });
             }
             if state.interview_loop == crate::agent::InterviewLoop::CodingBehavioral
@@ -677,7 +836,9 @@ pub(super) async fn send_wrap_up_and_wait(
         &farewell,
     )
     .await?;
-    context.activity.mark_speaking();
+    context
+        .activity
+        .mark_prompted(Instant::now(), Some(&farewell), false);
     let deadline = Instant::now() + WRAP_UP_WAIT;
     loop {
         if Instant::now() >= deadline {
@@ -761,6 +922,10 @@ pub(super) fn cut_off_turn(
     // without its own transcript measured from it: the same lie this field was
     // split out of `last_user_speech` to stop telling, one turn later.
     activity.awaiting_reply_since = None;
+
+    activity.prompted_at = None;
+    activity.prompt_behind_turn = false;
+    activity.generating = false;
 
     // The generation this was waiting for died with the turn.
     activity.tool_response_outstanding = false;

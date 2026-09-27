@@ -2133,6 +2133,10 @@ async fn the_reader_keeps_the_latest_handle_after_the_socket_closes() {
         session.resumption_handle().as_deref(),
         Some("handle-latest")
     );
+    assert!(
+        session.checkpoint_age().is_some(),
+        "a checkpoint this socket received is dated"
+    );
     server.await.unwrap();
 }
 
@@ -2163,6 +2167,11 @@ async fn a_resumed_session_keeps_its_handle_until_a_new_one_arrives() {
 
     assert_eq!(session.next_event().await, None);
     assert_eq!(session.resumption_handle().as_deref(), Some("handle-in"));
+    assert_eq!(
+        session.checkpoint_age(),
+        None,
+        "an inherited checkpoint is not one this socket can date"
+    );
     server.await.unwrap();
 }
 

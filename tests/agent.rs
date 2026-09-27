@@ -253,14 +253,14 @@ fn prompt_samples() -> Value {
         "languageChoice": language_choice("C++", LanguageChoiceContext::Start),
         "languageSwitch": language_choice("Java", LanguageChoiceContext::SwitchWithCode),
         "silenceBehavioral": behavioral_silence_nudge(),
-        "silenceEmpty": silence_nudge(&empty, None),
-        "silenceEarly": silence_nudge(&early, None),
-        "silenceWorking": silence_nudge(&working, Some(&excerpt)),
+        "silenceEmpty": silence_nudge(&RuntimeState::default(), &empty, None),
+        "silenceEarly": silence_nudge(&RuntimeState::default(), &early, None),
+        "silenceWorking": silence_nudge(&RuntimeState::default(), &working, Some(&excerpt)),
         "coldRestart": cold_restart(&cold_state),
         "coldRestartEmpty": cold_restart(&RuntimeState::default()),
-        "review": proactive_review(&working_changed, Some(&excerpt)),
-        "reviewWithoutExcerpt": proactive_review(&working, None),
-        "time": time_warning(false),
+        "review": proactive_review(&RuntimeState::default(), &working_changed, Some(&excerpt)),
+        "reviewWithoutExcerpt": proactive_review(&RuntimeState::default(), &working, None),
+        "time": time_warning(&RuntimeState::default()),
         "wrapCandidate": wrap_up("candidate_ended", false),
         "wrapTimer": wrap_up("time_up", false),
         "wrapBehavioral": wrap_up("time_up", true),
@@ -283,12 +283,14 @@ fn prompt_samples() -> Value {
         }),
         "interimSystem": interim_system_instruction(),
         "reportSystem": report_system_instruction(),
-        "testsPass": test_results_reaction("3/3 passed", true, TestRecord::Record, None),
+        "testsPass": test_results_reaction("3/3 passed", true, TestRecord::Record, None, &RuntimeState::default(), SincePrevious::Other,),
         "testsFail": test_results_reaction(
             "2/3 passed",
             false,
             TestRecord::Record,
             changed_excerpt("python", "", "def two_sum(nums, target):\n    return []").as_deref(),
+            &RuntimeState::default(),
+            SincePrevious::Other,
         ),
         "testsSetupError": test_setup_error_reaction("The runner could not start.", None),
         "logHint": log_hint_text(2),
@@ -393,31 +395,135 @@ fn prompt_samples() -> Value {
 
     // Outside the literal because more keys there pass the json! macro's
     // recursion limit. The map is sorted, so where a key is added changes
-    // nothing in the golden.
-    prompts["timeRunnerMissing"] = json!(time_warning(true));
+    // nothing in the golden. The warning offers a trace instead of a run when
+    // the browser cannot run the language on screen.
+    prompts["timeRunnerMissing"] = json!(time_warning(&RuntimeState {
+        language: "python".to_string(),
+        runner_unavailable: Some("python".to_string()),
+        ..RuntimeState::default()
+    }));
+
+    // The states the #66 prompts differ on: a run of the code on screen, and
+    // that run with the coding gate passed.
+    let tested_state = RuntimeState {
+        last_test_run: Some(json!({"language": "python", "passed": 3, "total": 3})),
+        test_runs: 1,
+        tested_code: Some(TestedCode {
+            language: "python".to_string(),
+            code: "def two_sum(nums, target):".to_string(),
+        }),
+        code: "def two_sum(nums, target):".to_string(),
+        ..RuntimeState::default()
+    };
+    let mut solved_state = tested_state.clone();
+    record_framework_evidence(
+        &mut solved_state,
+        &json!({"phase": "optimizations", "source": "candidate_speech", "kind": "observed",
+            "confidence": 90, "summary": "candidate completed optimizations"}),
+    )
+    .unwrap();
+    let mut both = solved_state.clone();
+    record_framework_evidence(
+        &mut both,
+        &json!({"phase": "test", "source": "test_event", "kind": "observed",
+            "confidence": 90, "summary": "candidate completed test"}),
+    )
+    .unwrap();
+    let solved_state = both;
+    let behavioral_state = RuntimeState {
+        behavioral_round_started: true,
+        ..RuntimeState::default()
+    };
+    for (name, prompt) in [
+        ("silenceTested", silence_nudge(&tested_state, "", None)),
+        ("silenceSolved", silence_nudge(&solved_state, "", None)),
+        (
+            "silenceSetupError",
+            silence_nudge(
+                &RuntimeState {
+                    last_test_run: Some(json!({"setupError": "runner unavailable"})),
+                    tested_code: None,
+                    ..tested_state.clone()
+                },
+                "",
+                None,
+            ),
+        ),
+        ("reviewTested", proactive_review(&tested_state, "", None)),
+        ("timeTested", time_warning(&tested_state)),
+        ("timeSolved", time_warning(&solved_state)),
+        (
+            "resumedContext",
+            resumed_context(&tested_state, false, None),
+        ),
+        (
+            "resumedContextReply",
+            resumed_context(&tested_state, true, None),
+        ),
+        (
+            "resumedContextSolved",
+            resumed_context(&solved_state, false, None),
+        ),
+        (
+            "resumedContextBehavioral",
+            resumed_context(&behavioral_state, false, None),
+        ),
+        (
+            "testsPassAnalysed",
+            test_results_reaction(
+                "3/3 passed",
+                true,
+                TestRecord::Settled,
+                None,
+                &solved_state,
+                SincePrevious::Unchanged,
+            ),
+        ),
+        (
+            "testsPassRewritten",
+            test_results_reaction(
+                "3/3 passed",
+                true,
+                TestRecord::Settled,
+                None,
+                &solved_state,
+                SincePrevious::Rewritten,
+            ),
+        ),
+    ] {
+        prompts[name] = json!(prompt);
+    }
     prompts["testsPassRunAgain"] = json!(test_results_reaction(
         "3/3 passed",
         true,
         TestRecord::RunAgain,
-        None
+        None,
+        &RuntimeState::default(),
+        SincePrevious::Other,
     ));
     prompts["testsRecordEarlier"] = json!(test_results_reaction(
         "3/3 passed",
         true,
         TestRecord::RecordEarlier,
-        None
+        None,
+        &RuntimeState::default(),
+        SincePrevious::Other,
     ));
     prompts["testsFailNotRecordable"] = json!(test_results_reaction(
         "2/3 passed",
         false,
         TestRecord::Settled,
-        None
+        None,
+        &RuntimeState::default(),
+        SincePrevious::Other,
     ));
     prompts["testsFailRunAgain"] = json!(test_results_reaction(
         "2/3 passed",
         false,
         TestRecord::RunAgain,
-        None
+        None,
+        &RuntimeState::default(),
+        SincePrevious::Other,
     ));
     prompts["testsRunnerUnavailable"] = json!(test_runner_unavailable_reaction(
         "Compiler Explorer returned HTTP 503.",
@@ -511,10 +617,25 @@ fn past_the_coding_round(state: &mut RuntimeState) {
 /// round transition's completion gate opens the behavioral round.
 fn past_the_coding_gate(state: &mut RuntimeState) {
     past_the_coding_round(state);
+    record_coding_gate_evidence(state);
+}
+
+/// Test and Optimizations evidence, which is what the coding completion gate
+/// reads, with the run Test needs received first. The state needs code in the
+/// editor for either to be accepted.
+fn record_coding_gate_evidence(state: &mut RuntimeState) {
     receive_test_run(state);
     for phase in ["test", "optimizations"] {
         record_framework_evidence(state, &json!({"phase": phase, "source": observed_source(phase), "kind": "observed", "confidence": 90, "summary": format!("candidate completed {phase}")})).unwrap();
     }
+}
+
+/// Reports a test run of the code `state` holds, as the page submits it.
+fn run_tests(state: &mut RuntimeState, passed: i64, total: i64) -> DataEventResult {
+    let packet = json!({
+        "language": state.language, "passed": passed, "total": total, "code": state.code,
+    });
+    apply_data_event(state, TOPIC_TEST_RESULTS, &packet, 100.0)
 }
 
 fn evaluation_reaction(case: &Value, state: &mut RuntimeState) -> String {
@@ -534,8 +655,8 @@ fn evaluation_reaction(case: &Value, state: &mut RuntimeState) -> String {
         assert_eq!(state.code, code);
     }
     match reaction["kind"].as_str().expect("reaction kind is text") {
-        "silence" => silence_nudge("", changed_excerpt("python", "", code).as_deref()),
-        "proactive" => proactive_review("", changed_excerpt("python", "", code).as_deref()),
+        "silence" => silence_nudge(state, "", changed_excerpt("python", "", code).as_deref()),
+        "proactive" => proactive_review(state, "", changed_excerpt("python", "", code).as_deref()),
         "tests_failed" | "tests_passed" => {
             let all_passed = reaction["kind"] == "tests_passed";
             let before = state.test_runs;

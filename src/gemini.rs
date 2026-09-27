@@ -119,6 +119,10 @@ pub struct GeminiLiveSession {
     /// the last events were drained, when the caller has to decide whether it
     /// can resume.
     resumption: Arc<Mutex<Option<String>>>,
+    /// When this socket last received a resumable checkpoint. A resumed
+    /// replacement starts from that moment, so its age is how much of the
+    /// interview the replacement cannot remember on its own.
+    checkpoint_at: Arc<Mutex<Option<std::time::Instant>>>,
     credential: Option<String>,
     failure: Arc<Mutex<Option<CredentialFailure>>>,
     /// Set by a write that timed out or failed. The frame it was sending may
@@ -153,6 +157,28 @@ impl GeminiLiveSession {
         self.send_json(realtime_text_message(text)).await
     }
 
+    /// Reconciles a resumed checkpoint by appending to the conversation. With
+    /// `turn_complete` false it only adds to what the model knows; true asks
+    /// for a reply, for a turn the replaced socket owed. `clientContent` rather
+    /// than `realtimeInput` because it is appended to the history as a turn and
+    /// starts no generation unless asked to, where realtime text is live input
+    /// the model answers. The Live API does not order the two against each
+    /// other, so candidate audio arriving with a briefing may be answered
+    /// before the briefing is read; it still holds for the turn after.
+    pub async fn send_context(
+        &mut self,
+        text: &str,
+        turn_complete: bool,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.send_json(json!({
+            "clientContent": {
+                "turns": [{"role": "user", "parts": [{"text": text}]}],
+                "turnComplete": turn_complete,
+            }
+        }))
+        .await
+    }
+
     pub async fn send_audio_pcm_16khz(
         &mut self,
         bytes: &[u8],
@@ -185,6 +211,15 @@ impl GeminiLiveSession {
     /// How long this socket has been up.
     pub fn age(&self) -> Duration {
         self.opened_at.elapsed()
+    }
+
+    /// How long ago this socket last received a resumable checkpoint, or
+    /// `None` if it has received none of its own.
+    pub fn checkpoint_age(&self) -> Option<Duration> {
+        self.checkpoint_at
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .map(|at| at.elapsed())
     }
 
     /// The most recent resumable checkpoint the server offered, or `None` if
@@ -995,6 +1030,8 @@ async fn open_live_session_redacted_at(
     // reconnect into the cold start this exists to avoid.
     let resumption = Arc::new(Mutex::new(resume.map(str::to_string)));
     let handles = Arc::clone(&resumption);
+    let checkpoint_at = Arc::new(Mutex::new(None));
+    let checkpoints = Arc::clone(&checkpoint_at);
     let failure = Arc::new(Mutex::new(None));
     let closed_with = Arc::clone(&failure);
     let reader = tokio::spawn(async move {
@@ -1058,6 +1095,9 @@ async fn open_live_session_redacted_at(
             let message = parse_server_message(&text);
             if let Some(handle) = message.resumption_handle {
                 *handles.lock().unwrap_or_else(|error| error.into_inner()) = Some(handle);
+                *checkpoints
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner()) = Some(std::time::Instant::now());
             }
             for event in message.events {
                 // Bounded on purpose: a stalled main loop must slow the socket
@@ -1073,6 +1113,7 @@ async fn open_live_session_redacted_at(
         reader,
         events,
         resumption,
+        checkpoint_at,
         credential: None,
         failure,
         opened_at: std::time::Instant::now(),

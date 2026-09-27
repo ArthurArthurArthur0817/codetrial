@@ -7,13 +7,13 @@
 
 use super::{
     DataEventResult, INTERVIEWER_SPEAKER, InterviewLoop, LanguageChoiceContext,
-    LifecycleTransition, MAX_INTEGRITY_EVENTS, ROUND_TRANSITION_SKEW, RuntimeState, TIME_WARNING_S,
-    TestRecord, TestSource, analyze_code, analyze_code_cached, behavioral_time_warning,
-    changed_excerpt, cold_restart, format_test_run_for_reaction, integrity_hash, language_choice,
-    observe_code, observe_code_cached, python_truthy, resume, round_skipped, round_started,
-    sanitize_integrity_event, sanitize_test_run, spoken_language, test_reaction_decision,
-    test_results_reaction, test_runner_unavailable_reaction, test_setup_error_reaction,
-    time_warning,
+    LifecycleTransition, MAX_INTEGRITY_EVENTS, ROUND_TRANSITION_SKEW, RuntimeState, SincePrevious,
+    TIME_WARNING_S, TestRecord, TestSource, analyze_code, analyze_code_cached,
+    behavioral_time_warning, changed_excerpt, cold_restart, format_test_run_for_reaction,
+    integrity_hash, language_choice, observe_code, observe_code_cached, python_truthy, resume,
+    round_skipped, round_started, sanitize_integrity_event, sanitize_test_run, spoken_language,
+    test_reaction_decision, test_results_reaction, test_runner_unavailable_reaction,
+    test_setup_error_reaction, time_warning,
 };
 use crate::runtime::{TOPIC_CODE_UPDATE, TOPIC_CONTROL, TOPIC_INTEGRITY, TOPIC_TEST_RESULTS};
 
@@ -411,18 +411,41 @@ fn apply_test_results(
         .and_then(serde_json::Value::as_str)
         .zip(raw.get("language").and_then(serde_json::Value::as_str))
         .filter(|(_, language)| offered_language(language).is_some());
-    let mut credited = false;
+
+    // How a credited run's code compares, read before it replaces the last
+    // credited run: a rerun of the same code is a repeat of the result already
+    // reacted to, and a rewrite since the complexity was recorded makes that
+    // analysis stale. `None` is a run that earned no credit.
+    let mut since_previous = None;
     if let Some((code, language)) = submitted
-        && !setup_error
-        && total > 0
+        && super::real_test_run(payload)
         && super::written_in(state, language, code)
     {
+        // The rewrite is judged first: a rerun of rewritten code whose first
+        // run failed was reacted to about the failure, not the analysis, so
+        // calling it a repeat would drop the question for good.
+        let analysed = match &state.analysis {
+            Some(super::Analysis::Of(analysed)) => Some(analysed),
+            _ => None,
+        };
+        since_previous = Some(match (&state.tested_code, analysed) {
+            (_, Some(analysed)) if super::rewritten(analysed, language, code) => {
+                SincePrevious::Rewritten
+            }
+            (Some(previous), _) if super::covers(previous, language, code) => {
+                SincePrevious::Unchanged
+            }
+            _ => SincePrevious::Other,
+        });
         state.tested_code = Some(super::TestedCode {
             language: language.to_string(),
             code: code.to_string(),
         });
-        credited = true;
+        if state.analysis == Some(super::Analysis::AwaitingRun) {
+            state.analysis = state.tested_code.clone().map(super::Analysis::Of);
+        }
     }
+    let credited = since_previous.is_some();
 
     // Only a run that failed to start can say its runner is missing: a packet
     // claiming both executed cases and an absent runner is believed on the
@@ -472,8 +495,14 @@ fn apply_test_results(
         since_last_test_reaction_seconds,
         record == TestRecord::Record || newly_unavailable,
     );
+    let note = Some(super::TestRunNote {
+        credited: since_previous,
+    });
     if !decision.react {
-        return DataEventResult::default();
+        return DataEventResult {
+            test_run: note,
+            ..DataEventResult::default()
+        };
     }
 
     let all_passed =
@@ -484,21 +513,36 @@ fn apply_test_results(
         state.code_shown = state.code.clone();
     }
 
+    // Held to the gate's own reading: an outage from a run in the language the
+    // candidate has since left is an ordinary setup error for the code on
+    // screen, and inviting a trace there invites a record the gate refuses.
+    let reply = if trace_open {
+        test_runner_unavailable_reaction(&summary, excerpt.as_deref())
+    } else if setup_error {
+        test_setup_error_reaction(&summary, excerpt.as_deref())
+    } else {
+        test_results_reaction(
+            &summary,
+            all_passed,
+            record,
+            excerpt.as_deref(),
+            state,
+            since_previous.unwrap_or(SincePrevious::Other),
+        )
+    };
+
+    // A passing reaction to a rewrite asks whether the analysis still holds,
+    // and asks it once: the code it asked about is what the analysis now
+    // describes, and the answer is the model's to record. A failing one asks
+    // nothing about the analysis, so the rerun after the fix still does.
+    if !trace_open && all_passed && since_previous == Some(SincePrevious::Rewritten) {
+        state.analysis = state.tested_code.clone().map(super::Analysis::Of);
+    }
     DataEventResult {
         update_last_test_reaction: decision.update_last_test_reaction,
         update_last_interjection: decision.update_last_interjection,
-
-        // Held to the gate's own reading: an outage from a run in the language
-        // the candidate has since left is an ordinary setup error for the code
-        // on screen, and inviting a trace there invites a record the gate
-        // refuses.
-        generate_reply: Some(if trace_open {
-            test_runner_unavailable_reaction(&summary, excerpt.as_deref())
-        } else if setup_error {
-            test_setup_error_reaction(&summary, excerpt.as_deref())
-        } else {
-            test_results_reaction(&summary, all_passed, record, excerpt.as_deref())
-        }),
+        generate_reply: Some(reply),
+        test_run: note,
         ..DataEventResult::default()
     }
 }
@@ -572,12 +616,19 @@ fn control_pause(
     // Jim who remembers the conversation, and after a cold restart there is
     // none to continue from.
     let cold_brief = !paused && std::mem::take(&mut state.needs_cold_brief);
+    let owed_reply = if paused {
+        None
+    } else {
+        state.owed_reply_on_resume.take()
+    };
     DataEventResult {
         pause_changed: Some(paused),
         generate_reply: (!paused).then(|| {
             if cold_brief {
                 state.code_shown = state.code.clone();
                 cold_restart(state)
+            } else if let Some(owed_reply) = owed_reply {
+                format!("{} {owed_reply}", resume(state.behavioral_round_started))
             } else {
                 resume(state.behavioral_round_started)
             }
@@ -651,10 +702,7 @@ fn control_time_warning(state: &mut RuntimeState) -> DataEventResult {
         generate_reply: Some(if state.behavioral_round_started {
             behavioral_time_warning()
         } else {
-            time_warning(
-                super::test_source(state) == TestSource::Trace
-                    && !super::phases_evidenced(state, &[super::FrameworkPhase::Test]),
-            )
+            time_warning(state)
         }),
         ..DataEventResult::default()
     }

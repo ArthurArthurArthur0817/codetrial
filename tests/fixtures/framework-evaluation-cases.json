@@ -4,7 +4,7 @@
     {
       "id": "ideal-reacto",
       "coverage": ["ideal-reacto"],
-      "reaction": {"kind": "tests_passed", "code": "def two_sum(nums, target): return [0, 1]", "required": ["move to Optimizations", "adversarial edge case", "not proof"], "forbidden": ["log_hint", "Begin STAR"]},
+      "reaction": {"kind": "tests_passed", "code": "def two_sum(nums, target): return [0, 1]", "required": ["Complexity and edge cases are already covered", "do not ask for complexity, edge cases or another run", "not proof"], "forbidden": ["log_hint", "Begin STAR", "move to Optimizations", "adversarial edge case"]},
       "transcript": "Candidate restated distinct indices, traced [2,7], explained a one-pass map, coded it, predicted the duplicate test, and justified O(n) time and space.",
       "evidence": [
         {"phase":"repeat","source":"candidate_speech","kind":"observed","confidence":95,"summary":"Restated inputs, outputs, and distinct-index constraint."},

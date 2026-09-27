@@ -238,6 +238,11 @@ if (!Number.isSafeInteger(soakSeconds) || soakSeconds < 0) {
 /// replacement kept the conversation.
 const CONNECTION_CAP_SECONDS = 600;
 
+/// How long a replacement may take to say something once it has resumed,
+/// past the soak's own deadline. The handover itself can take the rest of a
+/// `GoAway`'s notice plus a stalled reply's twenty seconds.
+const RESUME_GRACE_MS = 45_000;
+
 /// What the runtime says as it hands one interview between two sockets, matched
 /// literally because presence cannot tell any of these apart: the interviewer
 /// stays in the room through all of them, including the one that lost the
@@ -246,6 +251,7 @@ const HANDOVER_SIGNALS = {
   goAway: "Gemini requested a transport restart in",
   resumed: "Gemini session resumed; the interview continues where it left off",
   degraded: "Gemini session restart degraded",
+  expired: "goaway expired:",
 };
 
 function redact(text) {
@@ -368,7 +374,12 @@ async function soakInterview(page, roomName, agentIdentity, agentOutput) {
   // Latched on the way past rather than read at the end: agentOutput is a
   // rolling window, so whatever the agent logs over the rest of the soak can
   // evict the line this is looking for.
-  const seen = { goAway: false, resumed: false, degraded: false };
+  const seen = {
+    goAway: false,
+    resumed: false,
+    degraded: false,
+    expired: false,
+  };
   let turnsAtHandover = null;
 
   while (Date.now() < deadline) {
@@ -393,9 +404,20 @@ async function soakInterview(page, roomName, agentIdentity, agentOutput) {
       );
     }
 
-    // Sampled when the handover is first seen, so the growth asserted below is
-    // growth after it and not the turns that came before.
-    if (seen.goAway && turnsAtHandover === null) {
+    // A held GoAway the server outran: the resume then starts from an older
+    // checkpoint than the handover would have used, which is how a test run or
+    // an answer goes missing across the swap (issue #66).
+    if (seen.expired) {
+      throw new Error(
+        `the server closed the socket before a held GoAway was spent during ${soakSeconds}s soak`,
+      );
+    }
+
+    // Sampled when the resume is first seen, so the growth asserted below is
+    // growth on the new socket. Sampling at the GoAway counted what the old
+    // socket said while the advisory was held, which proves nothing about
+    // the replacement.
+    if (seen.resumed && turnsAtHandover === null) {
       turnsAtHandover = await transcriptTurns(page);
     }
   }
@@ -415,7 +437,15 @@ async function soakInterview(page, roomName, agentIdentity, agentOutput) {
   // A resumption that nothing was said across is not one anybody would notice
   // working. Jim nudges an idle candidate, so turns keep arriving without the
   // browser speaking.
-  const turnsAtEnd = await transcriptTurns(page);
+  // A resume first seen on the last tick has had no time to say anything, so
+  // the replacement gets a bounded window of its own before its silence
+  // counts against it.
+  let turnsAtEnd = await transcriptTurns(page);
+  const graceUntil = Date.now() + RESUME_GRACE_MS;
+  while (turnsAtEnd <= turnsAtHandover && Date.now() < graceUntil) {
+    await sleep(3000);
+    turnsAtEnd = await transcriptTurns(page);
+  }
   if (turnsAtEnd <= turnsAtHandover) {
     throw new Error(
       `the interview said nothing after the handover: ${turnsAtHandover} turns before, ${turnsAtEnd} after`,
