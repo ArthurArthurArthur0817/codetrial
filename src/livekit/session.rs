@@ -177,11 +177,20 @@ async fn on_tool_calls(
             (call, response)
         })
         .collect::<Vec<_>>();
-    context.gemini.send_tool_responses(&answers).await?;
 
-    // Gemini now owes a generation for this, and will deliver it on this socket
-    // or not at all.
-    context.activity.tool_response_outstanding = true;
+    // Not `?`. A response that did not go out is owed nothing back, so the flag
+    // stays down, and the socket it failed on is replaced when its close is
+    // reported; the checklist below still reflects the calls.
+    match context.gemini.send_tool_responses(&answers).await {
+        // Gemini now owes a generation for this, and will deliver it on this
+        // socket or not at all.
+        Ok(()) => context.activity.tool_response_outstanding = true,
+        Err(error) => {
+            eprintln!(
+                "Gemini tool response failed ({error}); waiting for the close to be reported"
+            );
+        }
+    }
     if checklist_changed(&shown_before, context.state) {
         publish_framework_progress(room, context.state).await?;
     }
