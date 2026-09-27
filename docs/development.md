@@ -68,6 +68,10 @@ files. The generated problem-card section in `web/index.html` has a
 changing the generator's output. As with the other formatter lanes, an absent
 Prettier is reported and skipped locally; CI installs it through `npm ci`.
 
+The commits that only reformatted are listed in `.git-blame-ignore-revs`, so
+`git blame` skips them. GitHub reads the file on its own; a local blame needs
+`git config blame.ignoreRevsFile .git-blame-ignore-revs` once per clone.
+
 ## Comments that count things
 
 Comments here carry the reasoning, deliberately, and that is not the part worth
