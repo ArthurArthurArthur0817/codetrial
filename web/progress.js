@@ -1,7 +1,16 @@
-import { frameworkPhases, sanitizeReport } from "./lib.js";
+import { FRAMEWORKS, frameworkPhases, sanitizeReport } from "./lib.js";
 import { LEVELS } from "./problem-picker.js";
 
 export const progressPhases = frameworkPhases;
+
+const phaseFramework = new Map(Object.values(FRAMEWORKS)
+  .flatMap((framework) => framework.steps.map((step) => [step.label, framework.name])));
+
+/// Which weakness wordings the progress panel lists once: they may differ in
+/// case, spacing and a closing full stop, and in nothing that could change
+/// what the sentence says. A display key only; no report is accepted or
+/// refused on it.
+const weaknessKey = (tag) => tag.replace(/\s+/g, " ").trim().replace(/\.+$/, "").toLowerCase();
 
 const allowedDifficulties = new Set(LEVELS);
 const allowedLanguages = new Set(["python", "javascript", "c", "cpp", "java"]);
@@ -82,7 +91,7 @@ export function progressModelFrom(normalized, filters = {}) {
     matches(entry, "difficulty") && matches(entry, "language")
     && matches(entry, "durationMin"));
   const series = Object.fromEntries(progressPhases.map((phase) => [phase, []]));
-  const weaknessCounts = new Map();
+  const weaknessByPhase = new Map();
   let activeVersion = null;
   let activeSegments = null;
   for (const [attemptIndex, attempt] of attempts.entries()) {
@@ -106,17 +115,30 @@ export function progressModelFrom(normalized, filters = {}) {
           problemTitle: attempt.problemTitle,
         });
       }
-      for (const tag of row.weaknessTags) {
-        weaknessCounts.set(tag, (weaknessCounts.get(tag) || 0) + 1);
-      }
+      const flagged = row.weaknessTags.length > 0;
+      if (row.score === null && !flagged) continue;
+      const group = weaknessByPhase.get(row.phase) || { phase: row.phase, assessed: 0, reports: [] };
+      group.assessed += 1;
+      if (flagged) group.reports.push(row.weaknessTags);
+      weaknessByPhase.set(row.phase, group);
     }
   }
   for (const phase of progressPhases) {
     series[phase] = series[phase].filter((segment) => segment.points.length > 0);
   }
-  const weaknesses = [...weaknessCounts]
-    .map(([tag, count]) => ({ tag, count }))
-    .sort((left, right) => right.count - left.count || left.tag.localeCompare(right.tag));
+  // Grouped by phase, not by wording: the model words every report afresh, so
+  // the same gap never matched itself across attempts. The phase is a closed
+  // set every stored report carries, old ones included. It is coarse, which is
+  // why a row says the phase was flagged rather than that a weakness recurred.
+  // `assessed` is the denominator because a coding round never scores a STAR
+  // step and a behavioral round never scores a REACTO one.
+  const weaknesses = [...weaknessByPhase.values()]
+    .filter((group) => group.reports.length > 0)
+    .map(({ phase, assessed, reports }) => ({
+      phase, framework: phaseFramework.get(phase), count: reports.length, assessed, tags: newestWordings(reports),
+    }))
+    .sort((left, right) => right.count - left.count
+      || progressPhases.indexOf(left.phase) - progressPhases.indexOf(right.phase));
   const topics = new Map();
   for (const attempt of attempts) {
     for (const topic of new Set(attempt.report.topics || [])) {
@@ -130,6 +152,21 @@ export function progressModelFrom(normalized, filters = {}) {
   const topicProgress = [...topics.values()]
     .sort((left, right) => left.topic.localeCompare(right.topic));
   return { total: normalized.length, attempts, series, weaknesses, topics: topicProgress, options: progressOptions(normalized) };
+}
+
+/// The distinct wordings of a phase's weaknesses, newest report first, each
+/// report's tags kept in the order the server wrote them, most important
+/// first, so the display cap keeps a report's top weakness. One pass from the
+/// newest report back, because this runs on every filter change.
+function newestWordings(reports) {
+  const seen = new Map();
+  for (const tags of [...reports].reverse()) {
+    for (const tag of tags) {
+      const key = weaknessKey(tag);
+      if (!seen.has(key)) seen.set(key, tag);
+    }
+  }
+  return [...seen.values()];
 }
 
 function progressOptions(entries) {

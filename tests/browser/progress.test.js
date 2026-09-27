@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { buildProgressModel, normalizeProgressEntry, pickerEntry, progressPhases } from "../../web/progress.js";
+import { buildProgressModel, normalizeProgressEntries, normalizeProgressEntry, pickerEntry, progressModelFrom, progressPhases } from "../../web/progress.js";
 import { pickProblem, suggestDifficulty } from "../../web/problem-picker.js";
 
 const web = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "web");
@@ -59,7 +59,128 @@ test("progress filters metadata, orders attempts, ranks tags, and keeps null as 
   assert.deepEqual(model.attempts.map((item) => item.id), ["earlier", "later"]);
   assert.deepEqual(model.series.Algorithm[0].points.map((point) => point.score), [60, 80]);
   assert.deepEqual(model.series.Action, [], "null STAR values are gaps, not zeroes");
-  assert.deepEqual(model.weaknesses, [{ tag: "Explain complexity", count: 2 }]);
+  assert.deepEqual(model.weaknesses, [
+    { phase: "Algorithm", framework: "REACTO", count: 2, assessed: 2, tags: ["Explain complexity"] },
+  ]);
+});
+
+/// One attempt whose Algorithm row carries `weaknesses`, in the order given,
+/// each grounded by a plan item so sanitizing keeps it.
+const flaggedAttempt = (id, date, weaknesses, score = 60) => {
+  const attempt = entry(id, date, score);
+  attempt.report.codingFeedback.improvements = [...weaknesses];
+  attempt.report.improvementPlan = weaknesses.map((weakness) => plan(weakness)[0]);
+  attempt.report.frameworkAssessment.phases.find((row) => row.phase === "Algorithm").weaknessTags = [...weaknesses];
+  return attempt;
+};
+
+// Each report words its weaknesses afresh, so grouping by the exact sentence
+// listed the same gap once per attempt and nothing ever recurred.
+test("weaknesses group reworded tags by phase and count attempts", () => {
+  const rows = [
+    entry("first", "2026-01-01", 50, { weakness: "Develop a concrete algorithmic plan before attempting to write code." }),
+    entry("second", "2026-01-02", 55, { weakness: "Develop a systematic approach to problem-solving before writing code." }),
+    entry("third", "2026-01-03", 60, { weakness: "Practice articulating a step-by-step algorithm before attempting to write code." }),
+    entry("repeat", "2026-01-04", 65, { weakness: "Develop a concrete algorithmic plan before attempting to write code." }),
+  ];
+  // Tags survive sanitizing only when the plan grounds them in that phase.
+  const star = entry("star", "2026-01-05", null);
+  for (const [phase, weakness] of [["Result", "Quantify the outcome"], ["Action", "Say what you did"]]) {
+    star.report.communicationFeedback.improvements.push(weakness);
+    star.report.improvementPlan.push({ ...plan(weakness)[0], phase });
+    star.report.frameworkAssessment.phases.find((row) => row.phase === phase).weaknessTags = [weakness];
+  }
+  const model = buildProgressModel([...rows, star]);
+  assert.deepEqual(model.weaknesses, [
+    {
+      phase: "Algorithm",
+      framework: "REACTO",
+      count: 4,
+      assessed: 4,
+      tags: [
+        "Develop a concrete algorithmic plan before attempting to write code.",
+        "Practice articulating a step-by-step algorithm before attempting to write code.",
+        "Develop a systematic approach to problem-solving before writing code.",
+      ],
+    },
+    { phase: "Action", framework: "STAR", count: 1, assessed: 1, tags: ["Say what you did"] },
+    { phase: "Result", framework: "STAR", count: 1, assessed: 1, tags: ["Quantify the outcome"] },
+  ], "one row per phase, newest first, ties in framework order, and the unscored Algorithm row of the STAR round is not an assessment");
+});
+
+test("one report's weaknesses keep their priority order and count as one attempt", () => {
+  const ranked = ["Explain the algorithm before coding", "Justify time complexity", "Justify space complexity", "Name an alternative"];
+  const older = flaggedAttempt("older", "2026-01-01", ["Trace an example first"]);
+  const newer = flaggedAttempt("newer", "2026-01-02", ranked);
+  const [algorithm] = buildProgressModel([newer, older]).weaknesses;
+  assert.equal(algorithm.count, 2, "four tags in one report are one flagged attempt");
+  assert.deepEqual(algorithm.tags, [...ranked, "Trace an example first"],
+    "the report's own order leads, so the cap never hides its highest-ranked weakness");
+});
+
+test("a wording that differs only in case, spacing or a full stop is listed once, as last written", () => {
+  const model = buildProgressModel([
+    flaggedAttempt("first", "2026-01-01", ["Explain complexity."]),
+    flaggedAttempt("second", "2026-01-02", ["explain  complexity"]),
+    flaggedAttempt("third", "2026-01-03", ["Explain complexity bounds"]),
+  ]);
+  assert.deepEqual(model.weaknesses[0].tags, ["Explain complexity bounds", "explain  complexity"]);
+  assert.equal(model.weaknesses[0].count, 3);
+});
+
+// The model is rebuilt on every filter change, over as many as five hundred
+// reports, so deduplicating wordings has to stay linear. Counted rather than
+// timed, so a slow CI host cannot fail it and a fast one cannot hide it: each
+// wording is normalized, and so lowercased, once.
+test("a long history normalizes each weakness wording once", () => {
+  const history = Array.from({ length: 500 }, (_, index) => flaggedAttempt(
+    String(index),
+    new Date(Date.UTC(2026, 0, 1) + index * 3_600_000).toISOString(),
+    [0, 1, 2, 3].map((rank) => `Attempt ${index} weakness ${rank}`),
+  ));
+  const normalized = normalizeProgressEntries(history);
+  const lower = String.prototype.toLowerCase;
+  let calls = 0;
+  String.prototype.toLowerCase = function toLowerCase() {
+    calls += 1;
+    return lower.call(this);
+  };
+  let model;
+  try {
+    model = progressModelFrom(normalized);
+  } finally {
+    String.prototype.toLowerCase = lower;
+  }
+  assert.equal(model.weaknesses[0].tags.length, 2000);
+  assert.equal(model.weaknesses[0].tags[0], "Attempt 499 weakness 0");
+  assert.ok(calls <= 2000, `normalized ${calls} times for 2000 wordings`);
+});
+
+test("the denominator counts assessed attempts, and filters narrow both counts", () => {
+  const counts = (model) => model.weaknesses.map(({ count, assessed }) => ({ count, assessed }));
+  const clean = entry("clean", "2026-01-02", 90, { language: "java" });
+  const unscored = entry("unscored", "2026-01-03", null);
+  const model = buildProgressModel([flaggedAttempt("flagged", "2026-01-01", ["Explain complexity"]), clean, unscored]);
+  assert.deepEqual(counts(model), [{ count: 1, assessed: 2 }],
+    "a scored phase without a weakness is assessed, an unscored one is not");
+  const history = [flaggedAttempt("flagged", "2026-01-01", ["Explain complexity"]), clean, entry("scored", "2026-01-04", 70)];
+  assert.deepEqual(counts(buildProgressModel(history)), [{ count: 1, assessed: 3 }]);
+  assert.deepEqual(counts(buildProgressModel(history, { language: "python" })), [{ count: 1, assessed: 2 }],
+    "the filter drops the java attempt from the denominator");
+  assert.deepEqual(buildProgressModel(history, { language: "java" }).weaknesses, [],
+    "a phase flagged only outside the filter has no row");
+});
+
+test("reports without a usable phase assessment add neither a weakness nor an assessment", () => {
+  const incomplete = flaggedAttempt("incomplete", "2026-01-02", ["Explain complexity"]);
+  incomplete.report.incomplete = true;
+  const legacy = { id: "legacy", date: "2026-01-03", report: { decision: "NO_HIRE" } };
+  const ungrounded = flaggedAttempt("ungrounded", "2026-01-04", ["Trace an example"]);
+  ungrounded.report.improvementPlan = [];
+  const counted = flaggedAttempt("counted", "2026-01-01", ["Name the invariant"]);
+  assert.deepEqual(buildProgressModel([incomplete, legacy, ungrounded, counted]).weaknesses, [
+    { phase: "Algorithm", framework: "REACTO", count: 1, assessed: 2, tags: ["Name the invariant"] },
+  ], "only the counted attempt flags; the ungrounded one still scored the phase, so it is assessed");
 });
 
 test("progress groups attempts by topic", () => {
