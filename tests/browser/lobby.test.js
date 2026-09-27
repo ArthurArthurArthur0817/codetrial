@@ -1637,3 +1637,680 @@ test("a failed history load leaves no other account's attempts behind", () => {
   assert.match(shown, /reports = \[\]/);
   assert.match(shown, /progressNormalized = \[\]/);
 });
+
+lobbyTest("Enter in the GitHub field submits the account choice", async (page) => {
+  session = { signedIn: false, loginRequired: true };
+  await lobby(page);
+  await page.fill("#github-login", "@candidate");
+  const login = page.waitForRequest((request) => request.url().endsWith("/api/login"), { timeout: 10_000 });
+  await page.press("#github-login", "Enter");
+  assert.deepEqual((await login).postDataJSON(), { login: "candidate" });
+  await page.waitForFunction(() => document.querySelector("#account-status").textContent === "Signed in as candidate", null, { timeout: 10_000 });
+});
+
+lobbyTest("composition Enter does not submit a GitHub username", async (page) => {
+  session = { signedIn: false, loginRequired: true };
+  let release;
+  holdLogin = new Promise((resolve) => (release = resolve));
+  try {
+    await lobby(page);
+    await page.fill("#github-login", "composing");
+    const login = page.waitForRequest((request) => request.url().endsWith("/api/login"), { timeout: 10_000 });
+    await page.evaluate(() => document.querySelector("#github-login").dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", isComposing: true, bubbles: true })));
+    // Hold the response so an early submit fails on its payload rather than
+    // hiding the field while the test is still entering the committed name.
+    await page.fill("#github-login", "candidate");
+    await page.press("#github-login", "Enter");
+    assert.deepEqual((await login).postDataJSON(), { login: "candidate" });
+    release();
+    await page.waitForFunction(() => document.querySelector("#account-status").textContent === "Signed in as candidate", null, { timeout: 10_000 });
+  } finally {
+    release();
+  }
+});
+
+lobbyTest("composition-end Enter does not submit a GitHub username", async (page) => {
+  session = { signedIn: false, loginRequired: true };
+  let release;
+  holdLogin = new Promise((resolve) => (release = resolve));
+  try {
+    await lobby(page);
+    await page.fill("#github-login", "composing");
+    const login = page.waitForRequest((request) => request.url().endsWith("/api/login"), { timeout: 10_000 });
+    await page.evaluate(() => {
+      const input = document.querySelector("#github-login");
+      input.dispatchEvent(new CompositionEvent("compositionend", { data: "composing", bubbles: true }));
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", keyCode: 229, isComposing: false, bubbles: true }));
+    });
+    await page.fill("#github-login", "candidate");
+    await page.press("#github-login", "Enter");
+    assert.deepEqual((await login).postDataJSON(), { login: "candidate" });
+    release();
+    await page.waitForFunction(() => document.querySelector("#account-status").textContent === "Signed in as candidate", null, { timeout: 10_000 });
+  } finally {
+    release();
+  }
+});
+
+lobbyTest("Enter does not submit again while the GitHub choice is pending", async (page) => {
+  session = { signedIn: false, loginRequired: true };
+  let release;
+  holdLogin = new Promise((resolve) => (release = resolve));
+  const submitted = [];
+  page.on("request", (request) => { if (request.url().endsWith("/api/login")) submitted.push(request); });
+  try {
+    await lobby(page);
+    await page.fill("#github-login", "candidate");
+    const login = page.waitForRequest((request) => request.url().endsWith("/api/login"), { timeout: 10_000 });
+    await page.press("#github-login", "Enter");
+    await login;
+    assert.equal(await page.locator("#login-link").isDisabled(), true);
+    await page.press("#github-login", "Enter");
+    await page.press("#github-login", "Enter");
+    release();
+    await page.waitForFunction(() => document.querySelector("#account-status").textContent === "Signed in as candidate", null, { timeout: 10_000 });
+    assert.equal(submitted.length, 1);
+  } finally {
+    release();
+  }
+});
+
+lobbyTest("a pending start owns the GitHub login until the interview opens", async (page) => {
+  session = { signedIn: false, loginRequired: true };
+  let release;
+  holdLogin = new Promise((resolve) => (release = resolve));
+  const submitted = [];
+  page.on("request", (request) => { if (request.url().endsWith("/api/login")) submitted.push(request); });
+  try {
+    const selected = await lobby(page);
+    await page.evaluate(() => {
+      const fetch = window.fetch;
+      window.loginRequests = 0;
+      window.fetch = (...args) => {
+        if (args[0] === "/api/login") window.loginRequests += 1;
+        return fetch(...args);
+      };
+    });
+    await page.fill("#github-login", "candidate");
+    const login = page.waitForRequest((request) => request.url().endsWith("/api/login"), { timeout: 10_000 });
+    await page.click("#start");
+    await login;
+    await page.press("#github-login", "Enter");
+    // Both keyboard and mouse use the same header login handler.
+    await page.evaluate(() => document.querySelector("#login-link").click());
+    assert.equal(await page.evaluate(() => window.loginRequests), 1, "the header sent another login while Start was pending");
+    release();
+    await page.waitForURL(/\/interview/, { timeout: 10_000 });
+    assert.equal(submitted.length, 1, "the header sent another login while Start was pending");
+    assert.equal(new URL(page.url()).searchParams.get("problem"), selected.card);
+  } finally {
+    release();
+  }
+});
+
+lobbyTest("a pending GitHub login prevents Start from sending another login", async (page) => {
+  session = { signedIn: false, loginRequired: true };
+  let release;
+  holdLogin = new Promise((resolve) => (release = resolve));
+  const submitted = [];
+  const interviews = [];
+  page.on("request", (request) => {
+    if (request.url().endsWith("/api/login")) submitted.push(request);
+    if (new URL(request.url()).pathname === "/interview") interviews.push(request);
+  });
+  try {
+    await lobby(page);
+    await page.evaluate(() => {
+      const fetch = window.fetch;
+      window.loginRequests = 0;
+      window.fetch = (...args) => {
+        if (args[0] === "/api/login") window.loginRequests += 1;
+        return fetch(...args);
+      };
+    });
+    await page.fill("#github-login", "candidate");
+    const login = page.waitForRequest((request) => request.url().endsWith("/api/login"), { timeout: 10_000 });
+    await page.press("#github-login", "Enter");
+    await login;
+    await page.evaluate(() => document.querySelector("#start").click());
+    await page.click("details.problem-picker summary");
+    await page.click(`[data-problem="${pageOf("gas-station")}"]`);
+    await page.evaluate(() => document.querySelector("#start").click());
+    assert.equal(await page.evaluate(() => window.loginRequests), 1, "Start sent another login while the header login was pending");
+    release();
+    await page.waitForFunction(() => document.querySelector("#account-status").textContent === "Signed in as candidate", null, { timeout: 10_000 });
+    assert.equal(submitted.length, 1, "Start sent another login while the header login was pending");
+    assert.equal(interviews.length, 0, "Start raced the header login with an interview navigation");
+  } finally {
+    release();
+  }
+});
+
+lobbyTest("a successful GitHub login stays busy through the account and history refresh", async (page) => {
+  session = { signedIn: false, loginRequired: true };
+  await lobby(page);
+  await page.evaluate(() => {
+    const fetch = window.fetch;
+    window.loginRequests = 0;
+    window.fetch = (...args) => {
+      if (args[0] === "/api/login") window.loginRequests += 1;
+      return fetch(...args);
+    };
+  });
+  const submitted = [];
+  page.on("request", (request) => { if (request.url().endsWith("/api/login")) submitted.push(request); });
+  let releaseAccount;
+  const holdAccount = new Promise((resolve) => (releaseAccount = resolve));
+  const releaseReports = holdHistory();
+  await page.route(`${base}/api/session`, async (route) => {
+    await holdAccount;
+    await route.continue();
+  });
+  const assertBusy = async () => {
+    for (const selector of ["#start", "#random-problem", "#delete-reports", "#login-link"]) {
+      assert.equal(await page.locator(selector).isDisabled(), true, `${selector} was live during the account refresh`);
+    }
+    await page.evaluate(() => {
+      document.querySelector("#login-link").click();
+      document.querySelector("#start").click();
+    });
+  };
+  try {
+    await page.fill("#github-login", "candidate");
+    const account = page.waitForRequest((request) => request.url().endsWith("/api/session"), { timeout: 10_000 });
+    await page.press("#github-login", "Enter");
+    await account;
+    await assertBusy();
+    await page.click("details.problem-picker summary");
+    await page.click(`[data-problem="${pageOf("gas-station")}"]`);
+    assert.equal(await page.locator("#start").isDisabled(), true, "a card click re-armed Start during the account refresh");
+    const history = page.waitForRequest((request) => request.url().endsWith("/api/reports"), { timeout: 10_000 });
+    releaseAccount();
+    await history;
+    await assertBusy();
+    releaseReports();
+    await settles(page, () => !document.querySelector("#start").disabled);
+    assert.equal(await page.locator("#start").isDisabled(), false);
+    assert.equal(await page.locator("#random-problem").isDisabled(), false);
+    assert.equal(await page.locator("#login-link").isHidden(), true);
+    const loginRequests = await page.evaluate(() => {
+      document.querySelector("#github-login").dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      document.querySelector("#login-link").click();
+      return window.loginRequests;
+    });
+    assert.equal(loginRequests, 1, "a queued input submitted the hidden login button again");
+    assert.equal(submitted.length, 1, "another login was sent during the account refresh");
+    assert.equal(new URL(page.url()).pathname, "/");
+  } finally {
+    releaseAccount();
+    releaseReports();
+  }
+});
+
+lobbyTest("a failed GitHub login can be retried with Enter", async (page) => {
+  session = { signedIn: false, loginRequired: true };
+  failing.add("/api/login");
+  await lobby(page);
+  await page.fill("#github-login", "candidate");
+  const failure = page.waitForResponse((response) => response.url().endsWith("/api/login") && response.status() === 500, { timeout: 10_000 });
+  await page.press("#github-login", "Enter");
+  await failure;
+  await settles(page, () => document.querySelector("#account-status").textContent === "Could not record GitHub username.");
+  assert.equal(await page.locator("#login-link").isDisabled(), false, "a failed login left the button disabled");
+  failing.delete("/api/login");
+  const retry = page.waitForRequest((request) => request.url().endsWith("/api/login"), { timeout: 10_000 });
+  await page.press("#github-login", "Enter");
+  assert.deepEqual((await retry).postDataJSON(), { login: "candidate" });
+  await page.waitForFunction(() => document.querySelector("#account-status").textContent === "Signed in as candidate", null, { timeout: 10_000 });
+});
+
+for (const trigger of ["Enter", "button"]) {
+  lobbyTest(`${trigger} login refreshes the account without losing interview choices`, async (page) => {
+    session = { signedIn: false, loginRequired: true };
+    await page.addInitScript((entry) => {
+      localStorage.setItem("codetrial_history", JSON.stringify([entry]));
+    }, focusedAttempt(EASY[0]).payload);
+    await lobby(page);
+    await page.check("#practice-focus-share-input");
+    await page.click("details.problem-picker summary");
+    await setLevel(page, "Hard", true);
+    await page.click(`[data-problem="${MEDIUM[1]}"]`);
+    await page.click('[data-duration="60"]');
+    await page.click('[data-loop="coding_only"]');
+    await page.click("details.interview-context summary");
+    await page.fill("#profile-role", "Backend engineer");
+    await page.selectOption("#profile-seniority", "senior");
+    await page.fill("#profile-company", "Example");
+    await page.setInputFiles("#grounding-jd", groundingTxt("jd.txt", "Must know Rust\nMust know SQL"));
+    await page.locator('#grounding-choices input[data-group="requirements"]').nth(1).check();
+    await page.setInputFiles("#grounding-resume", groundingTxt("resume.txt", "Skills: Rust, Go\nBuilt a parser"));
+    await page.locator('#grounding-choices input[data-group="skills"]').first().check();
+    await page.locator('#grounding-choices input[data-group="anchors"]').first().check();
+    await page.check("#grounding-consent");
+    const choices = await page.locator("#grounding-choices input").evaluateAll((inputs) => inputs.map((input) => input.checked));
+    const selected = await snapshot(page);
+    await page.evaluate(() => { window.loginPageMarker = "same document"; });
+    const updated = focusedAttempt(MEDIUM[0]);
+    updated.payload.report.improvementPlan[0].weakness = "Explain invariants";
+    reports = [updated];
+    await page.fill("#github-login", "candidate");
+    if (trigger === "Enter") await page.press("#github-login", "Enter");
+    else await page.click("#login-link");
+    await settles(page, () => !document.querySelector("#start").disabled && document.querySelector("#account-status").textContent === "Signed in as candidate");
+    assert.equal(await page.evaluate(() => window.loginPageMarker), "same document", "login replaced the document");
+    const signedIn = await snapshot(page);
+    assert.equal(signedIn.account, "Signed in as candidate");
+    assert.equal(signedIn.card, selected.card);
+    assert.equal(signedIn.duration, selected.duration);
+    assert.deepEqual(signedIn.levels, selected.levels);
+    assert.match(signedIn.history, /saved to your account/);
+    assert.match(signedIn.focus, /Explain invariants/);
+    assert.equal(await page.locator("#practice-focus-share-input").isChecked(), false, "a new practice focus inherited consent to the old text");
+    assert.equal(await page.locator("#grounding-consent").isChecked(), true);
+    assert.deepEqual(await page.locator("#grounding-choices input").evaluateAll((inputs) => inputs.map((input) => input.checked)), choices);
+    assert.deepEqual(await groundingText(page), ["Must know Rust", "Must know SQL", "Rust", "Go", "Built a parser"]);
+    await page.click("#start");
+    await page.waitForURL(/\/interview/, { timeout: 10_000 });
+    const query = new URL(page.url()).searchParams;
+    assert.equal(query.get("problem"), MEDIUM[1]);
+    assert.equal(query.get("duration"), "60");
+    assert.equal(query.get("loop"), "coding_only");
+    assert.equal(query.get("role"), "Backend engineer");
+    assert.equal(query.get("seniority"), "senior");
+    assert.equal(query.get("company"), "Example");
+    const stored = await page.evaluate(() => JSON.parse(sessionStorage.getItem("codetrial.interview-grounding.v1")));
+    assert.deepEqual(stored.requirements, ["Must know SQL"]);
+    assert.deepEqual(stored.skills, ["Rust"]);
+    assert.deepEqual(stored.anchors, ["Built a parser"]);
+    assert.equal(await page.evaluate(() => sessionStorage.getItem("codetrial.sharedPracticeFocus")), null);
+  });
+}
+
+lobbyTest("an account check can be retried without recording the GitHub username again", async (page) => {
+  session = { signedIn: false, loginRequired: true };
+  await lobby(page);
+  failing.add("/api/session");
+  const submitted = [];
+  page.on("request", (request) => { if (request.url().endsWith("/api/login")) submitted.push(request); });
+  await page.fill("#github-login", "candidate");
+  await page.press("#github-login", "Enter");
+  await settles(page, () => document.querySelector("#login-link").textContent === "Retry account check");
+  assert.match(await page.locator("#account-status").textContent(), /account could not be refreshed/);
+  assert.equal(await page.locator("#github-login").isHidden(), true);
+  assert.equal(await page.locator("#login-link").isVisible(), true);
+  assert.equal(await page.locator("#login-link").isDisabled(), false);
+  assert.equal(await page.locator("#start").isDisabled(), true);
+  await page.click("details.problem-picker summary");
+  await page.click(`[data-problem="${MEDIUM[1]}"]`);
+  assert.equal(await page.locator("#start").isDisabled(), true, "a card click bypassed the unfinished account check");
+  failing.delete("/api/session");
+  reports = [savedAttempt(EASY[0])];
+  const account = page.waitForRequest((request) => request.url().endsWith("/api/session"), { timeout: 10_000 });
+  await page.click("#login-link");
+  await account;
+  await settles(page, () => !document.querySelector("#start").disabled);
+  assert.equal(await page.locator("#account-status").textContent(), "Signed in as candidate");
+  assert.equal(await page.locator("#start").isDisabled(), false);
+  assert.match(await page.locator("#progress-summary").textContent(), /1 of 1 attempts shown/);
+  assert.equal(submitted.length, 1, "retry recorded the same GitHub username again");
+  // A later failed account read uses the normal sign-in path again. Its
+  // button must not retain the earlier GET-only retry label.
+  failing.add("/api/session");
+  await restore(page);
+  await settles(page, () => document.querySelector("#account-status").textContent === "Signed out");
+  assert.equal(await page.locator("#login-link").textContent(), "Use GitHub");
+});
+
+lobbyTest("a login without a signed-in session returns to the GitHub choice", async (page) => {
+  session = { signedIn: false, loginRequired: true };
+  await lobby(page);
+  await page.route(`${base}/api/session`, (route) => route.fulfill({
+    json: { signedIn: false, loginRequired: true },
+  }), { times: 1 });
+  await page.fill("#github-login", "candidate");
+  await page.press("#github-login", "Enter");
+  await settles(page, () => document.querySelector("#account-status").textContent.includes("no signed-in session"));
+  assert.match(await page.locator("#account-status").textContent(), /no signed-in session/);
+  assert.equal(await page.locator("#github-login").isVisible(), true);
+  assert.equal(await page.locator("#login-link").textContent(), "Use GitHub");
+  assert.equal(await page.locator("#login-link").isDisabled(), false);
+  assert.equal(await page.locator("#start").textContent(), "Use GitHub to start");
+  const retry = page.waitForRequest((request) => request.url().endsWith("/api/login"), { timeout: 10_000 });
+  await page.click("#login-link");
+  await retry;
+  await settles(page, () => document.querySelector("#account-status").textContent === "Signed in as candidate");
+  assert.equal(await page.locator("#account-status").textContent(), "Signed in as candidate");
+});
+
+lobbyTest("failed account history after login clears stale local progress and focus", async (page) => {
+  session = { signedIn: false, loginRequired: true };
+  await page.addInitScript((entry) => {
+    localStorage.setItem("codetrial_history", JSON.stringify([entry]));
+  }, focusedAttempt(EASY[0]).payload);
+  await lobby(page);
+  assert.match(await page.locator("#progress-summary").textContent(), /1 of 1 attempts shown/);
+  await page.check("#practice-focus-share-input");
+  failing.add("/api/reports");
+  await page.fill("#github-login", "candidate");
+  await page.press("#github-login", "Enter");
+  await settles(page, () => !document.querySelector("#start").disabled && document.querySelector("#history").textContent.includes("Could not load saved account progress."));
+  assert.equal(await page.locator("#account-status").textContent(), "Signed in as candidate");
+  assert.equal(await page.locator("#start").isDisabled(), false);
+  assert.match(await page.locator("#history").textContent(), /Could not load saved account progress/);
+  assert.equal(await page.locator("#attempt-history").textContent(), "");
+  assert.equal(await page.locator("#practice-focus").isHidden(), true);
+  assert.equal(await page.locator("#practice-focus-share-input").isChecked(), false);
+  await page.click("#random-problem");
+  assert.equal(await page.locator("#practice-focus").isHidden(), true, "a redraw revived stale local history");
+});
+
+lobbyTest("an account refresh clamps a manual duration to the server recording cap", async (page) => {
+  session = { signedIn: false, loginRequired: true };
+  await lobby(page);
+  await page.click('[data-duration="60"]');
+  await page.route(`${base}/api/session`, (route) => route.fulfill({
+    json: { signedIn: true, user: { login: "candidate" }, maxDurationMin: 30 },
+  }), { times: 1 });
+  await page.fill("#github-login", "candidate");
+  await page.press("#github-login", "Enter");
+  await settles(page, () => !document.querySelector("#start").disabled);
+  const state = await snapshot(page);
+  assert.equal(state.duration, "30");
+  assert.deepEqual(state.durationsOff, ["45", "60"]);
+  assert.match(state.durationNote, /at most 30 minutes/);
+});
+
+lobbyTest("an older login refresh cannot re-arm controls while the restored history is pending", async (page) => {
+  session = { signedIn: false, loginRequired: true };
+  await lobby(page);
+  await page.evaluate(() => {
+    const fetch = window.fetch.bind(window);
+    window.pendingHistory = [];
+    window.fetch = (url, ...args) => url === "/api/reports"
+      ? new Promise((resolve) => window.pendingHistory.push((reports) =>
+        resolve(new Response(JSON.stringify({ reports })))))
+      : fetch(url, ...args);
+  });
+  try {
+    await page.fill("#github-login", "candidate");
+    await page.press("#github-login", "Enter");
+    await page.waitForFunction(() => window.pendingHistory.length === 1);
+    await restore(page);
+    await page.waitForFunction(() => window.pendingHistory.length === 2);
+    await page.evaluate(async (reports) => {
+      window.pendingHistory[0](reports);
+      await new Promise(requestAnimationFrame);
+    }, [focusedAttempt(EASY[0])]);
+    for (const selector of ["#start", "#login-link", "#random-problem", "#delete-reports"]) {
+      assert.equal(await page.locator(selector).isDisabled(), true, `${selector} was re-armed by the older refresh`);
+    }
+    await page.evaluate(async (reports) => {
+      window.pendingHistory[1](reports);
+      await new Promise(requestAnimationFrame);
+    }, [savedAttempt(MEDIUM[0])]);
+    assert.equal(await page.locator("#start").isDisabled(), false);
+    assert.equal(await page.locator("#random-problem").isDisabled(), false);
+    assert.equal(await page.locator("#account-status").textContent(), "Signed in as candidate");
+    assert.match(await page.locator("#progress-summary").textContent(), /1 of 1 attempts shown/);
+    assert.equal((await snapshot(page)).card, MEDIUM[0]);
+    assert.equal(await page.locator("#practice-focus").isHidden(), true, "the older history replaced the current reports");
+  } finally {
+    await page.evaluate(() => window.pendingHistory.forEach((release) => release([])));
+  }
+});
+
+/// The request stays pending until the application's own timeout signal aborts.
+/// Keeping headers and body stalls separate catches a timeout that stops as
+/// soon as fetch resolves, before response.json has consumed the response.
+async function stallTimedRequest(page, { url, after = 0, body = false, status = 200 }) {
+  await page.addInitScript(({ url, after, body, status }) => {
+    const timers = new WeakMap();
+    AbortSignal.timeout = (delay) => {
+      const controller = new AbortController();
+      timers.set(controller.signal, { controller, delay });
+      return controller.signal;
+    };
+    const fetch = window.fetch.bind(window);
+    let matched = 0;
+    window.lobbyRequests = [];
+    window.fetch = (path, options = {}) => {
+      window.lobbyRequests.push({ path, method: options.method ?? "GET" });
+      if (path !== url || matched++ !== after) return fetch(path, options);
+      const signal = options.signal;
+      const timer = timers.get(signal);
+      window.stalledRequest = {
+        hasSignal: signal instanceof AbortSignal,
+        delay: timer?.delay,
+        aborted: false,
+        expire: () => timer?.controller.abort(new DOMException("Request timed out", "TimeoutError")),
+      };
+      const onAbort = (reject) => {
+        signal?.addEventListener("abort", () => {
+          window.stalledRequest.aborted = true;
+          reject(signal.reason);
+        }, { once: true });
+      };
+      if (body) {
+        return Promise.resolve(new Response(new ReadableStream({
+          start(controller) { onAbort((error) => controller.error(error)); },
+        }), { status, headers: { "Content-Type": "application/json" } }));
+      }
+      return new Promise((resolve, reject) => { onAbort(reject); });
+    };
+  }, { url, after, body, status });
+}
+
+async function expireStalledRequest(page) {
+  await page.waitForFunction(() => window.stalledRequest !== undefined);
+  assert.equal(await page.evaluate(() => window.stalledRequest.hasSignal), true, "the pending fetch did not receive an abort signal");
+  assert.equal(await page.evaluate(() => window.stalledRequest.delay), 10_000, "the request did not use the ten-second deadline");
+  await page.evaluate(() => window.stalledRequest.expire());
+  assert.equal(await page.evaluate(() => window.stalledRequest.aborted), true, "the pending request did not observe the timeout");
+}
+
+lobbyTest("an initial account timeout falls back to usable local progress", async (page) => {
+  await stallTimedRequest(page, { url: "/api/session" });
+  await page.addInitScript((entry) => {
+    localStorage.setItem("codetrial_history", JSON.stringify([entry]));
+  }, savedAttempt(EASY[0]).payload);
+  await page.goto(`${base}/`, { waitUntil: "domcontentloaded" });
+  assert.equal(await page.locator("#start").isDisabled(), true);
+  await expireStalledRequest(page);
+  await awaitReady(page);
+  assert.equal(await page.locator("#start").isDisabled(), false);
+  assert.equal(await page.locator("#account-status").textContent(), "Signed out");
+  assert.match(await page.locator("#progress-summary").textContent(), /1 of 1 attempts shown/);
+  assert.match(await page.locator("#history").textContent(), /saved on this device/);
+});
+
+lobbyTest("an account response body timeout offers a GET-only account retry", async (page) => {
+  session = { signedIn: false, loginRequired: true };
+  await stallTimedRequest(page, { url: "/api/session", after: 1, body: true });
+  await lobby(page);
+  await page.fill("#github-login", "candidate");
+  await page.press("#github-login", "Enter");
+  await expireStalledRequest(page);
+  await settles(page, () => document.querySelector("#login-link").textContent === "Retry account check");
+  assert.match(await page.locator("#account-status").textContent(), /account could not be refreshed/);
+  assert.equal(await page.locator("#start").isDisabled(), true);
+  assert.equal(await page.locator("#github-login").isHidden(), true);
+  assert.equal(await page.locator("#login-link").isDisabled(), false);
+  await page.click("#login-link");
+  await awaitReady(page);
+  assert.equal(await page.locator("#account-status").textContent(), "Signed in as candidate");
+  assert.deepEqual(await page.evaluate(() => window.lobbyRequests.filter(({ path }) => path === "/api/login").map(({ method }) => method)), ["POST"]);
+});
+
+lobbyTest("an account history body timeout clears stale progress and releases Start", async (page) => {
+  session = { signedIn: false, loginRequired: true };
+  await stallTimedRequest(page, { url: "/api/reports", body: true });
+  await page.addInitScript((entry) => {
+    localStorage.setItem("codetrial_history", JSON.stringify([entry]));
+  }, focusedAttempt(EASY[0]).payload);
+  await lobby(page);
+  await page.check("#practice-focus-share-input");
+  await page.fill("#github-login", "candidate");
+  await page.press("#github-login", "Enter");
+  await expireStalledRequest(page);
+  await awaitReady(page);
+  assert.equal(await page.locator("#account-status").textContent(), "Signed in as candidate");
+  assert.equal(await page.locator("#start").isDisabled(), false);
+  assert.equal(await page.locator("#random-problem").isDisabled(), false);
+  assert.match(await page.locator("#history").textContent(), /Could not load saved account progress/);
+  assert.equal(await page.locator("#attempt-history").textContent(), "");
+  assert.equal(await page.locator("#practice-focus").isHidden(), true);
+  assert.equal(await page.locator("#practice-focus-share-input").isChecked(), false);
+});
+
+for (const trigger of ["header", "Start"]) {
+  lobbyTest(`a ${trigger} login timeout checks the account before allowing another POST`, async (page) => {
+    session = { signedIn: false, loginRequired: true };
+    await stallTimedRequest(page, { url: "/api/login" });
+    await lobby(page);
+    await page.click("details.problem-picker summary");
+    await page.click(`[data-problem="${MEDIUM[1]}"]`);
+    await page.click('[data-duration="60"]');
+    await page.fill("#github-login", "candidate");
+    if (trigger === "header") await page.press("#github-login", "Enter");
+    else await page.click("#start");
+    await expireStalledRequest(page);
+    await settles(page, () => document.querySelector("#login-link").textContent === "Retry account check");
+    assert.equal(await page.locator("#account-status").textContent(), "Could not confirm the sign-in result. Retry the account check.");
+    assert.equal(await page.locator("#github-login").isHidden(), true);
+    assert.equal(await page.locator("#login-link").isDisabled(), false);
+    assert.equal(await page.locator("#start").isDisabled(), true);
+    assert.equal(new URL(page.url()).pathname, "/", "a login timeout navigated into the interview");
+    const selected = await snapshot(page);
+    assert.equal(selected.card, MEDIUM[1]);
+    assert.equal(selected.duration, "60");
+    await page.evaluate(() => document.querySelector("#start").click());
+    if (trigger === "header") {
+      // A malformed account response cannot establish that the POST failed.
+      await page.route(`${base}/api/session`, (route) => route.fulfill({ json: {} }), { times: 1 });
+      await page.click("#login-link");
+      await settles(page, () => !document.querySelector("#login-link").disabled);
+      assert.equal(await page.locator("#login-link").textContent(), "Retry account check");
+      assert.equal(await page.locator("#start").isDisabled(), true);
+      session = { signedIn: true, user: { login: "candidate" } };
+    }
+    await page.click("#login-link");
+    await settles(page, () => !document.querySelector("#start").disabled);
+    assert.deepEqual(await page.evaluate(() => window.lobbyRequests.filter(({ path }) => path === "/api/login").map(({ method }) => method)), ["POST"]);
+    if (trigger === "header") {
+      assert.equal(await page.locator("#account-status").textContent(), "Signed in as candidate");
+      assert.equal(await page.locator("#login-link").isHidden(), true);
+    } else {
+      assert.match(await page.locator("#account-status").textContent(), /no signed-in session/i);
+      assert.equal(await page.locator("#login-link").textContent(), "Use GitHub");
+      assert.equal(await page.locator("#github-login").isVisible(), true);
+      await page.click("#login-link");
+      await awaitReady(page);
+      assert.equal(await page.locator("#account-status").textContent(), "Signed in as candidate");
+      assert.equal(await page.evaluate(() => window.lobbyRequests.filter(({ path }) => path === "/api/login").length), 2);
+    }
+    assert.equal(new URL(page.url()).pathname, "/", "an account retry navigated without another Start");
+    const recovered = await snapshot(page);
+    assert.equal(recovered.card, selected.card);
+    assert.equal(recovered.duration, selected.duration);
+    assert.equal(recovered.startDisabled, false);
+  });
+}
+
+lobbyTest("a rejected login whose error body times out remains safe to resubmit", async (page) => {
+  session = { signedIn: false, loginRequired: true };
+  await stallTimedRequest(page, { url: "/api/login", body: true, status: 500 });
+  await lobby(page);
+  await page.fill("#github-login", "candidate");
+  await page.press("#github-login", "Enter");
+  await expireStalledRequest(page);
+  await settles(page, () => !document.querySelector("#login-link").disabled);
+  assert.equal(await page.locator("#account-status").textContent(), "Could not record GitHub username.");
+  assert.equal(await page.locator("#github-login").isVisible(), true);
+  assert.equal(await page.locator("#login-link").textContent(), "Use GitHub");
+  await page.press("#github-login", "Enter");
+  await awaitReady(page);
+  assert.equal(await page.locator("#account-status").textContent(), "Signed in as candidate");
+  assert.equal(await page.evaluate(() => window.lobbyRequests.filter(({ path }) => path === "/api/login").length), 2);
+});
+
+lobbyTest("a legacy page map timeout leaves local history usable", async (page) => {
+  session = { signedIn: false, loginRequired: true };
+  await page.addInitScript(() => {
+    localStorage.setItem("codetrial_history", JSON.stringify([{
+      problemId: "two-sum",
+      date: "2026-01-01T00:00:00Z",
+      report: { decision: "HIRE" },
+    }]));
+    const fetch = window.fetch.bind(window);
+    window.fetch = (path, options) => {
+      if (path !== "/problem-pages.json") return fetch(path, options);
+      window.mapRequested = true;
+      return new Promise(() => {});
+    };
+    const setTimeout = window.setTimeout.bind(window);
+    window.mapDeadlines = [];
+    window.setTimeout = (callback, delay, ...args) => {
+      if (delay !== 10_000) return setTimeout(callback, delay, ...args);
+      window.mapDeadlines.push({ delay, expire: () => callback(...args) });
+      return 0;
+    };
+  });
+  await page.goto(`${base}/`, { waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => window.mapRequested);
+  assert.deepEqual(await page.evaluate(() => window.mapDeadlines.map(({ delay }) => delay)), [10_000]);
+  assert.equal(await page.locator("#start").isDisabled(), true);
+  await page.evaluate(() => window.mapDeadlines[0].expire());
+  await awaitReady(page);
+  assert.equal(await page.locator("#start").isDisabled(), false);
+  assert.match(await page.locator("#history").textContent(), /saved on this device/);
+  assert.match(await page.locator("#progress-summary").textContent(), /1 of 1 attempts shown/);
+  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem("codetrial_history"))[0].problemId), "two-sum");
+});
+
+lobbyTest("a late account check cannot erase an uncertain login result", async (page) => {
+  session = { signedIn: false, loginRequired: true };
+  await lobby(page);
+  await page.evaluate(() => {
+    const fetch = window.fetch.bind(window);
+    window.loginAttempts = 0;
+    window.fetch = (path, options) => {
+      if (path === "/api/login") {
+        window.loginAttempts += 1;
+        return new Promise((resolve, reject) => {
+          window.rejectLogin = () => reject(new TypeError("Connection lost"));
+        });
+      }
+      if (path === "/api/session") {
+        return new Promise((resolve) => {
+          window.releaseAccount = () => resolve(new Response(JSON.stringify({ signedIn: false, loginRequired: true })));
+        });
+      }
+      return fetch(path, options);
+    };
+  });
+  try {
+    await page.fill("#github-login", "candidate");
+    await page.press("#github-login", "Enter");
+    await page.waitForFunction(() => typeof window.rejectLogin === "function");
+    // A restored page checks the account while the earlier POST is unresolved.
+    await restore(page);
+    await page.waitForFunction(() => typeof window.releaseAccount === "function");
+    await page.evaluate(() => window.rejectLogin());
+    await settles(page, () => document.querySelector("#login-link").textContent === "Retry account check");
+    assert.equal(await page.locator("#login-link").textContent(), "Retry account check");
+    await page.evaluate(async () => {
+      window.releaseAccount();
+      await new Promise(requestAnimationFrame);
+    });
+    assert.equal(await page.locator("#account-status").textContent(), "Could not confirm the sign-in result. Retry the account check.");
+    assert.equal(await page.locator("#login-link").textContent(), "Retry account check");
+    assert.equal(await page.locator("#github-login").isHidden(), true);
+    assert.equal(await page.locator("#start").isDisabled(), true);
+    assert.equal(await page.evaluate(() => window.loginAttempts), 1);
+  } finally {
+    await page.evaluate(() => {
+      window.rejectLogin?.();
+      window.releaseAccount?.();
+    });
+  }
+});
