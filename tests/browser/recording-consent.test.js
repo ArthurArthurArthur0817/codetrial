@@ -13,7 +13,12 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { functionBody, interviewSource, read } from "./source.js";
+import {
+  assertIncludesCompact,
+  functionBody,
+  interviewSource,
+  read,
+} from "./source.js";
 
 const page = read("web/interview.html");
 // The consent path spans the page script and the replay queue it starts
@@ -128,9 +133,9 @@ test("recording-consent the notice's promise of withdrawal is reachable", () => 
   const body = withoutComments(
     functionBody(script, "withdrawRecordingConsent"),
   );
-  assert.match(
+  assertIncludesCompact(
     body,
-    /fetch\(`\/api\/interviews\/\$\{encodeURIComponent\(state\.interviewId\)\}\/consent`/,
+    "fetch(`/api/interviews/${encodeURIComponent(state.interviewId)}/consent`",
     "and it has to call the route that records the withdrawal",
   );
   assert.match(body, /method: "DELETE"/);
@@ -160,8 +165,9 @@ test("recording-consent the notice's promise of withdrawal is reachable", () => 
 
 test("recording-consent is recorded before a token is asked for", () => {
   const body = withoutComments(functionBody(script, "connect"));
-  assert.ok(
-    body.includes("if (!consentGiven()) throw new Error("),
+  assertIncludesCompact(
+    body,
+    "if (!consentGiven()) throw new Error(",
     "the gate is restated where consent is actually written down, not only on the button",
   );
   const consent = body.indexOf("await recordConsent()");

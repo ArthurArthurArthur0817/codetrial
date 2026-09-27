@@ -2410,7 +2410,8 @@ lobbyTest(
       return {
         note: document
           .getElementById(list.getAttribute("aria-describedby"))
-          ?.textContent.slice(0, 16),
+          ?.textContent.trim()
+          .slice(0, 16),
         heading: item.querySelector(":scope > p").textContent,
         shown: [...item.querySelectorAll(":scope > ul > li")].map(
           (node) => node.textContent,

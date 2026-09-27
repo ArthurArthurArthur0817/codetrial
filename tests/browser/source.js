@@ -8,12 +8,28 @@
 // assertions against it passed against unrelated code. `web/interview.js`
 // declares fifteen `async function`s, so that was one edit away from happening.
 
+import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, extname, join, sep } from "node:path";
 
 export const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+
+/// Asserts that `snippet` occurs in `source` once both have their whitespace
+/// removed and a comma before a closing bracket dropped, so an assertion on
+/// formatted source reads the same whether or not the formatter wrapped a call
+/// and gave it a trailing comma. Whitespace inside a string literal goes too,
+/// so a snippet whose meaning rests on a space in a string needs its own check.
+/// The failure names the snippet, which a bare boolean in assert.ok would not.
+export function assertIncludesCompact(source, snippet, message) {
+  const compact = (text) =>
+    text.replace(/\s+/g, "").replace(/,(?=[)\]}])/g, "");
+  assert.ok(
+    compact(source).includes(compact(snippet)),
+    `${message ?? "source text is missing"}: ${snippet}`,
+  );
+}
 
 export function read(name) {
   return readFileSync(join(root, name), "utf8");

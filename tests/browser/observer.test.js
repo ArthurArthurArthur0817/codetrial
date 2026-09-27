@@ -8,7 +8,10 @@ const observerSource = `${page}\n${script}`;
 
 test("observer page is a deliberate subscribe-only join", () => {
   assert.match(page, /id="join-observer"/);
-  assert.match(page, /Observers cannot speak or use a camera or microphone/);
+  assert.match(
+    page,
+    /Observers\s+cannot\s+speak\s+or\s+use\s+a\s+camera\s+or\s+microphone/,
+  );
   assert.match(page, /candidate has been told you are joining/);
   assert.match(script, /"\/api\/observer-token"/);
   assert.match(script, /addEventListener\("click"/);

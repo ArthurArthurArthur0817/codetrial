@@ -16,7 +16,12 @@ import {
   reviewHistoryKey,
   saveReportHistory,
 } from "../../web/history.js";
-import { functionBody, memoryStorage, root } from "./source.js";
+import {
+  assertIncludesCompact,
+  functionBody,
+  memoryStorage,
+  root,
+} from "./source.js";
 
 const web = join(root, "web");
 const read = (name) => readFileSync(join(web, name), "utf8");
@@ -168,20 +173,20 @@ test("the lobby offers one interview and carries no mode to the room", () => {
   assert.doesNotMatch(interview, /frameworkBriefing/);
   assert.doesNotMatch(interview, /Two shapes fit this interview/);
   assert.doesNotMatch(page, /REACTO: Repeat/);
-  assert.match(
+  assertIncludesCompact(
     interview,
-    /message\.type === "framework_state" && Array\.isArray\(message\.phases\)/,
+    'message.type === "framework_state" && Array.isArray(message.phases)',
   );
   assert.match(interview, /frameworkRound = "behavioral"/);
   assert.match(
     interview,
     /globalThis\.setTimeout\(\(\) => \{\s*nodes\.frameworkHint\.hidden = true;/,
   );
-  assert.match(
+  assertIncludesCompact(
     interview,
-    /JSON\.stringify\(\{ problemId: problem\.page, durationMin, interviewId, interviewLoop, interviewProfile, \.\.\.\(interviewGrounding/,
+    "JSON.stringify({ problemId: problem.page, durationMin, interviewId, interviewLoop, interviewProfile, ...(interviewGrounding",
   );
-  assert.match(interview, /interviewLoop, report: state\.report/);
+  assertIncludesCompact(interview, "interviewLoop, report: state.report");
 });
 
 test("interview loop is explicit, budgeted, gated, and carried into artifacts", () => {
@@ -197,14 +202,17 @@ test("interview loop is explicit, budgeted, gated, and carried into artifacts", 
   assert.match(app, /let interviewLoop = "coding_behavioral"/);
   assert.match(app, /destination\.searchParams\.set\("loop", interviewLoop\)/);
   assert.match(page, /id="round-plan-summary"/);
-  assert.match(
+  assertIncludesCompact(
     interview,
-    /behavioralMinutes = interviewLoop === "coding_behavioral" \? Math\.min\(8, durationMin\) : 0/,
+    'behavioralMinutes = interviewLoop === "coding_behavioral" ? Math.min(8, durationMin) : 0',
   );
-  assert.match(interview, /type: "round_transition", round: "behavioral"/);
-  assert.match(
+  assertIncludesCompact(
     interview,
-    /recordReplay\("lifecycle", \{ state: "round_reserve_started"/,
+    'type: "round_transition", round: "behavioral"',
+  );
+  assertIncludesCompact(
+    interview,
+    'recordReplay("lifecycle", { state: "round_reserve_started"',
   );
   assert.match(interview, /message\.type === "round_state"/);
   assert.match(interview, /nodes\.editor\.disabled = true/);
@@ -245,13 +253,13 @@ test("optional interview profile is accessible, bounded, and omitted when blank"
     app,
     /if \(profile\.role\) destination\.searchParams\.set\("role", profile\.role\)/,
   );
-  assert.match(
+  assertIncludesCompact(
     app,
-    /if \(profile\.seniority\) destination\.searchParams\.set\("seniority", profile\.seniority\)/,
+    'if (profile.seniority) destination.searchParams.set("seniority", profile.seniority)',
   );
-  assert.match(
+  assertIncludesCompact(
     app,
-    /if \(profile\.targetCompany\) destination\.searchParams\.set\("company", profile\.targetCompany\)/,
+    'if (profile.targetCompany) destination.searchParams.set("company", profile.targetCompany)',
   );
   assert.match(interview, /const interviewProfile = \{/);
   // The focus travels in session storage, never the address bar.
@@ -277,7 +285,10 @@ test("document grounding is explicit, clearable, ephemeral, and absent from save
   ]) {
     assert.match(lobby, new RegExp(`id="${id}"`));
   }
-  assert.match(lobby, /Send only my selected snippets to the AI interviewer\./);
+  assert.match(
+    lobby,
+    /Send\s+only\s+my\s+selected\s+snippets\s+to\s+the\s+AI\s+interviewer\./,
+  );
   assert.match(
     app,
     /nodes\.groundingClear\.addEventListener\("click", clearGrounding\)/,

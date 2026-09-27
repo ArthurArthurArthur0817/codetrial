@@ -9,13 +9,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   INTERVIEW_SOURCES,
+  assertIncludesCompact,
   captures as matchAll,
   failFetchWith,
+  firstPartyScripts,
   functionBody,
   initialisedModules,
   interviewSource,
   root,
-  firstPartyScripts,
 } from "./source.js";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -1006,7 +1007,7 @@ test("a paused interview still counts down and still ends", () => {
 test("an interview the interviewer ended still records that it ended", () => {
   const receive = functionBody(interviewSource(), "receiveReport");
 
-  assert.match(receive, /recordReplay\("lifecycle", \{ state: "ended"/);
+  assertIncludesCompact(receive, 'recordReplay("lifecycle", { state: "ended"');
   assert.match(
     receive,
     /state\.phase === "live"/,

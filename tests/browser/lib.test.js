@@ -4,7 +4,12 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { functionBody, livekitSource, read } from "./source.js";
+import {
+  assertIncludesCompact,
+  functionBody,
+  livekitSource,
+  read,
+} from "./source.js";
 
 import {
   ACTIVE_CONTRACT,
@@ -777,9 +782,9 @@ test("the interviewer is whoever the page pinned, or else the first agent", () =
 // question each asks, not the wording around it.
 test("ending the interview waits for a report only while an interviewer is in the room", () => {
   const end = functionBody(read("web/interview.js"), "endInterview");
-  assert.match(
+  assertIncludesCompact(
     end,
-    /const reportComing = Boolean\(roomInterviewer\(roomParticipants\(\), state\.agentIdentity\)\)/,
+    "const reportComing = Boolean(roomInterviewer(roomParticipants(), state.agentIdentity))",
   );
   assert.match(end, /nodes\.forceReport\.hidden = reportComing;/);
   assert.match(end, /if \(!reportComing\) setTimeout\(showReport, /);
@@ -805,9 +810,9 @@ test("a report that cannot be shown puts the ways out back at once", () => {
   }
   // Which of the two failures it is explaining, and whether the exit it offers
   // is the one that just failed.
-  assert.match(
+  assertIncludesCompact(
     recovery,
-    /providerUiState\(offlineSummary \? "report_unreadable" : "report_undrawable"\)/,
+    'providerUiState(offlineSummary ? "report_unreadable" : "report_undrawable")',
   );
   assert.match(recovery, /nodes\.forceReport\.hidden = !offlineSummary;/);
   assert.match(
@@ -872,7 +877,7 @@ test("a report that fails to draw still ends the session it belonged to", () => 
   // the replay would stop mid-interview, and the button the forced phase puts
   // beyond `endInterview` would stay enabled and inert.
   assert.match(caught, /if \(!endRecorded && state\.phase === "live"\)/);
-  assert.match(caught, /recordReplay\("lifecycle", \{ state: "ended"/);
+  assertIncludesCompact(caught, 'recordReplay("lifecycle", { state: "ended"');
   assert.match(caught, /nodes\.end\.disabled = true;/);
 });
 
@@ -939,9 +944,9 @@ test("a report that arrives takes back the overlay's promises of one", () => {
   // "ending", which the recovery above restores: left armed, they overwrite
   // what went wrong with "preparing your report" and then with an offer to
   // retry a provider that did its part.
-  assert.match(
+  assertIncludesCompact(
     functionBody(page, "endInterview"),
-    /endingEscape = \[setTimeout\(/,
+    "endingEscape = [setTimeout(",
   );
   const receive = functionBody(page, "receiveReport");
   assert.ok(

@@ -12,6 +12,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import {
+  assertIncludesCompact,
   firstPartyScripts as webScripts,
   interviewSource,
   root,
@@ -60,7 +61,10 @@ test("meet-mode instructions", () => {
     page,
     /the interviewer\s+hears you by joining the interview room/,
   );
-  assert.match(page, /Google Meet controls who receives this interview/);
+  assert.match(
+    page,
+    /Google\s+Meet\s+controls\s+who\s+receives\s+this\s+interview/,
+  );
   assert.match(page, /outside CodeTrial's control/);
 });
 
@@ -190,9 +194,9 @@ test("sink routing", () => {
   );
   // Serialized and stamped. Two picks in flight can settle in either order, and
   // the older one must not write its device over the newer one's.
-  assert.match(
+  assertIncludesCompact(
     script,
-    /routingChain = routingChain\.then\(\(\) => routeAudioOutput\(deviceId, \+\+routingRequest\)\)/,
+    "routingChain = routingChain.then(() => routeAudioOutput(deviceId, ++routingRequest))",
     "routing requests are serialized",
   );
   assert.match(

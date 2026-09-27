@@ -12,7 +12,12 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { functionBody, read, interviewSource } from "./source.js";
+import {
+  assertIncludesCompact,
+  functionBody,
+  interviewSource,
+  read,
+} from "./source.js";
 
 const interview = withoutInterviewComments(interviewSource());
 const page = read("web/recording/index.html");
@@ -63,7 +68,7 @@ test("recording-template dom ids", () => {
   }
 
   assert.ok(
-    /<video id="candidate-video"[^>]*muted/.test(page),
+    /<video\s+id="candidate-video"[^>]*muted/.test(page),
     "the camera element must be muted, or the room's audio is recorded twice",
   );
   assert.ok(
@@ -80,7 +85,7 @@ test("recording-template dom ids", () => {
     "audio is attached for everyone in the room except the recorder",
   );
   assert.ok(
-    /<video id="candidate-video"[^>]*playsinline/.test(page),
+    /<video\s+id="candidate-video"[^>]*playsinline/.test(page),
     "playsinline, or the recorder gets a native player rather than the layout",
   );
   assert.ok(
@@ -421,9 +426,9 @@ test("replay-producer editor", () => {
   );
   // And that is where the debounce ends when nothing overtakes it. A timer with
   // its own publish sent the edit to the agent and left it out of the replay.
-  assert.match(
+  assertIncludesCompact(
     withoutComments(interview),
-    /codePublishTimer = setTimeout\(flushPendingEditorPublish, CODE_PUBLISH_DEBOUNCE_MS\);/,
+    "codePublishTimer = setTimeout(flushPendingEditorPublish, CODE_PUBLISH_DEBOUNCE_MS);",
     "an edit that outlives its debounce leaves through the recording flush",
   );
   // And where the end cancels it: the end payload carries that edit to the
@@ -520,10 +525,9 @@ test("replay-producer stage", () => {
 });
 
 test("replay-producer avatar", () => {
-  assert.ok(
-    withoutComments(functionBody(interview, "recordAvatarState")).includes(
-      'recordReplay("avatar", { state: value, responseWindow: opensWindow ? replayWindow : null });',
-    ),
+  assertIncludesCompact(
+    withoutComments(functionBody(interview, "recordAvatarState")),
+    'recordReplay("avatar", { state: value, responseWindow: opensWindow ? replayWindow : null });',
     "the interviewer's state and each opening window are recorded together",
   );
   assert.ok(
@@ -565,10 +569,9 @@ test("replay transcripts capture only the open response window", () => {
 });
 
 test("replay-producer lifecycle", () => {
-  assert.ok(
-    interview.includes(
-      'recordReplay("lifecycle", { state: "started", interviewLoop, codingMinutes, behavioralMinutes });',
-    ),
+  assertIncludesCompact(
+    interview,
+    'recordReplay("lifecycle", { state: "started", interviewLoop, codingMinutes, behavioralMinutes });',
     "a template that joins late has to know the interview was already running",
   );
   const ending = withoutComments(functionBody(interview, "endInterview"));

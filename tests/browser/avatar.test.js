@@ -10,6 +10,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  assertIncludesCompact,
   captures,
   firstPartyScripts,
   functionBody,
@@ -757,9 +758,9 @@ test("captions size to the turn and retire when nobody is speaking", () => {
 });
 
 test("avatar analyser reads Jim and never the candidate", () => {
-  assert.match(
+  assertIncludesCompact(
     script,
-    /createMediaStreamSource\(new MediaStream\(\[track\.mediaStreamTrack\]\)\)/,
+    "createMediaStreamSource(new MediaStream([track.mediaStreamTrack]))",
   );
   // createMediaElementSource returns silence for a MediaStream-backed element,
   // so the mouth would never open and nothing would say why. Matching the call
@@ -798,7 +799,7 @@ test("avatar analyser reads Jim and never the candidate", () => {
   const sources = captures(
     `${script}\n${read("web/mic-meter.js")}`,
     /createMediaStreamSource\(([^)]*)\)/g,
-  );
+  ).map((source) => source.trim());
   assert.deepEqual(
     sources,
     ["new MediaStream([track.mediaStreamTrack]", "stream"],

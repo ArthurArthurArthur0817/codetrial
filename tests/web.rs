@@ -596,6 +596,19 @@ fn read_json_dir(path: &str) -> std::collections::BTreeMap<String, Value> {
         .collect()
 }
 
+/// `source` with its whitespace removed and a comma before a closing bracket
+/// dropped, so a check against formatted JavaScript reads the same whether or
+/// not the formatter wrapped the call and gave it a trailing comma. Whitespace
+/// inside a string literal goes too, so a snippet whose meaning rests on a
+/// space in a string needs its own check.
+fn compact(source: &str) -> String {
+    let squashed: String = source.split_whitespace().collect();
+    squashed
+        .replace(",)", ")")
+        .replace(",}", "}")
+        .replace(",]", "]")
+}
+
 fn source_block<'a>(source: &'a str, start: &str, end: &str) -> &'a str {
     let start_index = source
         .find(start)
@@ -643,7 +656,10 @@ fn call_arguments<'a>(source: &'a str, name: &str) -> Vec<&'a str> {
             ')' => {
                 depth -= 1;
                 if depth == 0 {
-                    arguments.push(source[argument_start..at].trim());
+                    let last = source[argument_start..at].trim();
+                    if !last.is_empty() {
+                        arguments.push(last);
+                    }
                     break;
                 }
             }
