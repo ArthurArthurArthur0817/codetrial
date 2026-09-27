@@ -9,13 +9,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   INTERVIEW_SOURCES,
+  assertIncludesCompact,
   captures as matchAll,
   failFetchWith,
+  firstPartyScripts,
   functionBody,
   initialisedModules,
   interviewSource,
   root,
-  firstPartyScripts,
 } from "./source.js";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -71,7 +72,9 @@ function availableAttributes() {
     }
     // app.js sets card.dataset.problem, which renders as data-problem.
     for (const property of matchAll(read(name), /dataset\.([A-Za-z]+)\s*=/g)) {
-      attributes.add(`data-${property.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`);
+      attributes.add(
+        `data-${property.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`,
+      );
     }
   }
   return attributes;
@@ -82,12 +85,19 @@ test("every id a script queries exists in the markup", () => {
   const missing = [];
 
   for (const name of scripts) {
-    for (const selector of matchAll(read(name), /querySelector\("#([^"]+)"\)/g)) {
+    for (const selector of matchAll(
+      read(name),
+      /querySelector\("#([^"]+)"\)/g,
+    )) {
       if (!ids.has(selector)) missing.push(`${name} -> #${selector}`);
     }
   }
 
-  assert.deepEqual(missing, [], "these selectors resolve to nothing at runtime");
+  assert.deepEqual(
+    missing,
+    [],
+    "these selectors resolve to nothing at runtime",
+  );
 });
 
 test("every data attribute a script queries is produced somewhere", () => {
@@ -95,7 +105,10 @@ test("every data attribute a script queries is produced somewhere", () => {
   const missing = [];
 
   for (const name of scripts) {
-    for (const selector of matchAll(read(name), /querySelectorAll\("\[([^\]"]+)\]"\)/g)) {
+    for (const selector of matchAll(
+      read(name),
+      /querySelectorAll\("\[([^\]"]+)\]"\)/g,
+    )) {
       if (!attributes.has(selector)) missing.push(`${name} -> [${selector}]`);
     }
   }
@@ -107,7 +120,11 @@ test("ids are unique within each page", () => {
   for (const name of pages) {
     const ids = matchAll(read(name), /id="([^"]+)"/g);
     const duplicates = ids.filter((id, index) => ids.indexOf(id) !== index);
-    assert.deepEqual(duplicates, [], `${name} repeats an id, so querySelector picks one at random`);
+    assert.deepEqual(
+      duplicates,
+      [],
+      `${name} repeats an id, so querySelector picks one at random`,
+    );
   }
 });
 
@@ -137,11 +154,17 @@ test("problem loader resolves legacy ids and falls back to the default", async (
   const served = [];
   const restore = serveWebFromDisk(served);
   try {
-    const { loadProblem, loadJudge } = await import(join(web, "problem-data.js"));
+    const { loadProblem, loadJudge } = await import(
+      join(web, "problem-data.js")
+    );
 
     const scenario = await loadProblem(twoSum.page);
     assert.equal(scenario.page, twoSum.page);
-    assert.equal("id" in scenario, false, "a scenario load carries no published id");
+    assert.equal(
+      "id" in scenario,
+      false,
+      "a scenario load carries no published id",
+    );
     assert.equal(scenario.requestedPage, undefined);
     // An old link carries the published id and still opens its scenario.
     assert.equal((await loadProblem("two-sum")).title, twoSum.title);
@@ -183,7 +206,9 @@ test("an unreachable bank is reported as unreachable, not as an empty one", asyn
     throw new TypeError("Failed to fetch");
   });
   try {
-    const { loadProblem, loadJudge } = await import(`${join(web, "problem-data.js")}?unreachable`);
+    const { loadProblem, loadJudge } = await import(
+      `${join(web, "problem-data.js")}?unreachable`
+    );
 
     await assert.rejects(() => loadProblem("two-sum"), /could not be reached/);
     await assert.rejects(() => loadJudge("two-sum"), /could not be reached/);
@@ -193,9 +218,15 @@ test("an unreachable bank is reported as unreachable, not as an empty one", asyn
     restore();
   }
 
-  restore = failFetchWith(async () => ({ ok: false, status: 503, json: async () => null }));
+  restore = failFetchWith(async () => ({
+    ok: false,
+    status: 503,
+    json: async () => null,
+  }));
   try {
-    const { loadJudge } = await import(`${join(web, "problem-data.js")}?unavailable`);
+    const { loadJudge } = await import(
+      `${join(web, "problem-data.js")}?unavailable`
+    );
     await assert.rejects(() => loadJudge("two-sum"), /returned 503/);
   } finally {
     restore();
@@ -212,12 +243,18 @@ test("a page map that could not be fetched is asked for again", async () => {
     return fromDiskFetch(url);
   };
   try {
-    const { loadPageMap } = await import(`${join(web, "problem-data.js")}?map-retry`);
+    const { loadPageMap } = await import(
+      `${join(web, "problem-data.js")}?map-retry`
+    );
     await assert.rejects(() => loadPageMap(), /could not be reached/);
     down = false;
     assert.equal((await loadPageMap())["two-sum"].page, twoSum.page);
     await loadPageMap();
-    assert.deepEqual(served, ["/problem-pages.json"], "fetched once it arrived, not per call");
+    assert.deepEqual(
+      served,
+      ["/problem-pages.json"],
+      "fetched once it arrived, not per call",
+    );
   } finally {
     fromDisk();
   }
@@ -228,7 +265,9 @@ test("a judge that cannot be fetched is not a problem without tests", async () =
     throw new TypeError("Failed to fetch");
   });
   try {
-    const { runBrowserTests } = await import(`${join(web, "runners.js")}?judge-unreachable`);
+    const { runBrowserTests } = await import(
+      `${join(web, "runners.js")}?judge-unreachable`
+    );
     const summary = await runBrowserTests("two-sum", "x = 1", "python");
 
     assert.match(summary.setupError, /could not be loaded/);
@@ -246,32 +285,93 @@ test("the interview page keeps the structure the script drives", () => {
   const page = read("interview.html");
   // These are the hooks the interview flow needs; losing one breaks the
   // session in a way unit tests on pure functions cannot see.
-  for (const id of ["editor", "run-tests", "timer", "transcript-panel", "problem-panel", "camera-integrity-video"]) {
-    assert.match(page, new RegExp(`id="${id}"`), `interview.html must keep #${id}`);
+  for (const id of [
+    "editor",
+    "run-tests",
+    "timer",
+    "transcript-panel",
+    "problem-panel",
+    "camera-integrity-video",
+  ]) {
+    assert.match(
+      page,
+      new RegExp(`id="${id}"`),
+      `interview.html must keep #${id}`,
+    );
   }
-  assert.match(page, /<script[^>]+type="module"[^>]+src="\/interview\.js"/, "interview.js must load as a module");
-  assert.match(page, /<script[^>]+src="\/runtime-config\.js"/, "runtime config must load");
+  assert.match(
+    page,
+    /<script[^>]+type="module"[^>]+src="\/interview\.js"/,
+    "interview.js must load as a module",
+  );
+  assert.match(
+    page,
+    /<script[^>]+src="\/runtime-config\.js"/,
+    "runtime config must load",
+  );
   assert.ok(
-    page.indexOf('src="/runtime-config.js"') >= 0
-      && page.indexOf('src="/interview.js"') >= 0
-      && page.indexOf('src="/runtime-config.js"') < page.indexOf('src="/interview.js"'),
+    page.indexOf('src="/runtime-config.js"') >= 0 &&
+      page.indexOf('src="/interview.js"') >= 0 &&
+      page.indexOf('src="/runtime-config.js"') <
+        page.indexOf('src="/interview.js"'),
     "runtime config must load before interview.js imports runners",
   );
-  assert.match(page, /data-language="python"/, "the language tabs drive setLanguage");
-  assert.match(page, /C, C\+\+ and Java runs are sent to Compiler Explorer/, "compiled language runs need third-party disclosure");
+  assert.match(
+    page,
+    /data-language="python"/,
+    "the language tabs drive setLanguage",
+  );
+  assert.match(
+    page,
+    /C, C\+\+ and Java runs are sent to Compiler Explorer/,
+    "compiled language runs need third-party disclosure",
+  );
   const script = interviewSource();
   // The disclosure reads the same "compiled runs are on" the tabs do.
-  assert.match(script, /compileDisclosure\.textContent = compiledTestsEnabled\(\)/);
-  assert.match(read("compiler-explorer.js"), /CODETRIAL_COMPILER_EXPLORER_ENABLED !== false/);
-  assert.match(script, /C, C\+\+ and Java test runs are disabled by this server/);
-  assert.match(page, /id="audio-step-camera"/, "preflight must expose camera readiness");
+  assert.match(
+    script,
+    /compileDisclosure\.textContent = compiledTestsEnabled\(\)/,
+  );
+  assert.match(
+    read("compiler-explorer.js"),
+    /CODETRIAL_COMPILER_EXPLORER_ENABLED !== false/,
+  );
+  assert.match(
+    script,
+    /C, C\+\+ and Java test runs are disabled by this server/,
+  );
+  assert.match(
+    page,
+    /id="audio-step-camera"/,
+    "preflight must expose camera readiness",
+  );
   // Screen sharing was removed rather than left behind a disabled flag, so no
   // part of it may creep back as unreachable code.
-  assert.doesNotMatch(script, /[Ss]creen[SH]|SCREEN_/, "the screen-share path is deleted, not paused");
-  assert.doesNotMatch(page, /screen-share-request|audio-step-screen|screen-health-video/, "no orphaned screen markup");
-  assert.match(script, /new Worker\("\/integrity-worker\.js", \{ type: "module" \}\)/, "integrity analysis must stay off the UI thread");
-  assert.match(read("integrity-worker.js"), /new Worker\("\/face-worker\.js"\)/, "MediaPipe face detection needs a classic worker");
-  assert.doesNotMatch(script, /publishIntegrityEvent\(\{[^}]*url/s, "Blob URLs must not become integrity payloads");
+  assert.doesNotMatch(
+    script,
+    /[Ss]creen[SH]|SCREEN_/,
+    "the screen-share path is deleted, not paused",
+  );
+  assert.doesNotMatch(
+    page,
+    /screen-share-request|audio-step-screen|screen-health-video/,
+    "no orphaned screen markup",
+  );
+  assert.match(
+    script,
+    /new Worker\("\/integrity-worker\.js", \{ type: "module" \}\)/,
+    "integrity analysis must stay off the UI thread",
+  );
+  assert.match(
+    read("integrity-worker.js"),
+    /new Worker\("\/face-worker\.js"\)/,
+    "MediaPipe face detection needs a classic worker",
+  );
+  assert.doesNotMatch(
+    script,
+    /publishIntegrityEvent\(\{[^}]*url/s,
+    "Blob URLs must not become integrity payloads",
+  );
   // A camera another application has taken stays `live` and delivers stale
   // frames. Sampling those charges them as an absent candidate and ends the
   // interview 15s later, which is what opening the camera in Google Meet did.
@@ -294,9 +394,20 @@ test("a late judge response does not replace the active editor buffer", () => {
   const setLanguage = functionBody(script, "setLanguage");
   const updateRunAvailability = functionBody(script, "updateRunAvailability");
   assert.doesNotMatch(applyLanguages, /setLanguage\(/);
-  assert.match(applyLanguages, /updateRunAvailability\(\)/, "the unsupported active tab cannot run");
-  assert.match(setLanguage, /updateRunAvailability\(\)/, "a supported tab restores the runner");
-  assert.match(updateRunAvailability, /!languages\.includes\(state\.language\)/);
+  assert.match(
+    applyLanguages,
+    /updateRunAvailability\(\)/,
+    "the unsupported active tab cannot run",
+  );
+  assert.match(
+    setLanguage,
+    /updateRunAvailability\(\)/,
+    "a supported tab restores the runner",
+  );
+  assert.match(
+    updateRunAvailability,
+    /!languages\.includes\(state\.language\)/,
+  );
 });
 
 test("rapid language selections publish only the final tab", () => {
@@ -307,7 +418,10 @@ test("rapid language selections publish only the final tab", () => {
   assert.doesNotMatch(setLanguage, /flushPendingCodePublish\(\)/);
   // "An edit is queued" is the absence of a queued switch, which is the whole
   // reason a switch is held as a payload rather than a flag.
-  assert.match(flushEditor, /if \(!codePublishTimer \|\| pendingLanguagePublish\) return/);
+  assert.match(
+    flushEditor,
+    /if \(!codePublishTimer \|\| pendingLanguagePublish\) return/,
+  );
 
   // Where it flushes, not just that it does. publishCode reads the live editor
   // and state.language, so a flush moved below either assignment would publish
@@ -315,10 +429,18 @@ test("rapid language selections publish only the final tab", () => {
   // is the regression this test exists for.
   const flushAt = setLanguage.indexOf("flushPendingEditorPublish()");
   const languageAt = setLanguage.indexOf("state.language = language;");
-  const bufferAt = setLanguage.indexOf("nodes.editor.value = state.codeByLanguage[language];");
+  const bufferAt = setLanguage.indexOf(
+    "nodes.editor.value = state.codeByLanguage[language];",
+  );
   assert.ok(flushAt >= 0, "setLanguage flushes a pending editor publish");
-  assert.ok(languageAt > flushAt, "the flush runs before the language is switched");
-  assert.ok(bufferAt > flushAt, "the flush runs before the editor buffer is swapped");
+  assert.ok(
+    languageAt > flushAt,
+    "the flush runs before the language is switched",
+  );
+  assert.ok(
+    bufferAt > flushAt,
+    "the flush runs before the editor buffer is swapped",
+  );
 });
 
 test("typing into a freshly picked tab sends the switch before the keystroke", () => {
@@ -330,18 +452,34 @@ test("typing into a freshly picked tab sends the switch before the keystroke", (
   // time a keystroke can ask for it the editor already holds what was typed, so
   // a flag would have republished the typing under the switch and changed
   // nothing. The publish has to spend that captured copy, not read the editor.
-  assert.match(setLanguage, /pendingLanguagePublish = \{ code: nodes\.editor\.value/);
-  assert.match(flushLanguage, /publishCode\(.*pending\.code, pending\.language\)/);
+  assert.match(
+    setLanguage,
+    /pendingLanguagePublish = \{ code: nodes\.editor\.value/,
+  );
+  assert.match(
+    flushLanguage,
+    /publishCode\(.*pending\.code, pending\.language\)/,
+  );
 
   // Where it flushes, not just that it does. The handler overwrites
   // codeByLanguage with the live editor on its first line, so a flush below
   // that reads the buffer the keystroke produced rather than the one the tab
   // arrived with.
-  const handler = script.slice(script.indexOf('nodes.editor.addEventListener("input"'));
+  const handler = script.slice(
+    script.indexOf('nodes.editor.addEventListener("input"'),
+  );
   const flushAt = handler.indexOf("flushPendingLanguagePublish()");
-  const captureAt = handler.indexOf("state.codeByLanguage[state.language] = nodes.editor.value;");
-  assert.ok(flushAt >= 0, "the input handler flushes a pending language publish");
-  assert.ok(captureAt > flushAt, "the flush runs before the keystroke is captured");
+  const captureAt = handler.indexOf(
+    "state.codeByLanguage[state.language] = nodes.editor.value;",
+  );
+  assert.ok(
+    flushAt >= 0,
+    "the input handler flushes a pending language publish",
+  );
+  assert.ok(
+    captureAt > flushAt,
+    "the flush runs before the keystroke is captured",
+  );
 
   // Clicking through tabs without typing still coalesces, which is what keeps
   // the interviewer from confirming three languages out loud.
@@ -351,7 +489,10 @@ test("typing into a freshly picked tab sends the switch before the keystroke", (
   // reads the handle to mean "an edit is queued", so an id left behind by the
   // end of the interview would publish a buffer after it.
   const endInterview = functionBody(script, "endInterview");
-  assert.match(endInterview, /clearTimeout\(codePublishTimer\);\s*\n\s*codePublishTimer = null;/);
+  assert.match(
+    endInterview,
+    /clearTimeout\(codePublishTimer\);\s*\n\s*codePublishTimer = null;/,
+  );
 });
 
 test("a queued switch leaves as a switch whoever asks for the flush", () => {
@@ -364,10 +505,18 @@ test("a queued switch leaves as a switch whoever asks for the flush", () => {
   // the edit path runs after it and refuses anything with a switch behind it.
   const switchFirst = flush.indexOf("flushPendingLanguagePublish()");
   const editAfter = flush.indexOf("flushPendingEditorPublish()");
-  assert.ok(switchFirst >= 0 && editAfter > switchFirst, "the switch is flushed before the edit");
-  assert.match(edit, /if \(!codePublishTimer \|\| pendingLanguagePublish\) return;/);
-  assert.ok(edit.indexOf("pendingLanguagePublish") < edit.indexOf("recordReplay("),
-    "the edit path refuses a switch before it records anything");
+  assert.ok(
+    switchFirst >= 0 && editAfter > switchFirst,
+    "the switch is flushed before the edit",
+  );
+  assert.match(
+    edit,
+    /if \(!codePublishTimer \|\| pendingLanguagePublish\) return;/,
+  );
+  assert.ok(
+    edit.indexOf("pendingLanguagePublish") < edit.indexOf("recordReplay("),
+    "the edit path refuses a switch before it records anything",
+  );
   assert.match(functionBody(script, "runTests"), /flushPendingCodePublish\(\)/);
 });
 
@@ -410,10 +559,15 @@ test("the module state the first paint reads exists before init paints", () => {
     const match = /^(?:let|const) ([A-Za-z_$][\w$]*)/.exec(line);
     if (match) topLevel.set(match[1], index);
   });
-  const reads = [...functionBody(script, "paintEditor").matchAll(/\b[A-Za-z_$][\w$]*\b/g)]
+  const reads = [
+    ...functionBody(script, "paintEditor").matchAll(/\b[A-Za-z_$][\w$]*\b/g),
+  ]
     .map(([name]) => name)
     .filter((name) => topLevel.has(name));
-  assert.ok(reads.includes("paintedLineCount"), "the check sees what paintEditor reads");
+  assert.ok(
+    reads.includes("paintedLineCount"),
+    "the check sees what paintEditor reads",
+  );
   for (const name of new Set(reads)) {
     assert.ok(
       topLevel.get(name) < initCall,
@@ -431,7 +585,10 @@ test("output confirmation is required but not blocked by tone timing", () => {
 
   assert.doesNotMatch(script, /outputRequired: false/);
   assert.match(heardHandler, /outputConfirmed = true/);
-  assert.match(heardHandler, /addEventListener\("pointerdown", confirmOutput\)/);
+  assert.match(
+    heardHandler,
+    /addEventListener\("pointerdown", confirmOutput\)/,
+  );
   assert.match(heardHandler, /addEventListener\("click", confirmOutput\)/);
   // The tone used to be the only user gesture, and it was what let the browser
   // play the interviewer at all. Confirming without it must not skip that.
@@ -447,15 +604,21 @@ test("a replacement preflight camera gets a fresh face check", () => {
   // asserts the hook rather than a sequence written out at the call site. This
   // is the wiring `face-check.test.js` cannot see, because it is about who
   // calls the reset rather than what the reset does.
-  assert.match(read("interview.js"), /onLost: \(\) => faceCheck\.reset\(\)/,
-    "losing a camera must reset the face check");
+  assert.match(
+    read("interview.js"),
+    /onLost: \(\) => faceCheck\.reset\(\)/,
+    "losing a camera must reset the face check",
+  );
 
   // The preflight notices an ended camera per frame and the pool notices one on
   // a retry pass. Neither may reset the check by hand: `dropTrack` fires
   // `onLost` for the first and `requestDevice` for the second, and a caller
   // pairing the two by hand is what left the reset written at two sites.
-  assert.doesNotMatch(read("interview.js"), /faceCheck\.reset\(\);/,
-    "the face check reset belongs to onLost, not to a call site");
+  assert.doesNotMatch(
+    read("interview.js"),
+    /faceCheck\.reset\(\);/,
+    "the face check reset belongs to onLost, not to a call site",
+  );
 
   // start() awaits three times, and the camera can be replaced across any of
   // them, so every resumption has to re-check that this run still owns the
@@ -463,23 +626,42 @@ test("a replacement preflight camera gets a fresh face check", () => {
   // behaviorally: a test can prove one resumption bails, not that a fourth
   // await added later remembered to.
   const stale = [...read("face-check.js").matchAll(/\bstale\(\)/g)];
-  assert.equal(stale.length, 3,
-    "a stale detector must not publish a verdict for the replacement camera");
+  assert.equal(
+    stale.length,
+    3,
+    "a stale detector must not publish a verdict for the replacement camera",
+  );
 });
 
 test("an unrecorded preflight can continue without a camera", () => {
   const page = read("interview.html");
   const script = interviewSource();
 
-  assert.match(page, /id="camera-skip"/, "the optional path needs a reachable control");
-  assert.match(script, /nodes\.cameraSkip\.hidden = recordingEnabled \|\| cameraSkipped/,
-    "recorded interviews must not offer the bypass a second time");
-  assert.match(script, /pool\.disable\("video"\)/,
-    "declining the camera must stop only its retry path");
-  assert.match(script, /type: "CAMERA_NOT_USED"/,
-    "the session must name the condition in its evidence trail");
-  assert.match(script, /else if \(!preflight\.cameraSkipped\)/,
-    "a skipped camera must not start the face-presence worker");
+  assert.match(
+    page,
+    /id="camera-skip"/,
+    "the optional path needs a reachable control",
+  );
+  assert.match(
+    script,
+    /nodes\.cameraSkip\.hidden = recordingEnabled \|\| cameraSkipped/,
+    "recorded interviews must not offer the bypass a second time",
+  );
+  assert.match(
+    script,
+    /pool\.disable\("video"\)/,
+    "declining the camera must stop only its retry path",
+  );
+  assert.match(
+    script,
+    /type: "CAMERA_NOT_USED"/,
+    "the session must name the condition in its evidence trail",
+  );
+  assert.match(
+    script,
+    /else if \(!preflight\.cameraSkipped\)/,
+    "a skipped camera must not start the face-presence worker",
+  );
 });
 
 // The camera's liveness is judged on every preflight frame. The microphone's
@@ -495,9 +677,11 @@ test("a preflight microphone that goes away is asked for again", () => {
   // hook cannot silently widen the slice this is read out of. What `forget`
   // has to do is not asserted here: it lives in `web/mic-meter.js` now, and
   // `tests/browser/mic-meter.test.js` drives it rather than reading it.
-  assert.match(script,
+  assert.match(
+    script,
     /pool\.configure\("audio",[\s\S]*?onLost: \(\) => \{\s*meter\.forget\(\);/,
-    "dropping a microphone must invalidate its meter and readiness state");
+    "dropping a microphone must invalidate its meter and readiness state",
+  );
 });
 
 test("runtime config can withdraw compiled language test runs", async () => {
@@ -505,7 +689,9 @@ test("runtime config can withdraw compiled language test runs", async () => {
   globalThis.CODETRIAL_COMPILER_EXPLORER_BASE_URL = "";
   const restore = serveWebFromDisk();
   try {
-    const { runBrowserTests } = await import(`../../web/runners.js?compiled-runs-disabled=${Date.now()}`);
+    const { runBrowserTests } = await import(
+      `../../web/runners.js?compiled-runs-disabled=${Date.now()}`
+    );
     for (const language of ["c", "cpp", "java"]) {
       const summary = await runBrowserTests(twoSum.page, "", language);
       assert.equal(summary.language, language);
@@ -534,13 +720,21 @@ test("every report path releases the camera and microphone", () => {
   const script = interviewSource();
   const body = functionBody(script, "renderReport");
 
-  assert.match(body, /stopLocalMedia\(\);/, "renderReport must release the devices");
+  assert.match(
+    body,
+    /stopLocalMedia\(\);/,
+    "renderReport must release the devices",
+  );
   assert.match(body, /stopAvatar\(\);/, "and stop the render loop");
 
   // Both report paths must funnel through it rather than each remembering to
   // clean up for themselves, which is how one of them forgot.
   for (const caller of ["receiveReport", "showReport"]) {
-    assert.match(functionBody(script, caller), /renderReport\(\)/, `${caller} must render through renderReport`);
+    assert.match(
+      functionBody(script, caller),
+      /renderReport\(\)/,
+      `${caller} must render through renderReport`,
+    );
   }
 });
 
@@ -552,7 +746,11 @@ test("a dropped connection is visible and recovers its state", () => {
   const connect = functionBody(script, "connectLiveKit");
 
   for (const event of ["Reconnecting", "Reconnected", "Disconnected"]) {
-    assert.match(connect, new RegExp(`RoomEvent\\.${event}`), `RoomEvent.${event} must be handled`);
+    assert.match(
+      connect,
+      new RegExp(`RoomEvent\\.${event}`),
+      `RoomEvent.${event} must be handled`,
+    );
   }
   // Reconnecting is not a dead session, so the candidate is told to keep going.
   assert.match(connect, /providerUiState\("reconnecting"\)/);
@@ -580,19 +778,32 @@ test("a refused interview says why instead of silently degrading", () => {
 // rather than another boolean lock and another branch.
 test("the presence banner ranks its owners instead of racing them", () => {
   const script = interviewSource();
-  assert.match(script, /const BANNER_RANK = \{[^}]*session[^}]*connection[^}]*interviewer[^}]*face[^}]*\}/);
+  assert.match(
+    script,
+    /const BANNER_RANK = \{[^}]*session[^}]*connection[^}]*interviewer[^}]*face[^}]*\}/,
+  );
   // Every owner keeps a slot, so a warning raised behind a higher-ranked one is
   // deferred rather than discarded.
-  assert.match(functionBody(script, "setBanner"), /banners\[source\] = text \|\| "";/);
+  assert.match(
+    functionBody(script, "setBanner"),
+    /banners\[source\] = text \|\| "";/,
+  );
   // The flag-and-deferred-field mechanism this replaced is gone entirely.
-  assert.doesNotMatch(script, /interviewerBanner|faceBanner|paintPresenceBanner/);
+  assert.doesNotMatch(
+    script,
+    /interviewerBanner|faceBanner|paintPresenceBanner/,
+  );
 });
 
 test("no test runner executes candidate code on the main thread", () => {
   const script = read("runners.js");
 
   assert.match(script, /function runPython/);
-  assert.doesNotMatch(script, /pyodide\.runPython\(pythonDriver\)/, "Python must not run inline");
+  assert.doesNotMatch(
+    script,
+    /pyodide\.runPython\(pythonDriver\)/,
+    "Python must not run inline",
+  );
   for (const runner of ["runPython", "runWorker"]) {
     const start = script.indexOf(`function ${runner}(`);
     // Up to the next top-level declaration, so the assertions cannot drift into
@@ -601,11 +812,20 @@ test("no test runner executes candidate code on the main thread", () => {
     const body = script.slice(start, end);
 
     assert.match(body, /setTimeout\(/, `${runner} must arm a timeout`);
-    assert.match(body, /terminate\(\)/, `${runner} must be able to stop a runaway loop`);
+    assert.match(
+      body,
+      /terminate\(\)/,
+      `${runner} must be able to stop a runaway loop`,
+    );
   }
   // Measured: a cold Compiler Explorer compile takes about six seconds, so a
   // remote run sharing the local execution budget fails every first attempt.
-  const budget = (name) => Number(script.match(new RegExp(`const ${name} = ([0-9_]+)`))[1].replace(/_/g, ""));
+  const budget = (name) =>
+    Number(
+      script
+        .match(new RegExp(`const ${name} = ([0-9_]+)`))[1]
+        .replace(/_/g, ""),
+    );
   assert.ok(
     budget("compilerExplorerTimeoutMs") > budget("testTimeoutMs"),
     "a remote compile needs a larger budget than local execution",
@@ -616,7 +836,6 @@ test("no test runner executes candidate code on the main thread", () => {
   assert.doesNotMatch(script, /cdn\.jsdelivr\.net/);
 });
 
-
 /// The whole-path assertions in this file and four others read
 /// `INTERVIEW_SOURCES`. A cluster split out of `interview.js` and not added to
 /// it is not a failing test: it is five tests that quietly stop covering the
@@ -624,7 +843,9 @@ test("no test runner executes candidate code on the main thread", () => {
 /// about. So the list is checked against the source rather than trusted.
 test("the interview path is read whole", () => {
   const derived = initialisedModules().sort();
-  const listed = INTERVIEW_SOURCES.filter((name) => name !== "web/interview.js").sort();
+  const listed = INTERVIEW_SOURCES.filter(
+    (name) => name !== "web/interview.js",
+  ).sort();
   assert.deepEqual(
     derived,
     listed,
@@ -635,7 +856,6 @@ test("the interview path is read whole", () => {
     "the page script itself is part of the path",
   );
 });
-
 
 /// Every relative import in every first-party script resolves to a file.
 ///
@@ -661,7 +881,8 @@ test("relative imports resolve to files that exist", () => {
       ...matchAll(source, /(?:^|[^\w])export\s+[^;]*?from\s+"(\.[^"]+)"/g),
     ];
     for (const specifier of specifiers) {
-      if (!existsSync(resolve(dir, specifier))) missing.push(`web/${name} -> ${specifier}`);
+      if (!existsSync(resolve(dir, specifier)))
+        missing.push(`web/${name} -> ${specifier}`);
     }
   }
   assert.deepEqual(missing, [], "these specifiers name nothing on disk");
@@ -671,9 +892,18 @@ test("runner progress statuses stay wired to each execution path", () => {
   const script = read("runners.js");
 
   assert.match(script, /onStatus = null/);
-  assert.match(script, /reportStatus\??\.\("booting"\)|reportStatus\("booting"\)/);
-  assert.match(script, /reportStatus\??\.\("compiling"\)|reportStatus\("compiling"\)/);
-  assert.match(script, /reportStatus\??\.\("running"\)|reportStatus\("running"\)/);
+  assert.match(
+    script,
+    /reportStatus\??\.\("booting"\)|reportStatus\("booting"\)/,
+  );
+  assert.match(
+    script,
+    /reportStatus\??\.\("compiling"\)|reportStatus\("compiling"\)/,
+  );
+  assert.match(
+    script,
+    /reportStatus\??\.\("running"\)|reportStatus\("running"\)/,
+  );
 });
 
 /// A report that never arrives must not leave "leave the room" as the only way
@@ -713,7 +943,10 @@ test("the ending overlay counts the wait it is asking the candidate to sit throu
   const ending = functionBody(script, "endInterview");
 
   assert.match(ending, /startEndingClock\(\)/);
-  assert.match(functionBody(script, "startEndingClock"), /nodes\.endingElapsed\.textContent/);
+  assert.match(
+    functionBody(script, "startEndingClock"),
+    /nodes\.endingElapsed\.textContent/,
+  );
   for (const exit of ["renderReport", "leaveRoom"]) {
     assert.match(
       functionBody(script, exit),
@@ -740,7 +973,8 @@ test("a paused interview still counts down and still ends", () => {
     "a pause must not stop the countdown reaching time_up",
   );
   assert.ok(
-    tick.indexOf('endInterview("time_up")') > tick.indexOf("if (!state.paused)"),
+    tick.indexOf('endInterview("time_up")') >
+      tick.indexOf("if (!state.paused)"),
     "the ending is outside the pause guard, so a paused interview still reaches it",
   );
 
@@ -750,7 +984,11 @@ test("a paused interview still counts down and still ends", () => {
   for (const spoken of ["round_transition", "timeWarningPayload"]) {
     const at = tick.indexOf(spoken);
     assert.ok(at !== -1, `${spoken} left tickTimer`);
-    assert.match(tick.slice(0, at), /if \(!state\.paused\)/, `${spoken} would talk into a paused room`);
+    assert.match(
+      tick.slice(0, at),
+      /if \(!state\.paused\)/,
+      `${spoken} would talk into a paused room`,
+    );
     assert.doesNotMatch(
       tick.slice(0, at),
       /previousRemaining/,
@@ -769,7 +1007,7 @@ test("a paused interview still counts down and still ends", () => {
 test("an interview the interviewer ended still records that it ended", () => {
   const receive = functionBody(interviewSource(), "receiveReport");
 
-  assert.match(receive, /recordReplay\("lifecycle", \{ state: "ended"/);
+  assertIncludesCompact(receive, 'recordReplay("lifecycle", { state: "ended"');
   assert.match(
     receive,
     /state\.phase === "live"/,
@@ -790,7 +1028,11 @@ test("a pause releases only the threshold latches it prevented from being heard"
   const script = interviewSource();
   const pause = functionBody(script, "applyPause");
 
-  assert.match(pause, /if \(paused\)/, "the release belongs to pausing, not to resuming twice");
+  assert.match(
+    pause,
+    /if \(paused\)/,
+    "the release belongs to pausing, not to resuming twice",
+  );
   assert.match(
     pause,
     /state\.latchedBeforePause/,
@@ -839,7 +1081,11 @@ test("a report that arrives unasked says which clock ended the interview", () =>
 test("taking the offline summary releases the room", () => {
   const show = functionBody(interviewSource(), "showReport");
 
-  assert.match(show, /state\.room\?\.disconnect/, "the offline report leaves the agent connected");
+  assert.match(
+    show,
+    /state\.room\?\.disconnect/,
+    "the offline report leaves the agent connected",
+  );
   assert.match(show, /state\.room = null/);
   assert.match(show, /state\.connected = false/);
 });

@@ -7,7 +7,11 @@
 /// candidate reads about it are one decision made in three places, and the
 /// order they happen in is the part that matters.
 
-import { OUTPUT_NOTES, outputAfterRouting, outputOptions } from "./meet-audio.js";
+import {
+  OUTPUT_NOTES,
+  outputAfterRouting,
+  outputOptions,
+} from "./meet-audio.js";
 
 let nodes = null;
 /// Read through a function rather than held: `playRemoteAudio` creates and
@@ -27,7 +31,10 @@ export const MEET_PRESENTATION_KEY = "codetrial:meetPresentation";
 /// CodeTrial only decides which speaker plays the tab's own audio.
 export async function refreshAudioOutputs() {
   const mediaDevices = navigator.mediaDevices;
-  if (!mediaDevices?.enumerateDevices || !("setSinkId" in HTMLMediaElement.prototype)) {
+  if (
+    !mediaDevices?.enumerateDevices ||
+    !("setSinkId" in HTMLMediaElement.prototype)
+  ) {
     // Hide the row, not just the control: a label pointing at a hidden select
     // renders as a heading with nothing under it.
     nodes.meetOutputRow.hidden = true;
@@ -66,7 +73,9 @@ let routingChain = Promise.resolve();
 let routingRequest = 0;
 
 export function applyAudioOutput(deviceId) {
-  routingChain = routingChain.then(() => routeAudioOutput(deviceId, ++routingRequest));
+  routingChain = routingChain.then(() =>
+    routeAudioOutput(deviceId, ++routingRequest),
+  );
   return routingChain;
 }
 

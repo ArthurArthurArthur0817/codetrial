@@ -10,7 +10,11 @@ import assert from "node:assert/strict";
 const replayFeed = await import("../../web/replay-feed.js");
 
 function fakeClock() {
-  const real = { now: Date.now, setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout };
+  const real = {
+    now: Date.now,
+    setTimeout: globalThis.setTimeout,
+    clearTimeout: globalThis.clearTimeout,
+  };
   let now = 0;
   let nextId = 1;
   const pending = new Map();
@@ -44,7 +48,10 @@ test("replay-feed waits out Retry-After", async () => {
   globalThis.fetch = async (_url, init) => {
     posts.push(JSON.parse(init.body).events.length);
     const status = statuses.shift();
-    return { status, headers: { get: (name) => (name === "Retry-After" ? "30" : null) } };
+    return {
+      status,
+      headers: { get: (name) => (name === "Retry-After" ? "30" : null) },
+    };
   };
   try {
     replayFeed.initReplay({
@@ -66,11 +73,19 @@ test("replay-feed waits out Retry-After", async () => {
       clock.tick(1000);
       await new Promise(setImmediate);
     }
-    assert.deepEqual(posts, [1], "nor does any timer before the window has passed");
+    assert.deepEqual(
+      posts,
+      [1],
+      "nor does any timer before the window has passed",
+    );
 
     clock.tick(1000);
     await new Promise(setImmediate);
-    assert.deepEqual(posts, [1, 2], "then the kept batch goes, with what queued behind it");
+    assert.deepEqual(
+      posts,
+      [1, 2],
+      "then the kept batch goes, with what queued behind it",
+    );
   } finally {
     replayFeed.closeReplay();
     clock.restore();
@@ -82,7 +97,10 @@ test("replay-feed keeps a batch alive past the page unless it is over the keepal
   const feed = await import("../../web/replay-feed.js?keepalive");
   const posts = [];
   globalThis.fetch = async (_url, init) => {
-    posts.push({ events: JSON.parse(init.body).events.length, keepalive: init.keepalive });
+    posts.push({
+      events: JSON.parse(init.body).events.length,
+      keepalive: init.keepalive,
+    });
     return { status: 204, headers: { get: () => null } };
   };
   try {
@@ -139,19 +157,40 @@ test("replay-feed compacts superseded restates so the interview's end fits one k
     feed.recordReplay("lifecycle", { state: "rounds_final", rounds: 2 });
     await feed.flushReplay();
 
-    assert.equal(posts.length, 1, "the end of the interview goes out in one post");
+    assert.equal(
+      posts.length,
+      1,
+      "the end of the interview goes out in one post",
+    );
     const [post] = posts;
-    assert.equal(post.keepalive, true, "and it is the post that survives the tab closing");
-    assert.ok(post.bytes <= 64 * 1024, `the body is ${post.bytes} bytes, over the keepalive budget`);
+    assert.equal(
+      post.keepalive,
+      true,
+      "and it is the post that survives the tab closing",
+    );
+    assert.ok(
+      post.bytes <= 64 * 1024,
+      `the body is ${post.bytes} bytes, over the keepalive budget`,
+    );
     assert.deepEqual(
       post.events.map((event) => event.kind),
       ["transcript", "tests", "stage", "editor", "lifecycle", "lifecycle"],
       "only the superseded editor and stage frames are gone, and the order is the candidate's",
     );
-    assert.equal(post.events.at(3).payload.text, "c".repeat(30_000), "the editor frame kept is the newest");
-    assert.equal(post.events.at(2).payload.title, "newest", "and so is the stage frame");
+    assert.equal(
+      post.events.at(3).payload.text,
+      "c".repeat(30_000),
+      "the editor frame kept is the newest",
+    );
+    assert.equal(
+      post.events.at(2).payload.title,
+      "newest",
+      "and so is the stage frame",
+    );
     assert.deepEqual(
-      post.events.filter((event) => event.kind === "lifecycle").map((event) => event.payload.state),
+      post.events
+        .filter((event) => event.kind === "lifecycle")
+        .map((event) => event.payload.state),
       ["ended", "rounds_final"],
       "the lifecycle events are present and in order",
     );
@@ -188,13 +227,25 @@ test("replay-feed splits an oversized queue rather than compacting past the rest
     await feed.flushReplay();
     await feed.flushReplay();
 
-    assert.ok(posts.length > 1, "a queue over the budget is more than one post");
+    assert.ok(
+      posts.length > 1,
+      "a queue over the budget is more than one post",
+    );
     for (const post of posts) {
-      assert.equal(post.keepalive, true, "and every one of them can survive the page");
-      assert.ok(post.bytes <= 64 * 1024, `a body of ${post.bytes} bytes is over the keepalive budget`);
+      assert.equal(
+        post.keepalive,
+        true,
+        "and every one of them can survive the page",
+      );
+      assert.ok(
+        post.bytes <= 64 * 1024,
+        `a body of ${post.bytes} bytes is over the keepalive budget`,
+      );
     }
     assert.deepEqual(
-      posts.flatMap((post) => post.events).map((event) => event.payload.text.at(0)),
+      posts
+        .flatMap((post) => post.events)
+        .map((event) => event.payload.text.at(0)),
       ["0", "1", "2", "3"],
       "every line is delivered, in order",
     );
@@ -252,7 +303,10 @@ test("replay-feed keeps a batch of exactly the keepalive budget in one post", as
   const feed = await import("../../web/replay-feed.js?boundary");
   const posts = [];
   globalThis.fetch = async (_url, init) => {
-    posts.push({ bytes: new TextEncoder().encode(init.body).length, keepalive: init.keepalive });
+    posts.push({
+      bytes: new TextEncoder().encode(init.body).length,
+      keepalive: init.keepalive,
+    });
     return { status: 204, headers: { get: () => null } };
   };
   try {
@@ -263,13 +317,21 @@ test("replay-feed keeps a batch of exactly the keepalive budget in one post", as
       consentVersion: "v1",
       replayVersion: 1,
     });
-    const encoded = (value) => new TextEncoder().encode(JSON.stringify(value)).length;
+    const encoded = (value) =>
+      new TextEncoder().encode(JSON.stringify(value)).length;
     // The envelope and the event, as the queue writes them: the fake clock
     // holds `at` at 0, so the only length left to choose is the text's.
     const envelope = encoded({ events: [] });
-    const event = (text) => ({ v: 1, kind: "transcript", at: 0, payload: { text } });
+    const event = (text) => ({
+      v: 1,
+      kind: "transcript",
+      at: 0,
+      payload: { text },
+    });
     const budget = 64 * 1024;
-    const text = "x".repeat(budget - envelope - 1 - encoded(event("")) - encoded(event("")));
+    const text = "x".repeat(
+      budget - envelope - 1 - encoded(event("")) - encoded(event("")),
+    );
 
     feed.recordReplay("transcript", { text: "" });
     feed.recordReplay("transcript", { text });

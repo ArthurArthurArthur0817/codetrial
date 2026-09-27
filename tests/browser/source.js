@@ -8,12 +8,28 @@
 // assertions against it passed against unrelated code. `web/interview.js`
 // declares fifteen `async function`s, so that was one edit away from happening.
 
+import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, extname, join, sep } from "node:path";
 
 export const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+
+/// Asserts that `snippet` occurs in `source` once both have their whitespace
+/// removed and a comma before a closing bracket dropped, so an assertion on
+/// formatted source reads the same whether or not the formatter wrapped a call
+/// and gave it a trailing comma. Whitespace inside a string literal goes too,
+/// so a snippet whose meaning rests on a space in a string needs its own check.
+/// The failure names the snippet, which a bare boolean in assert.ok would not.
+export function assertIncludesCompact(source, snippet, message) {
+  const compact = (text) =>
+    text.replace(/\s+/g, "").replace(/,(?=[)\]}])/g, "");
+  assert.ok(
+    compact(source).includes(compact(snippet)),
+    `${message ?? "source text is missing"}: ${snippet}`,
+  );
+}
 
 export function read(name) {
   return readFileSync(join(root, name), "utf8");
@@ -62,7 +78,10 @@ export function initialisedModules() {
   return firstPartyScripts()
     .map((name) => `web/${name}`)
     .filter((path) => {
-      const exported = captures(read(path), /^export function (init[A-Z]\w*)\(/gm);
+      const exported = captures(
+        read(path),
+        /^export function (init[A-Z]\w*)\(/gm,
+      );
       return exported.some((name) => called.has(name));
     });
 }
@@ -106,7 +125,9 @@ export function livekitSource() {
 /// cannot find, so a renamed function fails the test that pins it instead of
 /// silently asserting against an empty string.
 export function functionBody(source, name) {
-  const start = source.search(new RegExp(`^(?:export )?(?:async )?function ${name}\\(`, "m"));
+  const start = source.search(
+    new RegExp(`^(?:export )?(?:async )?function ${name}\\(`, "m"),
+  );
   if (start === -1) throw new Error(`no function named ${name}`);
   const end = source.indexOf("\n}\n", start);
   return source.slice(start, end === -1 ? source.length : end);
@@ -157,9 +178,12 @@ export async function launchChromium() {
     // `cause` rather than the message alone: when CI does break, the frame that
     // names what went wrong is the launcher's, not this one's.
     if (process.env.CI) {
-      throw new Error("CI has no usable Chromium, so the browser suite would test nothing", {
-        cause: error,
-      });
+      throw new Error(
+        "CI has no usable Chromium, so the browser suite would test nothing",
+        {
+          cause: error,
+        },
+      );
     }
     return null;
   }
@@ -211,12 +235,19 @@ export async function startStaticServer({ handle, runtimeConfig } = {}) {
       return;
     }
     const file = join(web, url.pathname === "/" ? "index.html" : url.pathname);
-    if (!file.startsWith(web + sep) || !existsSync(file) || statSync(file).isDirectory()) {
+    if (
+      !file.startsWith(web + sep) ||
+      !existsSync(file) ||
+      statSync(file).isDirectory()
+    ) {
       response.statusCode = 404;
       response.end("not found");
       return;
     }
-    response.setHeader("content-type", STATIC_CONTENT_TYPES[extname(file)] ?? "application/json");
+    response.setHeader(
+      "content-type",
+      STATIC_CONTENT_TYPES[extname(file)] ?? "application/json",
+    );
     response.end(readFileSync(file));
   });
   await new Promise((listening) => server.listen(0, "127.0.0.1", listening));

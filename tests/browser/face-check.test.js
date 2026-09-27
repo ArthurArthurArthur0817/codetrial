@@ -47,7 +47,9 @@ test("a camera that is not ready is not watched", async () => {
 // No detector means no verdict to wait for, not a failed one. Reporting an
 // error here would block a candidate whose browser simply lacks the API.
 test("no available detector leaves the check ready rather than failed", async () => {
-  const { check } = harness({ createDetector: async () => ({ available: false }) });
+  const { check } = harness({
+    createDetector: async () => ({ available: false }),
+  });
 
   await check.start();
 
@@ -76,13 +78,15 @@ test("a reset mid-flight discards the detector the old run was building", async 
   let release;
   const closed = [];
   const { check } = harness({
-    createDetector: () => new Promise((resolve) => {
-      release = () => resolve({
-        available: true,
-        detect: async () => "raw",
-        close: () => closed.push("stale"),
-      });
-    }),
+    createDetector: () =>
+      new Promise((resolve) => {
+        release = () =>
+          resolve({
+            available: true,
+            detect: async () => "raw",
+            close: () => closed.push("stale"),
+          });
+      }),
   });
 
   const running = check.start();
@@ -94,7 +98,11 @@ test("a reset mid-flight discards the detector the old run was building", async 
   await running;
   await settle();
 
-  assert.deepEqual(closed, ["stale"], "the stale detector was kept instead of closed");
+  assert.deepEqual(
+    closed,
+    ["stale"],
+    "the stale detector was kept instead of closed",
+  );
   assert.equal(check.ready, true, "a reset leaves nothing to wait for");
 });
 

@@ -11,7 +11,13 @@
 // section it already serves.
 
 import { reportMarkup } from "/render.js";
-import { modeLabel, replayRows, replayTimeline, responseWindowLabel, sanitizeReport } from "/lib.js";
+import {
+  modeLabel,
+  replayRows,
+  replayTimeline,
+  responseWindowLabel,
+  sanitizeReport,
+} from "/lib.js";
 
 const nodes = {
   list: document.querySelector("#replay-list"),
@@ -35,7 +41,8 @@ const nodes = {
 /// here", because the file is in a Shared Drive folder shared with the address
 /// GitHub verified, and this page has never been told where it is.
 const MEDIA_WORDS = {
-  ready: "The video was shared with your verified email address. It is deleted 24 hours after the interview.",
+  ready:
+    "The video was shared with your verified email address. It is deleted 24 hours after the interview.",
   recording: "This interview is still being recorded.",
   starting: "This interview is still being recorded.",
   finalizing: "The recording is being finished.",
@@ -150,7 +157,9 @@ async function select(recordingId) {
   nodes.title.textContent = "Recording";
   clearDetail();
 
-  const response = await fetch(`/api/recordings/${encodeURIComponent(recordingId)}`);
+  const response = await fetch(
+    `/api/recordings/${encodeURIComponent(recordingId)}`,
+  );
   // A click while a fetch was in flight. Without this the older answer paints
   // over the newer one and the page shows one recording's state beside
   // another's transcript.
@@ -164,9 +173,11 @@ async function select(recordingId) {
     // A recording that is gone is not an error to apologise for. It is the
     // retention promise being kept, and the page says which of the two ways it
     // was kept.
-    nodes.status.textContent = response.status === 410 ? "Deleted" : "Not available";
+    nodes.status.textContent =
+      response.status === 410 ? "Deleted" : "Not available";
     nodes.media.textContent =
-      GONE_WORDS[body.code] || "This recording is not available on this account.";
+      GONE_WORDS[body.code] ||
+      "This recording is not available on this account.";
     return;
   }
   const recording = await response.json();
@@ -177,7 +188,8 @@ async function select(recordingId) {
   nodes.media.textContent =
     MEDIA_WORDS[recording.state] || "There is no video for this interview.";
   if (recording.quotaExceeded) {
-    nodes.media.textContent += " The replay below stops before the end of the interview.";
+    nodes.media.textContent +=
+      " The replay below stops before the end of the interview.";
   }
   // Events first, then the report, because the report card shows the code and
   // the code comes from the last editor snapshot the events carried.
@@ -234,7 +246,8 @@ async function loadEvents(recordingId) {
     const body = await response.json().catch(() => ({}));
     if (selected !== recordingId) return;
     if (response.status === 410) {
-      nodes.media.textContent = GONE_WORDS[body.code] || nodes.media.textContent;
+      nodes.media.textContent =
+        GONE_WORDS[body.code] || nodes.media.textContent;
       return;
     }
     // Said rather than left blank. An empty transcript beside an interview that
@@ -269,7 +282,8 @@ export function render(events) {
   // Only where the recording actually carried one. Reading it unconditionally
   // floored `undefined` to "Scored" and announced a distinction that no longer
   // exists on every replay made since the practice mode was removed.
-  const mode = stage?.payload?.mode === undefined ? "" : modeLabel(stage.payload.mode);
+  const mode =
+    stage?.payload?.mode === undefined ? "" : modeLabel(stage.payload.mode);
   if (mode) {
     nodes.status.textContent = nodes.status.textContent
       ? `${nodes.status.textContent} · ${mode}`
@@ -332,7 +346,10 @@ function windowItem(span, index) {
   // `WINDOW_WORDS` and can say nothing else. Empty parts dropped rather than
   // joined: `momentTime` answers a clock it cannot read with "", and joining
   // that left the label opening on a separator with nothing in front of it.
-  item.textContent = [momentTime(span.at), ...responseWindowLabel(span, WINDOW_WORDS)]
+  item.textContent = [
+    momentTime(span.at),
+    ...responseWindowLabel(span, WINDOW_WORDS),
+  ]
     .filter(Boolean)
     .join(WINDOW_WORDS.separator);
   return item;

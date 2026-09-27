@@ -61,8 +61,8 @@ const layout = params.get("layout") || "default";
 export function isRecorder(participant) {
   return Boolean(
     participant?.permissions?.hidden ||
-      participant?.identity?.startsWith("EG_") ||
-      participant?.identity?.startsWith("egress-"),
+    participant?.identity?.startsWith("EG_") ||
+    participant?.identity?.startsWith("egress-"),
   );
 }
 
@@ -75,7 +75,8 @@ export function publishesCamera(participant) {
   const publications = participant?.videoTrackPublications;
   if (!publications) return false;
   for (const publication of publications.values()) {
-    if (publication.source === window.LivekitClient.Track.Source.Camera) return true;
+    if (publication.source === window.LivekitClient.Track.Source.Camera)
+      return true;
   }
   return false;
 }
@@ -89,7 +90,9 @@ export function publishesCamera(participant) {
 export function findCandidate(participants) {
   return participants.find(
     (participant) =>
-      !isAgent(participant) && !isRecorder(participant) && publishesCamera(participant),
+      !isAgent(participant) &&
+      !isRecorder(participant) &&
+      publishesCamera(participant),
   );
 }
 
@@ -160,8 +163,10 @@ export function applyReplayEvent(event) {
   const payload = event?.payload || {};
   switch (event?.kind) {
     case "stage":
-      if (typeof payload.title === "string") nodes.problemTitle.textContent = payload.title;
-      if (typeof payload.meta === "string") nodes.problemMeta.textContent = payload.meta;
+      if (typeof payload.title === "string")
+        nodes.problemTitle.textContent = payload.title;
+      if (typeof payload.meta === "string")
+        nodes.problemMeta.textContent = payload.meta;
       if (typeof payload.remainingSeconds === "number") {
         nodes.timer.textContent = clockText(payload.remainingSeconds);
       }
@@ -170,7 +175,8 @@ export function applyReplayEvent(event) {
       // `textContent`, never `innerHTML`. This is the candidate's own code
       // rendered into a page a recorder screenshots sixty times a second, and
       // markup in it would be markup in the recording.
-      if (typeof payload.code === "string") nodes.code.textContent = payload.code;
+      if (typeof payload.code === "string")
+        nodes.code.textContent = payload.code;
       break;
     case "tests":
       nodes.tests.replaceChildren(testsLine(payload));
@@ -285,7 +291,8 @@ function candidateTrack(participant) {
   const publications = participant?.videoTrackPublications;
   if (!publications) return null;
   for (const publication of publications.values()) {
-    if (publication.source !== window.LivekitClient.Track.Source.Camera) continue;
+    if (publication.source !== window.LivekitClient.Track.Source.Camera)
+      continue;
     if (publication.track) return publication.track;
   }
   return null;
@@ -309,7 +316,10 @@ async function connect() {
   // into, which is the right answer for a person on a laptop and the wrong one
   // for a recorder, where the output resolution is fixed and a downgraded
   // stream is a permanently blurry file.
-  const room = new window.LivekitClient.Room({ adaptiveStream: false, dynacast: false });
+  const room = new window.LivekitClient.Room({
+    adaptiveStream: false,
+    dynacast: false,
+  });
   const events = window.LivekitClient.RoomEvent;
 
   room.on(events.TrackSubscribed, (track, publication, participant) => {
@@ -425,10 +435,12 @@ function pumpAvatar(at) {
   if (analyser) {
     analyser.getByteTimeDomainData(samples);
     let peak = 0;
-    for (const sample of samples) peak = Math.max(peak, Math.abs(sample - 128) / 128);
+    for (const sample of samples)
+      peak = Math.max(peak, Math.abs(sample - 128) / 128);
     amplitudes.push(peak);
     if (amplitudes.length > ANALYSER_WINDOW) amplitudes.shift();
-    const average = amplitudes.reduce((total, each) => total + each, 0) / amplitudes.length;
+    const average =
+      amplitudes.reduce((total, each) => total + each, 0) / amplitudes.length;
     avatar.setMouth(mouthFromAmplitude(average));
   }
   // The rAF timestamp, not `performance.now()`: it is the frame's target time
@@ -445,13 +457,16 @@ function pumpAvatar(at) {
 function listenToAgent(track) {
   if (!track?.mediaStreamTrack) return;
   audioContext ||= new (window.AudioContext || window.webkitAudioContext)();
-  if (audioContext.state === "suspended") void audioContext.resume().catch(() => {});
+  if (audioContext.state === "suspended")
+    void audioContext.resume().catch(() => {});
   // The old graph first. LiveKit re-subscribes the interviewer on every
   // reconnect, and a source per subscription accumulates nodes that hold their
   // tracks and keep processing for the rest of the interview.
   analyserSource?.disconnect();
   analyser?.disconnect();
-  const source = audioContext.createMediaStreamSource(new MediaStream([track.mediaStreamTrack]));
+  const source = audioContext.createMediaStreamSource(
+    new MediaStream([track.mediaStreamTrack]),
+  );
   analyserSource = source;
   analyser = audioContext.createAnalyser();
   analyser.fftSize = ANALYSER_FFT_SIZE;

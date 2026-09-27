@@ -5,7 +5,12 @@
 // that never returns costs one test run, not the interview.
 
 import { loadJudge } from "./problem-data.js";
-import { compilerExplorerBaseUrl, generateHarness, harnessGap, mapCompilerResponse } from "./compiler-explorer.js";
+import {
+  compilerExplorerBaseUrl,
+  generateHarness,
+  harnessGap,
+  mapCompilerResponse,
+} from "./compiler-explorer.js";
 import { DIAGNOSTIC, checkAnswer, renderValue } from "./lib.js";
 
 /// How long candidate code may run locally, in either Worker. This bounds
@@ -36,7 +41,9 @@ const compilerExplorer = {
 // root-relative path there has no origin to resolve against. Resolved lazily
 // because the browser tests import this module under node, where there is no
 // `location`.
-const pyodideBaseUrl = () => new URL("/vendor/pyodide/", globalThis.location?.href ?? "http://localhost/").href;
+const pyodideBaseUrl = () =>
+  new URL("/vendor/pyodide/", globalThis.location?.href ?? "http://localhost/")
+    .href;
 let pythonWorkerPromise = null;
 
 export function parseCandidateCase(spec, input) {
@@ -46,11 +53,15 @@ export function parseCandidateCase(spec, input) {
   } catch {
     throw new Error("Input must be a JSON argument array.");
   }
-  if (!Array.isArray(args)) throw new Error("Input must be a JSON argument array.");
+  if (!Array.isArray(args))
+    throw new Error("Input must be a JSON argument array.");
   if (spec.kind === "class") return parseClassCandidateCase(spec, args);
   const types = spec.paramTypes || [];
   const names = spec.paramNames || [];
-  if (args.length !== types.length) throw new Error(`Expected ${types.length} arguments, received ${args.length}.`);
+  if (args.length !== types.length)
+    throw new Error(
+      `Expected ${types.length} arguments, received ${args.length}.`,
+    );
   for (const [index, type] of types.entries()) {
     // `argTypes` is the node shape the judge builds, `paramTypes` the language
     // signature. Name whichever one was checked: "must match Node" tells a
@@ -72,7 +83,9 @@ export function parseCandidateCase(spec, input) {
   const list = args[spec.argTypes?.indexOf("linkedList")];
   if (Number.isInteger(cycle) && Array.isArray(list)) {
     if (args[cycle] < -1 || args[cycle] >= list.length) {
-      throw new Error(`Parameter ${cycle + 1} must name a list position or -1.`);
+      throw new Error(
+        `Parameter ${cycle + 1} must name a list position or -1.`,
+      );
     }
   }
   const tree = reachableTreeValues(args[spec.nodeRefRootParam ?? 0]);
@@ -90,12 +103,14 @@ export function parseCandidateCase(spec, input) {
 /// the array would accept that reference and the runner would then fail to
 /// resolve it, differently in each language.
 function reachableTreeValues(values) {
-  if (!Array.isArray(values) || values[0] === null || values[0] === undefined) return [];
+  if (!Array.isArray(values) || values[0] === null || values[0] === undefined)
+    return [];
   const reachable = [values[0]];
   let index = 1;
   for (let parent = 0; parent < reachable.length; parent++) {
     for (let side = 0; side < 2; side++, index++) {
-      if (index < values.length && values[index] !== null) reachable.push(values[index]);
+      if (index < values.length && values[index] !== null)
+        reachable.push(values[index]);
     }
   }
   return reachable;
@@ -107,36 +122,78 @@ function candidateTypeMatches(value, type) {
   if (typeof type !== "string") return false;
   if (type === "array" || type === "Node") return Array.isArray(value);
   if (type === "null") return value === null;
-  if (type === "object") return value !== null && typeof value === "object" && !Array.isArray(value);
-  if (type.endsWith("[]")) return Array.isArray(value) && value.every((item) => candidateTypeMatches(item, type.slice(0, -2)));
+  if (type === "object")
+    return value !== null && typeof value === "object" && !Array.isArray(value);
+  if (type.endsWith("[]"))
+    return (
+      Array.isArray(value) &&
+      value.every((item) => candidateTypeMatches(item, type.slice(0, -2)))
+    );
   const list = /^list<(.*)>$/.exec(type);
-  if (list) return Array.isArray(value) && value.every((item) => candidateTypeMatches(item, list[1]));
+  if (list)
+    return (
+      Array.isArray(value) &&
+      value.every((item) => candidateTypeMatches(item, list[1]))
+    );
   if (type === "integer") return Number.isInteger(value);
   if (type === "double" || type === "number") return Number.isFinite(value);
   if (type === "string") return typeof value === "string";
   if (type === "boolean") return typeof value === "boolean";
-  if (type === "character") return typeof value === "string" && [...value].length === 1;
-  if (["linkedList", "ListNode"].includes(type)) return Array.isArray(value) && value.every(Number.isInteger);
+  if (type === "character")
+    return typeof value === "string" && [...value].length === 1;
+  if (["linkedList", "ListNode"].includes(type))
+    return Array.isArray(value) && value.every(Number.isInteger);
   if (["binaryTree", "nextTree", "TreeNode"].includes(type)) {
-    return Array.isArray(value) && value.every((item) => item === null || Number.isInteger(item));
+    return (
+      Array.isArray(value) &&
+      value.every((item) => item === null || Number.isInteger(item))
+    );
   }
-  if (type === "linkedListArray") return Array.isArray(value) && value.every((item) => candidateTypeMatches(item, "linkedList"));
+  if (type === "linkedListArray")
+    return (
+      Array.isArray(value) &&
+      value.every((item) => candidateTypeMatches(item, "linkedList"))
+    );
   if (type === "randomList") {
-    return Array.isArray(value) && value.every((item) => Array.isArray(item) && item.length === 2
-      && Number.isInteger(item[0]) && (item[1] === null
-        || (Number.isInteger(item[1]) && item[1] >= 0 && item[1] < value.length)));
+    return (
+      Array.isArray(value) &&
+      value.every(
+        (item) =>
+          Array.isArray(item) &&
+          item.length === 2 &&
+          Number.isInteger(item[0]) &&
+          (item[1] === null ||
+            (Number.isInteger(item[1]) &&
+              item[1] >= 0 &&
+              item[1] < value.length)),
+      )
+    );
   }
-  if (type === "graphNode") return Array.isArray(value)
-    && value.every((item) => Array.isArray(item)
-      && item.every((neighbor) => Number.isInteger(neighbor) && neighbor >= 1 && neighbor <= value.length));
-  if (["cyclePos", "treeNodeValue"].includes(type)) return Number.isInteger(value);
+  if (type === "graphNode")
+    return (
+      Array.isArray(value) &&
+      value.every(
+        (item) =>
+          Array.isArray(item) &&
+          item.every(
+            (neighbor) =>
+              Number.isInteger(neighbor) &&
+              neighbor >= 1 &&
+              neighbor <= value.length,
+          ),
+      )
+    );
+  if (["cyclePos", "treeNodeValue"].includes(type))
+    return Number.isInteger(value);
   return false;
 }
 
 function inferredCandidateType(value) {
   if (Array.isArray(value)) {
     const itemTypes = new Set(value.map(inferredCandidateType));
-    return itemTypes.size === 1 ? `${itemTypes.values().next().value}[]` : "array";
+    return itemTypes.size === 1
+      ? `${itemTypes.values().next().value}[]`
+      : "array";
   }
   if (value === null) return "null";
   if (Number.isInteger(value)) return "integer";
@@ -145,13 +202,26 @@ function inferredCandidateType(value) {
 }
 
 function parseClassCandidateCase(spec, input) {
-  if (input.length !== 2 || !Array.isArray(input[0]) || !Array.isArray(input[1]) || input[0].length !== input[1].length) {
-    throw new Error("A class case needs matching operation and argument arrays.");
+  if (
+    input.length !== 2 ||
+    !Array.isArray(input[0]) ||
+    !Array.isArray(input[1]) ||
+    input[0].length !== input[1].length
+  ) {
+    throw new Error(
+      "A class case needs matching operation and argument arrays.",
+    );
   }
-  if (!input[0].every((operation) => typeof operation === "string") || !input[1].every(Array.isArray)) {
-    throw new Error("Class operations must be strings with JSON argument arrays.");
+  if (
+    !input[0].every((operation) => typeof operation === "string") ||
+    !input[1].every(Array.isArray)
+  ) {
+    throw new Error(
+      "Class operations must be strings with JSON argument arrays.",
+    );
   }
-  if (input[0][0] !== spec.className) throw new Error(`The first operation must be ${spec.className}.`);
+  if (input[0][0] !== spec.className)
+    throw new Error(`The first operation must be ${spec.className}.`);
   const signatures = new Map();
   for (const testCase of spec.cases) {
     const [operations, argumentsList] = testCase.input || [];
@@ -160,9 +230,11 @@ function parseClassCandidateCase(spec, input) {
       const args = argumentsList[index];
       if (!Array.isArray(args)) continue;
       const allowed = signatures.get(operation) || [];
-      allowed.push(operation === spec.className && spec.constructorArgTypes
-        ? spec.constructorArgTypes
-        : args.map(inferredCandidateType));
+      allowed.push(
+        operation === spec.className && spec.constructorArgTypes
+          ? spec.constructorArgTypes
+          : args.map(inferredCandidateType),
+      );
       signatures.set(operation, allowed);
     }
   }
@@ -171,14 +243,27 @@ function parseClassCandidateCase(spec, input) {
       throw new Error(`Only the first operation may be ${spec.className}.`);
     }
     const allowed = signatures.get(operation);
-    if (!allowed) throw new Error("Class case names an operation this exercise does not provide.");
+    if (!allowed)
+      throw new Error(
+        "Class case names an operation this exercise does not provide.",
+      );
     const args = input[1][index];
     const sameArity = allowed.filter((types) => types.length === args.length);
     if (!sameArity.length) {
-      throw new Error(`Operation ${operation} does not accept ${args.length} arguments.`);
+      throw new Error(
+        `Operation ${operation} does not accept ${args.length} arguments.`,
+      );
     }
-    if (!sameArity.some((types) => types.every((type, argument) => candidateTypeMatches(args[argument], type)))) {
-      throw new Error(`Arguments for operation ${operation} do not match its parameter types.`);
+    if (
+      !sameArity.some((types) =>
+        types.every((type, argument) =>
+          candidateTypeMatches(args[argument], type),
+        ),
+      )
+    ) {
+      throw new Error(
+        `Arguments for operation ${operation} do not match its parameter types.`,
+      );
     }
   }
   return input;
@@ -190,10 +275,24 @@ function outage(setupError) {
   return { runnerUnavailable: true, setupError };
 }
 
-export async function runBrowserTests(problemId, code, language, onStatus = null, candidateCases = []) {
+export async function runBrowserTests(
+  problemId,
+  code,
+  language,
+  onStatus = null,
+  candidateCases = [],
+) {
   // `code` is what this run executed. The agent credits Test to it rather than
   // to the editor when the results land, which may have moved on since.
-  const empty = { problemId, language, code, passed: 0, total: 0, cases: [], at: Date.now() };
+  const empty = {
+    problemId,
+    language,
+    code,
+    passed: 0,
+    total: 0,
+    cases: [],
+    at: Date.now(),
+  };
   // A judge that cannot be fetched is not a problem without tests. Reporting
   // both the same way told a candidate on a flaky connection that their problem
   // had no test cases, which is the one reading that makes them stop trying.
@@ -201,30 +300,58 @@ export async function runBrowserTests(problemId, code, language, onStatus = null
   try {
     spec = await loadJudge(problemId);
   } catch {
-    return { ...empty, ...outage("The test cases could not be loaded. Check your connection and run again.") };
+    return {
+      ...empty,
+      ...outage(
+        "The test cases could not be loaded. Check your connection and run again.",
+      ),
+    };
   }
   // Neither of these is the candidate's doing, and no edit can make a run pass
   // them, so the agent is told the runner itself is missing.
-  if (!spec) return { ...empty, ...outage("No test cases are defined for this problem.") };
-  const candidates = candidateCases.map((testCase, index) => ({ ...testCase, label: testCase.label || `Your case ${index + 1}` }));
+  if (!spec)
+    return {
+      ...empty,
+      ...outage("No test cases are defined for this problem."),
+    };
+  const candidates = candidateCases.map((testCase, index) => ({
+    ...testCase,
+    label: testCase.label || `Your case ${index + 1}`,
+  }));
   const runnable = { ...spec, cases: [...spec.cases, ...candidates] };
   const base = { ...empty, total: spec.cases.length };
   const gap = harnessGap(language, spec);
   if (gap) return { ...base, setupError: gap };
   const reportStatus = (status) => onStatus?.(status);
   try {
-    const raw = language === "python"
-      ? await runPython(code, runnable, reportStatus)
-      : compilerExplorer[language]
-        ? await runCompilerExplorer(language, code, runnable, reportStatus)
-        : (reportStatus("running"), await runWorker(code, runnable));
-    if (raw.setupError || !raw.results) return { ...base, runnerUnavailable: raw.runnerUnavailable, setupError: raw.setupError || "The run produced no results.", diagnostic: raw.diagnostic || null };
+    const raw =
+      language === "python"
+        ? await runPython(code, runnable, reportStatus)
+        : compilerExplorer[language]
+          ? await runCompilerExplorer(language, code, runnable, reportStatus)
+          : (reportStatus("running"), await runWorker(code, runnable));
+    if (raw.setupError || !raw.results)
+      return {
+        ...base,
+        runnerUnavailable: raw.runnerUnavailable,
+        setupError: raw.setupError || "The run produced no results.",
+        diagnostic: raw.diagnostic || null,
+      };
     const cases = runnable.cases.map((testCase, index) => {
       const candidate = index >= spec.cases.length;
       const observed = candidate && !Object.hasOwn(testCase, "expected");
       const result = raw.results[index];
       if (!result || result.error) {
-        return { label: testCase.label, pass: false, got: "-", expected: observed ? undefined : renderValue(testCase.expected), ...(candidate ? { input: renderValue(testCase.input) } : {}), error: result?.error || "No result produced.", timeMs: Math.round(result?.timeMs || 0), candidate };
+        return {
+          label: testCase.label,
+          pass: false,
+          got: "-",
+          expected: observed ? undefined : renderValue(testCase.expected),
+          ...(candidate ? { input: renderValue(testCase.input) } : {}),
+          error: result?.error || "No result produced.",
+          timeMs: Math.round(result?.timeMs || 0),
+          candidate,
+        };
       }
       let pass = null;
       let error = null;
@@ -236,9 +363,23 @@ export async function runBrowserTests(problemId, code, language, onStatus = null
           error = String(caught.message || caught);
         }
       }
-      return { label: testCase.label, pass, got: renderValue(result.actual), expected: observed ? undefined : renderValue(testCase.expected), ...(candidate ? { input: renderValue(testCase.input) } : {}), ...(error ? { error } : {}), timeMs: Math.round(result.timeMs), candidate };
+      return {
+        label: testCase.label,
+        pass,
+        got: renderValue(result.actual),
+        expected: observed ? undefined : renderValue(testCase.expected),
+        ...(candidate ? { input: renderValue(testCase.input) } : {}),
+        ...(error ? { error } : {}),
+        timeMs: Math.round(result.timeMs),
+        candidate,
+      };
     });
-    return { ...base, cases, passed: cases.filter((item) => !item.candidate && item.pass === true).length };
+    return {
+      ...base,
+      cases,
+      passed: cases.filter((item) => !item.candidate && item.pass === true)
+        .length,
+    };
   } catch (error) {
     return {
       ...base,
@@ -262,38 +403,52 @@ async function runCompilerExplorer(language, code, spec, reportStatus = null) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), compilerExplorerTimeoutMs);
   try {
-    const response = await fetch(`${compilerExplorerBaseUrl()}/api/compiler/${config.compiler}/compile`, {
-      method: "POST",
-      headers: {
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        source,
-        options: {
-          userArguments: config.userArguments,
-          compilerOptions: { executorRequest: true },
-          filters: { execute: true },
-          executeParameters: { args: [], stdin: "" },
+    const response = await fetch(
+      `${compilerExplorerBaseUrl()}/api/compiler/${config.compiler}/compile`,
+      {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
         },
-      }),
-      signal: controller.signal,
-    });
+        body: JSON.stringify({
+          source,
+          options: {
+            userArguments: config.userArguments,
+            compilerOptions: { executorRequest: true },
+            filters: { execute: true },
+            executeParameters: { args: [], stdin: "" },
+          },
+        }),
+        signal: controller.signal,
+      },
+    );
     // A 4xx is this run's request refused (an oversized or rejected source),
     // which an edit can fix. Only the service failing, or refusing for load,
     // is an outage.
     if (response.status >= 500 || response.status === 429) {
-      return outage(`Compiler Explorer returned HTTP ${response.status}. Try again later.`);
+      return outage(
+        `Compiler Explorer returned HTTP ${response.status}. Try again later.`,
+      );
     }
     if (!response.ok) {
-      return { setupError: `Compiler Explorer rejected this run with HTTP ${response.status}.` };
+      return {
+        setupError: `Compiler Explorer rejected this run with HTTP ${response.status}.`,
+      };
     }
     return mapCompilerResponse(await response.json());
   } catch (error) {
     if (error?.name === "AbortError") {
-      return { ...outage(`Compiler Explorer did not respond within ${compilerExplorerTimeoutMs / 1000} seconds. Try again later.`), diagnostic: DIAGNOSTIC.timeout };
+      return {
+        ...outage(
+          `Compiler Explorer did not respond within ${compilerExplorerTimeoutMs / 1000} seconds. Try again later.`,
+        ),
+        diagnostic: DIAGNOSTIC.timeout,
+      };
     }
-    return outage(`Compiler Explorer run failed: ${String(error?.message || error).slice(0, 300)}`);
+    return outage(
+      `Compiler Explorer run failed: ${String(error?.message || error).slice(0, 300)}`,
+    );
   } finally {
     clearTimeout(timer);
   }
@@ -577,19 +732,33 @@ function runWorker(code, spec) {
   return new Promise((resolve, reject) => {
     const name = spec.kind === "class" ? spec.className : spec.entry;
     if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name ?? "")) {
-      reject(new Error("This exercise does not name a function the runner can call."));
+      reject(
+        new Error(
+          "This exercise does not name a function the runner can call.",
+        ),
+      );
       return;
     }
     const prelude = [
       code,
-      "\n;self.__codetrialEntry = (typeof ", name, " !== 'undefined' ? ", name, " : undefined);\n",
+      "\n;self.__codetrialEntry = (typeof ",
+      name,
+      " !== 'undefined' ? ",
+      name,
+      " : undefined);\n",
     ];
-    const url = URL.createObjectURL(new Blob([...prelude, JS_RUNNER_SOURCE], { type: "application/javascript" }));
+    const url = URL.createObjectURL(
+      new Blob([...prelude, JS_RUNNER_SOURCE], {
+        type: "application/javascript",
+      }),
+    );
     const worker = new Worker(url);
     const timer = setTimeout(() => {
       worker.terminate();
       URL.revokeObjectURL(url);
-      const error = new Error(`Execution timed out after ${testTimeoutMs / 1000}s - check for an infinite loop.`);
+      const error = new Error(
+        `Execution timed out after ${testTimeoutMs / 1000}s - check for an infinite loop.`,
+      );
       // Named as a timeout rather than tagged with a diagnostic, so it reaches
       // the same branch the catch below takes for `AbortSignal.timeout`.
       error.name = "TimeoutError";
@@ -605,7 +774,9 @@ function runWorker(code, spec) {
       clearTimeout(timer);
       worker.terminate();
       URL.revokeObjectURL(url);
-      reject(new Error(event.message || "Worker crashed while running your code."));
+      reject(
+        new Error(event.message || "Worker crashed while running your code."),
+      );
     };
     worker.postMessage({ spec, name });
   });
@@ -933,13 +1104,20 @@ async function runPython(code, spec, reportStatus = null) {
       resolve(value);
     };
     timer = setTimeout(() => {
-      finish({
-        setupError: `Execution timed out after ${testTimeoutMs / 1000}s - check for an infinite loop.`,
-        diagnostic: DIAGNOSTIC.timeout,
-      }, true);
+      finish(
+        {
+          setupError: `Execution timed out after ${testTimeoutMs / 1000}s - check for an infinite loop.`,
+          diagnostic: DIAGNOSTIC.timeout,
+        },
+        true,
+      );
     }, testTimeoutMs);
     worker.onmessage = (event) => finish(event.data);
-    worker.onerror = (event) => finish({ setupError: event.message || "The Python runtime crashed." }, true);
+    worker.onerror = (event) =>
+      finish(
+        { setupError: event.message || "The Python runtime crashed." },
+        true,
+      );
     worker.postMessage({ code, spec: JSON.stringify(spec) });
   });
 }
@@ -977,11 +1155,14 @@ async function startPythonWorker() {
       }
     };
   `;
-  const url = URL.createObjectURL(new Blob([source], { type: "application/javascript" }));
+  const url = URL.createObjectURL(
+    new Blob([source], { type: "application/javascript" }),
+  );
   const worker = new Worker(url);
   const booted = await new Promise((resolve) => {
     const timer = setTimeout(
-      () => resolve({ setupError: "The Python runtime did not start in time." }),
+      () =>
+        resolve({ setupError: "The Python runtime did not start in time." }),
       pythonBootTimeoutMs,
     );
     worker.onmessage = (event) => {
@@ -990,7 +1171,10 @@ async function startPythonWorker() {
     };
     worker.onerror = (event) => {
       clearTimeout(timer);
-      resolve({ setupError: event.message || "The Python runtime crashed while starting." });
+      resolve({
+        setupError:
+          event.message || "The Python runtime crashed while starting.",
+      });
     };
   });
   worker.onmessage = null;
@@ -1016,7 +1200,9 @@ async function startPythonWorker() {
 async function pyodideLoader(url) {
   // Without a deadline a stalled response leaves the Run button disabled
   // forever.
-  const response = await fetch(url, { signal: AbortSignal.timeout(pythonBootTimeoutMs) });
+  const response = await fetch(url, {
+    signal: AbortSignal.timeout(pythonBootTimeoutMs),
+  });
   if (!response.ok) throw new Error("Could not load the Python runtime.");
   return response.text();
 }

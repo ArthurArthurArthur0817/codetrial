@@ -52,8 +52,13 @@ export function startAvatar() {
   // page's ~16 WebGL contexts and a 60 Hz loop drawing into a 1x1 canvas. The
   // computed style is asked rather than the breakpoint restated, so the CSS
   // stays the only place that decides where the avatar is shown.
-  if (!nodes.jimAvatar || window.getComputedStyle(nodes.jimAvatar).display === "none") return;
-  const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches === true;
+  if (
+    !nodes.jimAvatar ||
+    window.getComputedStyle(nodes.jimAvatar).display === "none"
+  )
+    return;
+  const reducedMotion =
+    window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches === true;
   stopWatchingStageWidth();
   avatar = createAvatar({
     mount: nodes.jimAvatar,
@@ -62,7 +67,8 @@ export function startAvatar() {
     // voice" under a blank box is indistinguishable from a broken page.
     onState: (next) => {
       if (next !== "unavailable") return;
-      nodes.jimAvatarNote.textContent = "Jim is here by voice; his avatar is unavailable in this browser.";
+      nodes.jimAvatarNote.textContent =
+        "Jim is here by voice; his avatar is unavailable in this browser.";
     },
     loadModel: async () => {
       const { loadAvatarModel } = await import("./model.js");
@@ -124,7 +130,13 @@ export function resumeAvatar() {
   // `state()` and not just `avatar`: `createAvatar` returns before the model
   // has loaded, so a visibility change during the load would otherwise start a
   // loop that poses nothing sixty times a second.
-  if (!avatar || avatar.state() !== "ready" || document.hidden || avatarFrame !== null) return;
+  if (
+    !avatar ||
+    avatar.state() !== "ready" ||
+    document.hidden ||
+    avatarFrame !== null
+  )
+    return;
   pumpAvatar();
 }
 
@@ -170,12 +182,17 @@ export function attachAvatarAnalyser(track, participant) {
   // and nothing rebuilt it, so lip sync died for the rest of the session.
   if (jimAnalyser) releaseAvatarAnalyser();
   try {
-    jimAnalyserContext ||= new (window.AudioContext || window.webkitAudioContext)();
+    jimAnalyserContext ||= new (
+      window.AudioContext || window.webkitAudioContext
+    )();
     // TrackSubscribed is not a user gesture, so a context first built here can
     // arrive suspended and then read silence forever. The mouth would simply
     // never open, with nothing anywhere saying why.
-    if (jimAnalyserContext.state === "suspended") void jimAnalyserContext.resume().catch(() => {});
-    jimAnalyserSource = jimAnalyserContext.createMediaStreamSource(new MediaStream([track.mediaStreamTrack]));
+    if (jimAnalyserContext.state === "suspended")
+      void jimAnalyserContext.resume().catch(() => {});
+    jimAnalyserSource = jimAnalyserContext.createMediaStreamSource(
+      new MediaStream([track.mediaStreamTrack]),
+    );
     jimAnalyser = jimAnalyserContext.createAnalyser();
     jimAnalyser.fftSize = ANALYSER_FFT_SIZE;
     // One buffer for the session. Allocating it per frame produced 512 bytes of
@@ -234,7 +251,10 @@ export function resumeAnalyserOnGesture() {
       stop();
       return;
     }
-    void jimAnalyserContext.resume().then(stop).catch(() => {});
+    void jimAnalyserContext
+      .resume()
+      .then(stop)
+      .catch(() => {});
   }
   document.addEventListener("pointerdown", resume, true);
   document.addEventListener("keydown", resume, true);
@@ -245,7 +265,10 @@ export function jimAmplitude() {
   jimAnalyser.getByteTimeDomainData(jimAnalyserSamples);
   jimAnalyserPeaks.push(peakLevel(jimAnalyserSamples));
   if (jimAnalyserPeaks.length > ANALYSER_WINDOW) jimAnalyserPeaks.shift();
-  return jimAnalyserPeaks.reduce((total, peak) => total + peak, 0) / jimAnalyserPeaks.length;
+  return (
+    jimAnalyserPeaks.reduce((total, peak) => total + peak, 0) /
+    jimAnalyserPeaks.length
+  );
 }
 
 export function stopAvatar() {

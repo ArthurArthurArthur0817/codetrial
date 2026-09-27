@@ -32,7 +32,9 @@ const IMPOSTOR = new TextEncoder().encode("something else entirely").buffer;
 
 async function sha256Hex(bytes) {
   const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
 }
 
 const PIN = await sha256Hex(MODEL);
@@ -135,7 +137,10 @@ function sends(bytes, chunk) {
 test("the pin in the module is the one the license record documents", () => {
   // The model is not in the tree any more, so these two are the only places
   // that say which bytes are Jim, and they have to agree.
-  assert.match(read("web/vendor/avatar/LICENSE-jim-vrm.txt"), new RegExp(MODEL_SHA256));
+  assert.match(
+    read("web/vendor/avatar/LICENSE-jim-vrm.txt"),
+    new RegExp(MODEL_SHA256),
+  );
 });
 
 test("the CSP names the origin the model is actually fetched from", () => {
@@ -143,8 +148,13 @@ test("the CSP names the origin the model is actually fetched from", () => {
   // Drift here is invisible in the worst way: the CSP blocks the download and
   // the avatar degrades to the neutral panel, which is what every other
   // failure looks like too.
-  const origin = read("src/web/policy.rs").match(/AVATAR_MODEL_ORIGIN: &str = "([^"]+)"/)?.[1];
-  assert.ok(origin, "src/web/policy.rs must keep naming the avatar model origin");
+  const origin = read("src/web/policy.rs").match(
+    /AVATAR_MODEL_ORIGIN: &str = "([^"]+)"/,
+  )?.[1];
+  assert.ok(
+    origin,
+    "src/web/policy.rs must keep naming the avatar model origin",
+  );
   assert.ok(
     MODEL_URL.startsWith(`${origin}/`),
     `MODEL_URL ${MODEL_URL} is not under the CSP-permitted origin ${origin}`,
@@ -154,7 +164,9 @@ test("the CSP names the origin the model is actually fetched from", () => {
 test("a cold load fetches, verifies, stores, and returns the bytes", async () => {
   const cache = fakeCache();
   const network = counted();
-  const bytes = await withFetch(network.fetch, () => modelBytes("model-url", cache, PIN));
+  const bytes = await withFetch(network.fetch, () =>
+    modelBytes("model-url", cache, PIN),
+  );
 
   assert.equal(await sha256Hex(bytes), PIN);
   assert.equal(network.calls, 1);
@@ -164,7 +176,9 @@ test("a cold load fetches, verifies, stores, and returns the bytes", async () =>
 test("a warm load reads the cache and never touches the network", async () => {
   const cache = fakeCache(MODEL);
   const network = counted();
-  const bytes = await withFetch(network.fetch, () => modelBytes("model-url", cache, PIN));
+  const bytes = await withFetch(network.fetch, () =>
+    modelBytes("model-url", cache, PIN),
+  );
 
   assert.equal(await sha256Hex(bytes), PIN);
   assert.equal(network.calls, 0, "the whole point of the cache is this");
@@ -174,40 +188,75 @@ test("a warm load reads the cache and never touches the network", async () => {
 test("a cached entry that misses the pin is dropped and re-fetched, not trusted", async () => {
   const cache = fakeCache(IMPOSTOR);
   const network = counted();
-  const bytes = await withFetch(network.fetch, () => modelBytes("model-url", cache, PIN));
+  const bytes = await withFetch(network.fetch, () =>
+    modelBytes("model-url", cache, PIN),
+  );
 
-  assert.equal(await sha256Hex(bytes), PIN, "the load recovers rather than failing");
-  assert.equal(cache.deletes, 1, "a truncated or replaced entry must not survive");
+  assert.equal(
+    await sha256Hex(bytes),
+    PIN,
+    "the load recovers rather than failing",
+  );
+  assert.equal(
+    cache.deletes,
+    1,
+    "a truncated or replaced entry must not survive",
+  );
   assert.equal(network.calls, 1);
   assert.equal(cache.puts, 1, "and the good bytes replace it");
 });
 
 for (const [why, cache] of [
-  ["a storage backend that went away mid-session", {
-    async match() { throw new DOMException("gone", "InvalidStateError"); },
-    async put() {},
-  }],
-  ["Firefox private browsing, or an origin already at its quota", {
-    async match() { return undefined; },
-    async put() { throw new DOMException("quota", "QuotaExceededError"); },
-  }],
+  [
+    "a storage backend that went away mid-session",
+    {
+      async match() {
+        throw new DOMException("gone", "InvalidStateError");
+      },
+      async put() {},
+    },
+  ],
+  [
+    "Firefox private browsing, or an origin already at its quota",
+    {
+      async match() {
+        return undefined;
+      },
+      async put() {
+        throw new DOMException("quota", "QuotaExceededError");
+      },
+    },
+  ],
   // Not hypothetical bookkeeping: the store is fired and not awaited, so a
   // `put` that throws instead of rejecting would escape a bare `.catch` on the
   // returned promise and take the load down with it.
-  ["a put that throws synchronously rather than rejecting", {
-    async match() { return undefined; },
-    put() { throw new DOMException("bad request", "TypeError"); },
-  }],
+  [
+    "a put that throws synchronously rather than rejecting",
+    {
+      async match() {
+        return undefined;
+      },
+      put() {
+        throw new DOMException("bad request", "TypeError");
+      },
+    },
+  ],
 ]) {
   test(`losing the cache costs a download, not the avatar: ${why}`, async () => {
-    const bytes = await withFetch(async () => new Response(MODEL), () =>
-      modelBytes("model-url", cache, PIN));
+    const bytes = await withFetch(
+      async () => new Response(MODEL),
+      () => modelBytes("model-url", cache, PIN),
+    );
     assert.equal(await sha256Hex(bytes), PIN);
   });
 }
 
 test("an unopenable cache degrades to no cache instead of failing the load", async () => {
-  assert.equal(await openModelCache(undefined), null, "a browser with no Cache API is not an error");
+  assert.equal(
+    await openModelCache(undefined),
+    null,
+    "a browser with no Cache API is not an error",
+  );
   assert.equal(
     await openModelCache({
       async open() {
@@ -225,7 +274,12 @@ test("the sweep collects superseded models and spares everything else", async ()
   // pass or fail on scheduling luck.
   await evictSuperseded({
     async keys() {
-      return [MODEL_CACHE, SUPERSEDED, "some-other-app", "codetrial-avatar-short"];
+      return [
+        MODEL_CACHE,
+        SUPERSEDED,
+        "some-other-app",
+        "codetrial-avatar-short",
+      ];
     },
     async delete(name) {
       deleted.push(name);
@@ -235,8 +289,11 @@ test("the sweep collects superseded models and spares everything else", async ()
 
   // Only the one that looks like a real model cache. A name with the prefix but
   // a short tail is somebody else's, and is left alone.
-  assert.deepEqual(deleted, [SUPERSEDED],
-    "11 MB per superseded model, and nothing else ever collects them");
+  assert.deepEqual(
+    deleted,
+    [SUPERSEDED],
+    "11 MB per superseded model, and nothing else ever collects them",
+  );
 });
 
 test("opening the cache does not wait for the sweep", async () => {
@@ -261,7 +318,10 @@ test("a context that cannot verify refuses rather than loading unchecked bytes",
   // An insecure context has no crypto.subtle, and `http://` on a LAN address is
   // exactly how this gets demonstrated to someone.
   const original = Object.getOwnPropertyDescriptor(globalThis, "crypto");
-  Object.defineProperty(globalThis, "crypto", { value: {}, configurable: true });
+  Object.defineProperty(globalThis, "crypto", {
+    value: {},
+    configurable: true,
+  });
   try {
     await assert.rejects(
       () => loadModelBytes(),
@@ -280,13 +340,20 @@ test("a context that cannot verify refuses rather than loading unchecked bytes",
 
 test("the ceiling is the top of the documented budget and clears the real model", () => {
   const contract = read("docs/avatar-contract.md");
-  assert.equal(MODEL_MAX_BYTES, 15 * 1024 * 1024, "binary megabytes, and 15 is the budget's top");
+  assert.equal(
+    MODEL_MAX_BYTES,
+    15 * 1024 * 1024,
+    "binary megabytes, and 15 is the budget's top",
+  );
   assert.match(contract, /5 to 15 MB/, "the budget the ceiling is taken from");
 
   // The pinned model has to fit under its own ceiling, or this whole item
   // breaks the avatar it was written to protect.
   const recorded = contract.match(/\| Size \| ([\d,]+) bytes/)?.[1];
-  assert.ok(recorded, "docs/avatar-contract.md must keep recording the model's size");
+  assert.ok(
+    recorded,
+    "docs/avatar-contract.md must keep recording the model's size",
+  );
   assert.ok(
     Number(recorded.replaceAll(",", "")) < MODEL_MAX_BYTES,
     `the pinned model is ${recorded} bytes and must fit under the ${MODEL_MAX_BYTES} ceiling`,
@@ -301,7 +368,11 @@ test("the ceiling is the top of the documented budget and clears the real model"
     /size half of that budget is enforced rather than advisory/,
     "the budget must say the fetch enforces it",
   );
-  assert.match(contract, /MODEL_MAX_BYTES/, "and must name the constant that does");
+  assert.match(
+    contract,
+    /MODEL_MAX_BYTES/,
+    "and must name the constant that does",
+  );
 });
 
 test("a redirect is refused rather than followed to another origin", async () => {
@@ -330,15 +401,30 @@ test("a redirect is refused rather than followed to another origin", async () =>
 test("a declared length over the ceiling is refused before the body is read", async () => {
   const origin = declares(String(MODEL_MAX_BYTES + 1));
   await withFetch(origin.fetch, async () => {
-    await assert.rejects(() => modelBytes("model-url", null, PIN), /over the .* ceiling/);
+    await assert.rejects(
+      () => modelBytes("model-url", null, PIN),
+      /over the .* ceiling/,
+    );
   });
-  assert.equal(origin.started, 0, "the refusal must not wait for a transfer nobody wants");
-  assert.equal(origin.calls, 1, "and an origin that has said what it will send is not asked twice");
+  assert.equal(
+    origin.started,
+    0,
+    "the refusal must not wait for a transfer nobody wants",
+  );
+  assert.equal(
+    origin.calls,
+    1,
+    "and an origin that has said what it will send is not asked twice",
+  );
   // Refusing is not enough on its own: the body is already on its way by the
   // time the header is read, so a refusal that walks away from the stream
   // leaves the connection open and the bytes arriving behind a load that has
   // already failed, which is the transfer the ceiling exists to refuse.
-  assert.equal(origin.released, 1, "the refused body must be let go, not left running");
+  assert.equal(
+    origin.released,
+    1,
+    "the refused body must be let go, not left running",
+  );
 });
 
 test("a body that passes the ceiling while streaming is refused mid-transfer", async () => {
@@ -358,7 +444,10 @@ test("a body that passes the ceiling while streaming is refused mid-transfer", a
     );
 
   await withFetch(endlessBody, async () => {
-    await assert.rejects(() => modelBytes("model-url", null, PIN), /sent more than/);
+    await assert.rejects(
+      () => modelBytes("model-url", null, PIN),
+      /sent more than/,
+    );
   });
   assert.ok(sent > 0, "the stream was read");
   // Fifteen chunks fit under the ceiling, the sixteenth passes it, and the
@@ -384,7 +473,11 @@ test("bytes that miss the pin are never returned, and are tried exactly twice", 
     );
   });
   assert.equal(network.calls, 2);
-  assert.equal(cache.puts, 0, "and unverified bytes are never cached for next time");
+  assert.equal(
+    cache.puts,
+    0,
+    "and unverified bytes are never cached for next time",
+  );
 });
 
 test("a 404 is not retried: the origin will answer the same way twice", async () => {
@@ -405,13 +498,24 @@ test("a 404 is not retried: the origin will answer the same way twice", async ()
     );
   const network = counted(errorPage);
   await withFetch(network.fetch, async () => {
-    await assert.rejects(() => modelBytes("model-url", null, PIN), /answered 404/);
+    await assert.rejects(
+      () => modelBytes("model-url", null, PIN),
+      /answered 404/,
+    );
   });
-  assert.equal(network.calls, 1, "retrying a status only doubles the wait before the panel");
+  assert.equal(
+    network.calls,
+    1,
+    "retrying a status only doubles the wait before the panel",
+  );
   // A refused status is the same leak a refused length is: the page body is
   // already on its way, and a load that walks away from it holds the connection
   // for as long as the origin keeps writing.
-  assert.equal(released, 1, "the error page's body is let go rather than left open");
+  assert.equal(
+    released,
+    1,
+    "the error page's body is let go rather than left open",
+  );
 });
 
 test("one transient failure followed by a good response still loads the model", async () => {
@@ -423,7 +527,8 @@ test("one transient failure followed by a good response still loads the model", 
   const bytes = await withFetch(
     async () => {
       calls += 1;
-      if (calls === 1) throw new TypeError("NetworkError when attempting to fetch resource.");
+      if (calls === 1)
+        throw new TypeError("NetworkError when attempting to fetch resource.");
       return new Response(MODEL);
     },
     () => modelBytes("model-url", cache, PIN),
@@ -431,7 +536,11 @@ test("one transient failure followed by a good response still loads the model", 
 
   assert.equal(await sha256Hex(bytes), PIN);
   assert.equal(calls, 2);
-  assert.equal(cache.puts, 1, "and the recovered bytes are kept like any other download");
+  assert.equal(
+    cache.puts,
+    1,
+    "and the recovered bytes are kept like any other download",
+  );
 });
 
 test("a declared length of exactly the ceiling is not refused", async () => {
@@ -440,9 +549,13 @@ test("a declared length of exactly the ceiling is not refused", async () => {
   // says is allowed. The body is the stand-in rather than 15 MB of anything:
   // what is under test is the header, and the pin proves the read went through.
   const declaresTheCeiling = async () =>
-    new Response(MODEL, { headers: { "content-length": String(MODEL_MAX_BYTES) } });
+    new Response(MODEL, {
+      headers: { "content-length": String(MODEL_MAX_BYTES) },
+    });
 
-  const bytes = await withFetch(declaresTheCeiling, () => modelBytes("model-url", null, PIN));
+  const bytes = await withFetch(declaresTheCeiling, () =>
+    modelBytes("model-url", null, PIN),
+  );
   assert.equal(await sha256Hex(bytes), PIN);
 });
 
@@ -459,7 +572,11 @@ for (const [why, value, refusal] of [
     "15728641, 15728641",
     /unreadable Content-Length/,
   ],
-  ["a length that is not digits at all", "about eleven megabytes", /unreadable Content-Length/],
+  [
+    "a length that is not digits at all",
+    "about eleven megabytes",
+    /unreadable Content-Length/,
+  ],
   // `Number` of four hundred digits is `Infinity`. It is a readable length, so
   // it is refused as the enormous one it is rather than as nonsense; what it
   // catches is a comparison guarded on the value being finite first.
@@ -475,8 +592,16 @@ for (const [why, value, refusal] of [
       );
     });
     assert.equal(origin.started, 0);
-    assert.equal(origin.released, 1, "an unreadable declaration lets the body go too");
-    assert.equal(origin.calls, 1, "a declaration is an answer, and asking again gets the same one");
+    assert.equal(
+      origin.released,
+      1,
+      "an unreadable declaration lets the body go too",
+    );
+    assert.equal(
+      origin.calls,
+      1,
+      "a declaration is an answer, and asking again gets the same one",
+    );
   });
 }
 
@@ -487,7 +612,9 @@ test("a body delivered in chunks is reassembled in the order it arrived", async 
   // test and corrupt every model that arrives in more than one packet.
   const whole = new Uint8Array(MODEL);
   const cuts = [0, 7, 19, whole.byteLength];
-  const pieces = cuts.slice(0, -1).map((from, index) => whole.subarray(from, cuts[index + 1]));
+  const pieces = cuts
+    .slice(0, -1)
+    .map((from, index) => whole.subarray(from, cuts[index + 1]));
   assert.ok(
     pieces.slice(1).every((piece) => piece.byteOffset > 0),
     "the point of the fixture is the offsets",
@@ -503,7 +630,9 @@ test("a body delivered in chunks is reassembled in the order it arrived", async 
       }),
     );
 
-  const bytes = await withFetch(inPieces, () => modelBytes("model-url", null, PIN));
+  const bytes = await withFetch(inPieces, () =>
+    modelBytes("model-url", null, PIN),
+  );
   assert.equal(bytes.byteLength, whole.byteLength);
   assert.equal(await sha256Hex(bytes), PIN);
 });
@@ -517,7 +646,8 @@ test("a body of exactly the ceiling streams through rather than being refused", 
   const pin = await sha256Hex(full.buffer);
 
   const bytes = await withFetch(sends(full, 1024 * 1024), () =>
-    modelBytes("model-url", null, pin));
+    modelBytes("model-url", null, pin),
+  );
   // The length, and not the hash: `modelBytes` returns nothing that missed the
   // pin, so hashing 15 MB again here would cost 20 ms to assert what returning
   // at all already proved.
@@ -554,7 +684,9 @@ test("a connection that drops partway through the body is retried like any other
     );
   };
 
-  const bytes = await withFetch(dropsMidBody, () => modelBytes("model-url", null, PIN));
+  const bytes = await withFetch(dropsMidBody, () =>
+    modelBytes("model-url", null, PIN),
+  );
   assert.equal(await sha256Hex(bytes), PIN);
   assert.equal(calls, 2, "a half-delivered body is worth one more try");
   assert.equal(delivered, 1, "and the first attempt really did get partway in");
@@ -573,17 +705,23 @@ test("the pinned path is a commit and not a branch", () => {
 });
 
 for (const [why, respond] of [
-  ["before the response arrives", () => {
-    throw new TypeError("Failed to fetch");
-  }],
-  ["partway through the body", () =>
-    new Response(
-      new ReadableStream({
-        start(controller) {
-          controller.error(new TypeError("network error"));
-        },
-      }),
-    )],
+  [
+    "before the response arrives",
+    () => {
+      throw new TypeError("Failed to fetch");
+    },
+  ],
+  [
+    "partway through the body",
+    () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.error(new TypeError("network error"));
+          },
+        }),
+      ),
+  ],
 ]) {
   test(`an expired deadline is not retried: ${why}`, async () => {
     // The failure looks exactly like a dropped connection, which is retried,
@@ -621,11 +759,18 @@ test("a body larger than the first allocation and shorter than the ceiling arriv
   // Random rather than a per-byte loop, which cost more than everything this
   // test is about. `getRandomValues` fills 64 KiB at a time, and the pin is
   // taken from the same array, so the bytes only have to be distinct.
-  for (let at = 0; at < size; at += 65536) crypto.getRandomValues(full.subarray(at, at + 65536));
+  for (let at = 0; at < size; at += 65536)
+    crypto.getRandomValues(full.subarray(at, at + 65536));
   const pin = await sha256Hex(full.buffer);
 
-  const bytes = await withFetch(sends(full, 8 * 1024), () => modelBytes("model-url", null, pin));
-  assert.equal(bytes.byteLength, size, "no trailing slack from the buffer it grew into");
+  const bytes = await withFetch(sends(full, 8 * 1024), () =>
+    modelBytes("model-url", null, pin),
+  );
+  assert.equal(
+    bytes.byteLength,
+    size,
+    "no trailing slack from the buffer it grew into",
+  );
   assert.equal(await sha256Hex(bytes), pin);
 });
 
@@ -644,20 +789,39 @@ test("the fetch carries the deadline, and both attempts carry the same one", asy
     return new Response(MODEL);
   };
 
-  const bytes = await withFetch(noticesTheSignal, () => modelBytes("model-url", null, PIN));
+  const bytes = await withFetch(noticesTheSignal, () =>
+    modelBytes("model-url", null, PIN),
+  );
   assert.equal(await sha256Hex(bytes), PIN);
   assert.equal(signals.length, 2);
-  assert.ok(signals[0] instanceof AbortSignal, "the fetch must be given a deadline at all");
-  assert.equal(signals[0], signals[1], "one deadline for the load, not one per attempt");
-  assert.equal(signals[0].aborted, false, "and it is a live deadline, not a spent one");
+  assert.ok(
+    signals[0] instanceof AbortSignal,
+    "the fetch must be given a deadline at all",
+  );
+  assert.equal(
+    signals[0],
+    signals[1],
+    "one deadline for the load, not one per attempt",
+  );
+  assert.equal(
+    signals[0].aborted,
+    false,
+    "and it is a live deadline, not a spent one",
+  );
 });
 
 test("a response with no body at all is refused rather than hashed", async () => {
   // A 204 is `ok`, declares nothing, and carries no stream to read. Reaching
   // `getReader()` on it throws where the pin should have spoken.
-  await withFetch(async () => ({ ok: true, status: 204, headers: new Headers(), body: null }), async () => {
-    await assert.rejects(() => modelBytes("model-url", null, PIN), /answered 204 with no body/);
-  });
+  await withFetch(
+    async () => ({ ok: true, status: 204, headers: new Headers(), body: null }),
+    async () => {
+      await assert.rejects(
+        () => modelBytes("model-url", null, PIN),
+        /answered 204 with no body/,
+      );
+    },
+  );
 });
 
 test("a reader that will not let go costs a connection, not the avatar", async () => {
@@ -716,7 +880,10 @@ test("a blip followed by a refusal reports the refusal, not the blip", async () 
       return new Response("gone", { status: 404 });
     },
     async () => {
-      await assert.rejects(() => modelBytes("model-url", null, PIN), /answered 404/);
+      await assert.rejects(
+        () => modelBytes("model-url", null, PIN),
+        /answered 404/,
+      );
     },
   );
   assert.equal(calls, 2);
@@ -736,7 +903,9 @@ test("an unreadable Content-Length is quoted back trimmed, not entire", async ()
   });
 
   await withFetch(declaresAnEssay, async () => {
-    const error = await modelBytes("model-url", null, PIN).catch((caught) => caught);
+    const error = await modelBytes("model-url", null, PIN).catch(
+      (caught) => caught,
+    );
     assert.match(error.message, /unreadable Content-Length/);
     assert.ok(
       error.message.length < 200,
@@ -759,14 +928,20 @@ test("the default deadline is the renderer's own, and it is a timeout", async ()
     return real.call(AbortSignal, ms);
   };
   try {
-    const bytes = await withFetch(async () => new Response(MODEL), () =>
-      modelBytes("model-url", null, PIN));
+    const bytes = await withFetch(
+      async () => new Response(MODEL),
+      () => modelBytes("model-url", null, PIN),
+    );
     assert.equal(await sha256Hex(bytes), PIN);
   } finally {
     AbortSignal.timeout = real;
   }
 
-  assert.deepEqual(asked, [LOAD_TIMEOUT_MS], "one timeout, of the panel's own length");
+  assert.deepEqual(
+    asked,
+    [LOAD_TIMEOUT_MS],
+    "one timeout, of the panel's own length",
+  );
 });
 
 test("a warm cache hit builds no deadline it will not use", async () => {
@@ -785,5 +960,9 @@ test("a warm cache hit builds no deadline it will not use", async () => {
     AbortSignal.timeout = real;
   }
 
-  assert.deepEqual(asked, [], "the network was never reached, so nothing needed a deadline");
+  assert.deepEqual(
+    asked,
+    [],
+    "the network was never reached, so nothing needed a deadline",
+  );
 });

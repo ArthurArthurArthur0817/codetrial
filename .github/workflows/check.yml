@@ -240,7 +240,7 @@ jobs:
       # `npm ci`, not `npm install`: eslint's transitive dependencies are caret
       # ranges, so an install resolves them fresh on every run and the gate that
       # passed yesterday is not the gate running today. The exact pins in
-      # package.json only cover the three direct dependencies.
+      # package.json only cover the four direct dependencies.
       - name: Cache Chromium
         uses: actions/cache@v6
         with:

@@ -26,8 +26,12 @@ import {
 // the generated map translates.
 const webFile = (path) => new URL(`../../web/${path}`, import.meta.url);
 const pageMap = JSON.parse(readFileSync(webFile("problem-pages.json"), "utf8"));
-const judges = Object.fromEntries(Object.entries(pageMap)
-  .map(([id, { page }]) => [id, JSON.parse(readFileSync(webFile(`judges/${page}.json`), "utf8"))]));
+const judges = Object.fromEntries(
+  Object.entries(pageMap).map(([id, { page }]) => [
+    id,
+    JSON.parse(readFileSync(webFile(`judges/${page}.json`), "utf8")),
+  ]),
+);
 
 const sampleValues = {
   boolean: true,
@@ -54,8 +58,14 @@ test("type mapper covers bank function types for C, C++ and Java", () => {
   assert.equal(compilerType("string[]", "c"), "char**");
   assert.equal(compilerType("integer[]", "cpp"), "vector<int>");
   assert.equal(compilerType("integer[]", "java"), "int[]");
-  assert.equal(compilerType("list<list<string>>", "cpp"), "vector<vector<string>>");
-  assert.equal(compilerType("list<list<string>>", "java"), "List<List<String>>");
+  assert.equal(
+    compilerType("list<list<string>>", "cpp"),
+    "vector<vector<string>>",
+  );
+  assert.equal(
+    compilerType("list<list<string>>", "java"),
+    "List<List<String>>",
+  );
 
   for (const type of bankFunctionTypes()) {
     if (type === "void" || type === "Node") continue;
@@ -69,30 +79,63 @@ test("literal emitter covers every non-void function type in the bank", () => {
   assert.equal(nativeLiteral([1, 2], "integer[]", "cpp"), "{1, 2}");
   assert.equal(nativeLiteral([1, 2], "integer[]", "c"), "{1, 2}");
   assert.equal(nativeLiteral([1, 2], "integer[]", "java"), "new int[]{1, 2}");
-  assert.equal(nativeLiteral([["a"]], "character[][]", "java"), "new char[][]{new char[]{'a'}}");
-  assert.equal(nativeLiteral([1, null, 2], "TreeNode", "java"), "treeNode(new Integer[]{1, null, 2})");
+  assert.equal(
+    nativeLiteral([["a"]], "character[][]", "java"),
+    "new char[][]{new char[]{'a'}}",
+  );
+  assert.equal(
+    nativeLiteral([1, null, 2], "TreeNode", "java"),
+    "treeNode(new Integer[]{1, null, 2})",
+  );
 
   for (const type of bankFunctionTypes()) {
     if (type === "void" || type === "Node") continue;
     const value = sampleValues[type];
     assert.notEqual(value, undefined, `missing sample for ${type}`);
-    assert.doesNotThrow(() => nativeLiteral(value, type, "c"), `C literal ${type}`);
-    assert.doesNotThrow(() => nativeLiteral(value, type, "cpp"), `C++ literal ${type}`);
-    assert.doesNotThrow(() => nativeLiteral(value, type, "java"), `Java literal ${type}`);
+    assert.doesNotThrow(
+      () => nativeLiteral(value, type, "c"),
+      `C literal ${type}`,
+    );
+    assert.doesNotThrow(
+      () => nativeLiteral(value, type, "cpp"),
+      `C++ literal ${type}`,
+    );
+    assert.doesNotThrow(
+      () => nativeLiteral(value, type, "java"),
+      `Java literal ${type}`,
+    );
   }
-  assert.throws(() => nativeLiteral([[2], [1]], "Node", "cpp"), /argTypes preparation/);
+  assert.throws(
+    () => nativeLiteral([[2], [1]], "Node", "cpp"),
+    /argTypes preparation/,
+  );
 });
 
 test("harness generator builds one batched function harness", () => {
   const spec = judges["two-sum"];
-  const c = generateHarness("c", spec, `int* matchDisputedCharge(int* nums, int numsSize, int target, int* returnSize) {
+  const c = generateHarness(
+    "c",
+    spec,
+    `int* matchDisputedCharge(int* nums, int numsSize, int target, int* returnSize) {
     return NULL;
-  }`);
-  const cpp = generateHarness("cpp", spec, "class Solution { public: vector<int> matchDisputedCharge(vector<int>& nums, int target) { return {0, 1}; } };");
-  const java = generateHarness("java", spec, "class Solution { public int[] matchDisputedCharge(int[] nums, int target) { return new int[]{0, 1}; } }");
+  }`,
+  );
+  const cpp = generateHarness(
+    "cpp",
+    spec,
+    "class Solution { public: vector<int> matchDisputedCharge(vector<int>& nums, int target) { return {0, 1}; } };",
+  );
+  const java = generateHarness(
+    "java",
+    spec,
+    "class Solution { public int[] matchDisputedCharge(int[] nums, int target) { return new int[]{0, 1}; } }",
+  );
 
   assert.match(c, /#include <stdbool\.h>/);
-  assert.match(c, /int\* matchDisputedCharge\(int\* nums, int numsSize, int target, int\* returnSize\)/);
+  assert.match(
+    c,
+    /int\* matchDisputedCharge\(int\* nums, int numsSize, int target, int\* returnSize\)/,
+  );
   assert.match(c, /json_int_array\(stdout, actual, returnSize\)/);
   assert.match(c, /results/);
   assert.match(cpp, /class Solution/);
@@ -120,27 +163,52 @@ test("generated harnesses emit JSON for control characters and non-finite double
 
   assert.match(cpp, /c < 0x20/, "C++ must escape control characters");
   assert.match(cpp, /if \(!isfinite\(value\)\) return "null"/);
-  assert.match(cpp, /setprecision\(17\)/, "6 significant digits mis-compares doubles");
+  assert.match(
+    cpp,
+    /setprecision\(17\)/,
+    "6 significant digits mis-compares doubles",
+  );
   assert.match(cpp, /#include <iomanip>/);
   assert.match(java, /c < 0x20/, "Java must escape control characters");
-  assert.match(java, /Double\.isFinite\(value\) \? String\.valueOf\(value\) : "null"/);
+  assert.match(
+    java,
+    /Double\.isFinite\(value\) \? String\.valueOf\(value\) : "null"/,
+  );
 });
 
 test("harness generator covers every function problem without network access", () => {
   for (const [id, spec] of Object.entries(judges)) {
     if (spec.kind !== "function") continue;
-    assert.doesNotThrow(() => generateHarness("c", spec, "int placeholder(void) { return 0; }"), `C harness for ${id}`);
-    assert.doesNotThrow(() => generateHarness("cpp", spec, "class Solution {};"), `C++ harness for ${id}`);
-    assert.doesNotThrow(() => generateHarness("java", spec, "class Solution {}"), `Java harness for ${id}`);
+    assert.doesNotThrow(
+      () => generateHarness("c", spec, "int placeholder(void) { return 0; }"),
+      `C harness for ${id}`,
+    );
+    assert.doesNotThrow(
+      () => generateHarness("cpp", spec, "class Solution {};"),
+      `C++ harness for ${id}`,
+    );
+    assert.doesNotThrow(
+      () => generateHarness("java", spec, "class Solution {}"),
+      `Java harness for ${id}`,
+    );
   }
 });
 
 test("harness generator covers every class problem without network access", () => {
   for (const [id, spec] of Object.entries(judges)) {
     if (spec.kind !== "class") continue;
-    assert.doesNotThrow(() => generateHarness("cpp", spec, `class ${spec.className} {};`), `C++ class harness for ${id}`);
-    assert.doesNotThrow(() => generateHarness("java", spec, `class ${spec.className} {}`), `Java class harness for ${id}`);
-    assert.throws(() => generateHarness("c", spec, ""), /Only function judges are supported for C/);
+    assert.doesNotThrow(
+      () => generateHarness("cpp", spec, `class ${spec.className} {};`),
+      `C++ class harness for ${id}`,
+    );
+    assert.doesNotThrow(
+      () => generateHarness("java", spec, `class ${spec.className} {}`),
+      `Java class harness for ${id}`,
+    );
+    assert.throws(
+      () => generateHarness("c", spec, ""),
+      /Only function judges are supported for C/,
+    );
   }
 });
 
@@ -148,7 +216,10 @@ test("a candidate case without an expected value builds the C++ and Java class h
   const spec = judges["min-stack"];
   const candidate = {
     label: "Your case 1",
-    input: [[spec.className, "push", "getMin"], [[], [3], []]],
+    input: [
+      [spec.className, "push", "getMin"],
+      [[], [3], []],
+    ],
   };
   // Asserted on the generated code, not on the absence of a JS expression that
   // was never going to appear in C++ or Java. What proves the contract was read
@@ -160,7 +231,11 @@ test("a candidate case without an expected value builds the C++ and Java class h
     java: ["jsonAny(instance.getMin())", "instance.push(3);"],
   };
   for (const language of ["cpp", "java"]) {
-    const harness = generateHarness(language, { ...spec, cases: [...spec.cases, candidate] }, `class ${spec.className} {}`);
+    const harness = generateHarness(
+      language,
+      { ...spec, cases: [...spec.cases, candidate] },
+      `class ${spec.className} {}`,
+    );
     for (const fragment of serialized[language]) {
       assert.ok(
         harness.includes(fragment),
@@ -168,7 +243,8 @@ test("a candidate case without an expected value builds the C++ and Java class h
       );
     }
     assert.ok(
-      !harness.includes("jsonAny(instance.push(") && !harness.includes("toJson(instance.push("),
+      !harness.includes("jsonAny(instance.push(") &&
+        !harness.includes("toJson(instance.push("),
       `${language} must not serialize a void method`,
     );
   }
@@ -218,12 +294,20 @@ const noJava =
     : "javac/java are not available";
 
 describe("toolchain harnesses", { concurrency: true }, () => {
-  it("C Two Sum harness can produce passing Compiler Explorer JSON", { skip: noCc }, async () => {
-    const dir = mkdtempSync(join(tmpdir(), "codetrial-c-"));
-    try {
-      const source = join(dir, "twosum.c");
-      const binary = join(dir, "twosum");
-      writeFileSync(source, generateHarness("c", judges["two-sum"], `int* matchDisputedCharge(int* nums, int numsSize, int target, int* returnSize) {
+  it(
+    "C Two Sum harness can produce passing Compiler Explorer JSON",
+    { skip: noCc },
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "codetrial-c-"));
+      try {
+        const source = join(dir, "twosum.c");
+        const binary = join(dir, "twosum");
+        writeFileSync(
+          source,
+          generateHarness(
+            "c",
+            judges["two-sum"],
+            `int* matchDisputedCharge(int* nums, int numsSize, int target, int* returnSize) {
     int* out = malloc(sizeof(int) * 2);
     for (int i = 0; i < numsSize; i++) {
         for (int j = i + 1; j < numsSize; j++) {
@@ -237,26 +321,42 @@ describe("toolchain harnesses", { concurrency: true }, () => {
     }
     *returnSize = 0;
     return out;
-}`));
-      await run("cc", ["-std=c17", source, "-o", binary]);
-      assert.deepEqual(parseCompilerResults((await run(binary, [], { encoding: "utf8" })).stdout).results.map((result) => result.actual), [
-        [0, 1],
-        [1, 2],
-        [0, 1],
-        [0, 2],
-        [1, 2],
-      ]);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
+}`,
+          ),
+        );
+        await run("cc", ["-std=c17", source, "-o", binary]);
+        assert.deepEqual(
+          parseCompilerResults(
+            (await run(binary, [], { encoding: "utf8" })).stdout,
+          ).results.map((result) => result.actual),
+          [
+            [0, 1],
+            [1, 2],
+            [0, 1],
+            [0, 2],
+            [1, 2],
+          ],
+        );
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 
-  it("C Merge k Sorted Lists harness can produce passing Compiler Explorer JSON", { skip: noCc }, async () => {
-    const dir = mkdtempSync(join(tmpdir(), "codetrial-c-"));
-    try {
-      const source = join(dir, "mergek.c");
-      const binary = join(dir, "mergek");
-      writeFileSync(source, generateHarness("c", judges["merge-k-sorted-lists"], `struct ListNode* combineShardChains(struct ListNode** lists, int listsSize) {
+  it(
+    "C Merge k Sorted Lists harness can produce passing Compiler Explorer JSON",
+    { skip: noCc },
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "codetrial-c-"));
+      try {
+        const source = join(dir, "mergek.c");
+        const binary = join(dir, "mergek");
+        writeFileSync(
+          source,
+          generateHarness(
+            "c",
+            judges["merge-k-sorted-lists"],
+            `struct ListNode* combineShardChains(struct ListNode** lists, int listsSize) {
     struct ListNode dummy = {0, NULL};
     struct ListNode* tail = &dummy;
     for (;;) {
@@ -271,20 +371,38 @@ describe("toolchain harnesses", { concurrency: true }, () => {
         tail->next = NULL;
     }
     return dummy.next;
-}`));
-      await run("cc", ["-std=c17", source, "-o", binary]);
-      assert.deepEqual(parseCompilerResults((await run(binary, [], { encoding: "utf8" })).stdout).results.map((result) => result.actual), judges["merge-k-sorted-lists"].cases.map((testCase) => testCase.expected));
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
+}`,
+          ),
+        );
+        await run("cc", ["-std=c17", source, "-o", binary]);
+        assert.deepEqual(
+          parseCompilerResults(
+            (await run(binary, [], { encoding: "utf8" })).stdout,
+          ).results.map((result) => result.actual),
+          judges["merge-k-sorted-lists"].cases.map(
+            (testCase) => testCase.expected,
+          ),
+        );
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 
-  it("C Construct Quad Tree harness can produce passing Compiler Explorer JSON", { skip: noCc }, async () => {
-    const dir = mkdtempSync(join(tmpdir(), "codetrial-c-quad-"));
-    try {
-      const source = join(dir, "quad.c");
-      const binary = join(dir, "quad");
-      writeFileSync(source, generateHarness("c", judges["construct-quad-tree"], `static bool same(int** grid, int row, int col, int size) {
+  it(
+    "C Construct Quad Tree harness can produce passing Compiler Explorer JSON",
+    { skip: noCc },
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "codetrial-c-quad-"));
+      try {
+        const source = join(dir, "quad.c");
+        const binary = join(dir, "quad");
+        writeFileSync(
+          source,
+          generateHarness(
+            "c",
+            judges["construct-quad-tree"],
+            `static bool same(int** grid, int row, int col, int size) {
     int first = grid[row][col];
     for (int r = row; r < row + size; r++) {
         for (int c = col; c < col + size; c++) {
@@ -314,20 +432,38 @@ static struct Node* build(int** grid, int row, int col, int size) {
 struct Node* buildTileTree(int** grid, int gridSize, int* gridColSize) {
     (void)gridColSize;
     return build(grid, 0, 0, gridSize);
-}`));
-      await run("cc", ["-std=c17", source, "-o", binary]);
-      assert.deepEqual(parseCompilerResults((await run(binary, [], { encoding: "utf8" })).stdout).results.map((result) => result.actual), judges["construct-quad-tree"].cases.map((testCase) => testCase.expected));
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
+}`,
+          ),
+        );
+        await run("cc", ["-std=c17", source, "-o", binary]);
+        assert.deepEqual(
+          parseCompilerResults(
+            (await run(binary, [], { encoding: "utf8" })).stdout,
+          ).results.map((result) => result.actual),
+          judges["construct-quad-tree"].cases.map(
+            (testCase) => testCase.expected,
+          ),
+        );
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 
-  it("C++ BidLedger class harness can produce passing Compiler Explorer JSON", { skip: noGpp }, async () => {
-    const dir = mkdtempSync(join(tmpdir(), "codetrial-cpp-class-"));
-    try {
-      const source = join(dir, "minstack.cpp");
-      const binary = join(dir, "minstack");
-      writeFileSync(source, generateHarness("cpp", judges["min-stack"], `class BidLedger {
+  it(
+    "C++ BidLedger class harness can produce passing Compiler Explorer JSON",
+    { skip: noGpp },
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "codetrial-cpp-class-"));
+      try {
+        const source = join(dir, "minstack.cpp");
+        const binary = join(dir, "minstack");
+        writeFileSync(
+          source,
+          generateHarness(
+            "cpp",
+            judges["min-stack"],
+            `class BidLedger {
     vector<int> values;
     vector<int> minimums;
 public:
@@ -342,19 +478,35 @@ public:
     }
     int top() { return values.back(); }
     int getMin() { return minimums.back(); }
-};`));
-      await run("g++", ["-std=c++20", source, "-o", binary]);
-      assert.deepEqual(parseCompilerResults((await run(binary, [], { encoding: "utf8" })).stdout).results.map((result) => result.actual), judges["min-stack"].cases.map((testCase) => testCase.expected));
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
+};`,
+          ),
+        );
+        await run("g++", ["-std=c++20", source, "-o", binary]);
+        assert.deepEqual(
+          parseCompilerResults(
+            (await run(binary, [], { encoding: "utf8" })).stdout,
+          ).results.map((result) => result.actual),
+          judges["min-stack"].cases.map((testCase) => testCase.expected),
+        );
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 
-  it("Java OrderedCursor class harness can produce passing Compiler Explorer JSON", { skip: noJava }, async () => {
-    const dir = mkdtempSync(join(tmpdir(), "codetrial-java-class-"));
-    try {
-      const source = join(dir, "Main.java");
-      writeFileSync(source, generateHarness("java", judges["binary-search-tree-iterator"], `class OrderedCursor {
+  it(
+    "Java OrderedCursor class harness can produce passing Compiler Explorer JSON",
+    { skip: noJava },
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "codetrial-java-class-"));
+      try {
+        const source = join(dir, "Main.java");
+        writeFileSync(
+          source,
+          generateHarness(
+            "java",
+            judges["binary-search-tree-iterator"],
+            `class OrderedCursor {
     private final ArrayDeque<TreeNode> stack = new ArrayDeque<>();
     public OrderedCursor(TreeNode root) { pushLeft(root); }
     private void pushLeft(TreeNode node) {
@@ -369,20 +521,39 @@ public:
         return node.val;
     }
     public boolean hasNext() { return !stack.isEmpty(); }
-}`));
-      await run("javac", [source]);
-      assert.deepEqual(parseCompilerResults((await run("java", ["-cp", dir, "Main"], { encoding: "utf8" })).stdout).results.map((result) => result.actual), judges["binary-search-tree-iterator"].cases.map((testCase) => testCase.expected));
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
+}`,
+          ),
+        );
+        await run("javac", [source]);
+        assert.deepEqual(
+          parseCompilerResults(
+            (await run("java", ["-cp", dir, "Main"], { encoding: "utf8" }))
+              .stdout,
+          ).results.map((result) => result.actual),
+          judges["binary-search-tree-iterator"].cases.map(
+            (testCase) => testCase.expected,
+          ),
+        );
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 
-  it("C++ Construct Quad Tree harness can produce passing Compiler Explorer JSON", { skip: noGpp }, async () => {
-    const dir = mkdtempSync(join(tmpdir(), "codetrial-cpp-quad-"));
-    try {
-      const source = join(dir, "quad.cpp");
-      const binary = join(dir, "quad");
-      writeFileSync(source, generateHarness("cpp", judges["construct-quad-tree"], `class Solution {
+  it(
+    "C++ Construct Quad Tree harness can produce passing Compiler Explorer JSON",
+    { skip: noGpp },
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "codetrial-cpp-quad-"));
+      try {
+        const source = join(dir, "quad.cpp");
+        const binary = join(dir, "quad");
+        writeFileSync(
+          source,
+          generateHarness(
+            "cpp",
+            judges["construct-quad-tree"],
+            `class Solution {
     bool same(vector<vector<int>>& grid, int row, int col, int size) {
         int first = grid[row][col];
         for (int r = row; r < row + size; r++) {
@@ -405,20 +576,38 @@ public:
     Node* buildTileTree(vector<vector<int>>& grid) {
         return build(grid, 0, 0, grid.size());
     }
-};`));
-      await run("g++", ["-std=c++20", source, "-o", binary]);
-      assert.deepEqual(parseCompilerResults((await run(binary, [], { encoding: "utf8" })).stdout).results.map((result) => result.actual), judges["construct-quad-tree"].cases.map((testCase) => testCase.expected));
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
+};`,
+          ),
+        );
+        await run("g++", ["-std=c++20", source, "-o", binary]);
+        assert.deepEqual(
+          parseCompilerResults(
+            (await run(binary, [], { encoding: "utf8" })).stdout,
+          ).results.map((result) => result.actual),
+          judges["construct-quad-tree"].cases.map(
+            (testCase) => testCase.expected,
+          ),
+        );
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 
-  it("C++ ThumbnailStore class harness supports standard list-based solutions", { skip: noGpp }, async () => {
-    const dir = mkdtempSync(join(tmpdir(), "codetrial-cpp-lru-"));
-    try {
-      const source = join(dir, "lru.cpp");
-      const binary = join(dir, "lru");
-      writeFileSync(source, generateHarness("cpp", judges["lru-cache"], `class ThumbnailStore {
+  it(
+    "C++ ThumbnailStore class harness supports standard list-based solutions",
+    { skip: noGpp },
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "codetrial-cpp-lru-"));
+      try {
+        const source = join(dir, "lru.cpp");
+        const binary = join(dir, "lru");
+        writeFileSync(
+          source,
+          generateHarness(
+            "cpp",
+            judges["lru-cache"],
+            `class ThumbnailStore {
     int capacity;
     list<pair<int, int>> order;
     unordered_map<int, list<pair<int, int>>::iterator> byKey;
@@ -444,20 +633,36 @@ public:
             order.pop_back();
         }
     }
-};`));
-      await run("g++", ["-std=c++20", source, "-o", binary]);
-      assert.deepEqual(parseCompilerResults((await run(binary, [], { encoding: "utf8" })).stdout).results.map((result) => result.actual), judges["lru-cache"].cases.map((testCase) => testCase.expected));
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
+};`,
+          ),
+        );
+        await run("g++", ["-std=c++20", source, "-o", binary]);
+        assert.deepEqual(
+          parseCompilerResults(
+            (await run(binary, [], { encoding: "utf8" })).stdout,
+          ).results.map((result) => result.actual),
+          judges["lru-cache"].cases.map((testCase) => testCase.expected),
+        );
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 
-  it("C++ EventQueue original class judge runs end to end", { skip: noGpp }, async () => {
-    const dir = mkdtempSync(join(tmpdir(), "codetrial-cpp-event-queue-"));
-    try {
-      const source = join(dir, "event-queue.cpp");
-      const binary = join(dir, "event-queue");
-      writeFileSync(source, generateHarness("cpp", judges["fixed-capacity-ring-buffer"], `class EventQueue {
+  it(
+    "C++ EventQueue original class judge runs end to end",
+    { skip: noGpp },
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "codetrial-cpp-event-queue-"));
+      try {
+        const source = join(dir, "event-queue.cpp");
+        const binary = join(dir, "event-queue");
+        writeFileSync(
+          source,
+          generateHarness(
+            "cpp",
+            judges["fixed-capacity-ring-buffer"],
+            `class EventQueue {
     vector<int> values;
     int head = 0;
     int tail = 0;
@@ -480,18 +685,36 @@ public:
     }
     int front() { return count == 0 ? -1 : values[head]; }
     int size() { return count; }
-};`));
-      await run("g++", ["-std=c++20", source, "-o", binary]);
-      assert.deepEqual(parseCompilerResults((await run(binary, [], { encoding: "utf8" })).stdout).results.map((result) => result.actual), judges["fixed-capacity-ring-buffer"].cases.map((testCase) => testCase.expected));
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
+};`,
+          ),
+        );
+        await run("g++", ["-std=c++20", source, "-o", binary]);
+        assert.deepEqual(
+          parseCompilerResults(
+            (await run(binary, [], { encoding: "utf8" })).stdout,
+          ).results.map((result) => result.actual),
+          judges["fixed-capacity-ring-buffer"].cases.map(
+            (testCase) => testCase.expected,
+          ),
+        );
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 });
 
 test("harness generator handles output parameter and output prefix specs", () => {
-  const merge = generateHarness("cpp", judges["merge-sorted-array"], "class Solution { public: void spliceReadings(vector<int>& nums1, int m, vector<int>& nums2, int n) {} };");
-  const remove = generateHarness("java", judges["remove-element"], "class Solution { public int dropMutedCode(int[] nums, int val) { return 0; } }");
+  const merge = generateHarness(
+    "cpp",
+    judges["merge-sorted-array"],
+    "class Solution { public: void spliceReadings(vector<int>& nums1, int m, vector<int>& nums2, int n) {} };",
+  );
+  const remove = generateHarness(
+    "java",
+    judges["remove-element"],
+    "class Solution { public int dropMutedCode(int[] nums, int val) { return 0; } }",
+  );
 
   assert.match(merge, /solution\.spliceReadings\(nums1, m, nums2, n\)/);
   assert.match(merge, /auto actual = nums1/);
@@ -501,53 +724,135 @@ test("harness generator handles output parameter and output prefix specs", () =>
 });
 
 test("class harness generator handles constructor, mutator, query, and tree constructor calls", () => {
-  const minStack = generateHarness("cpp", judges["min-stack"], "class BidLedger { public: BidLedger() {} void push(int) {} void pop() {} int top() { return 0; } int getMin() { return 0; } };");
-  const iterator = generateHarness("java", judges["binary-search-tree-iterator"], "class OrderedCursor { OrderedCursor(TreeNode root) {} int next() { return 0; } boolean hasNext() { return false; } }");
+  const minStack = generateHarness(
+    "cpp",
+    judges["min-stack"],
+    "class BidLedger { public: BidLedger() {} void push(int) {} void pop() {} int top() { return 0; } int getMin() { return 0; } };",
+  );
+  const iterator = generateHarness(
+    "java",
+    judges["binary-search-tree-iterator"],
+    "class OrderedCursor { OrderedCursor(TreeNode root) {} int next() { return 0; } boolean hasNext() { return false; } }",
+  );
 
   assert.match(minStack, /BidLedger instance\{\}/);
   assert.match(minStack, /instance\.push\(-2\)/);
   assert.match(minStack, /instance\.pop\(\);\n    actual\.push_back\("null"\)/);
   assert.match(minStack, /actual\.push_back\(toJson\(instance\.getMin\(\)\)\)/);
-  assert.match(iterator, /new OrderedCursor\(treeNode\(new Integer\[\]\{7, 3, 15, null, null, 9, 20\}\)\)/);
+  assert.match(
+    iterator,
+    /new OrderedCursor\(treeNode\(new Integer\[\]\{7, 3, 15, null, null, 9, 20\}\)\)/,
+  );
   assert.match(iterator, /actual\.add\(jsonAny\(instance\.hasNext\(\)\)\)/);
 });
 
 test("harness generator prepares adapter arguments and mutable char matrices", () => {
-  const cList = generateHarness("c", judges["merge-two-sorted-lists"], "struct ListNode* interleaveEvents(struct ListNode* list1, struct ListNode* list2) { return list1; }");
-  const cTree = generateHarness("c", judges["lowest-common-ancestor-of-a-binary-tree"], "struct TreeNode* nearestSharedApprover(struct TreeNode* root, struct TreeNode* p, struct TreeNode* q) { return p; }");
-  const cSurrounded = generateHarness("c", judges["surrounded-regions"], "void backfillSealedPockets(char** board, int boardSize, int* boardColSize) {}");
-  const cycle = generateHarness("cpp", judges["linked-list-cycle"], "class Solution { public: bool hasHandoffLoop(ListNode* head) { return head != nullptr; } };");
-  const lca = generateHarness("java", judges["lowest-common-ancestor-of-a-binary-tree"], "class Solution { public TreeNode nearestSharedApprover(TreeNode root, TreeNode p, TreeNode q) { return p; } }");
-  const surrounded = generateHarness("java", judges["surrounded-regions"], "class Solution { public void backfillSealedPockets(char[][] board) {} }");
-  const randomList = generateHarness("cpp", judges["copy-list-with-random-pointer"], "class Solution { public: Node* snapshotOutline(Node* head) { return head; } };");
-  const cRandomList = generateHarness("c", judges["copy-list-with-random-pointer"], "struct Node* snapshotOutline(struct Node* head) { return head; }");
-  const graph = generateHarness("java", judges["clone-graph"], "class Solution { public Node replicateTopology(Node node) { return node; } }");
-  const cGraph = generateHarness("c", judges["clone-graph"], "struct Node* replicateTopology(struct Node* s) { return s; }");
-  const nextTree = generateHarness("cpp", judges["populating-next-right-pointers-in-each-node-ii"], "class Solution { public: Node* linkRowNeighbors(Node* root) { return root; } };");
-  const quadTree = generateHarness("cpp", judges["construct-quad-tree"], "class Solution { public: Node* buildTileTree(vector<vector<int>>& grid) { return new Node(grid[0][0], true); } };");
-  const cQuadTree = generateHarness("c", judges["construct-quad-tree"], "struct Node* buildTileTree(int** grid, int gridSize, int* gridColSize) { return NULL; }");
-  const javaQuadTree = generateHarness("java", judges["construct-quad-tree"], "class Solution { public Node buildTileTree(int[][] grid) { return new Node(grid[0][0], true); } }");
+  const cList = generateHarness(
+    "c",
+    judges["merge-two-sorted-lists"],
+    "struct ListNode* interleaveEvents(struct ListNode* list1, struct ListNode* list2) { return list1; }",
+  );
+  const cTree = generateHarness(
+    "c",
+    judges["lowest-common-ancestor-of-a-binary-tree"],
+    "struct TreeNode* nearestSharedApprover(struct TreeNode* root, struct TreeNode* p, struct TreeNode* q) { return p; }",
+  );
+  const cSurrounded = generateHarness(
+    "c",
+    judges["surrounded-regions"],
+    "void backfillSealedPockets(char** board, int boardSize, int* boardColSize) {}",
+  );
+  const cycle = generateHarness(
+    "cpp",
+    judges["linked-list-cycle"],
+    "class Solution { public: bool hasHandoffLoop(ListNode* head) { return head != nullptr; } };",
+  );
+  const lca = generateHarness(
+    "java",
+    judges["lowest-common-ancestor-of-a-binary-tree"],
+    "class Solution { public TreeNode nearestSharedApprover(TreeNode root, TreeNode p, TreeNode q) { return p; } }",
+  );
+  const surrounded = generateHarness(
+    "java",
+    judges["surrounded-regions"],
+    "class Solution { public void backfillSealedPockets(char[][] board) {} }",
+  );
+  const randomList = generateHarness(
+    "cpp",
+    judges["copy-list-with-random-pointer"],
+    "class Solution { public: Node* snapshotOutline(Node* head) { return head; } };",
+  );
+  const cRandomList = generateHarness(
+    "c",
+    judges["copy-list-with-random-pointer"],
+    "struct Node* snapshotOutline(struct Node* head) { return head; }",
+  );
+  const graph = generateHarness(
+    "java",
+    judges["clone-graph"],
+    "class Solution { public Node replicateTopology(Node node) { return node; } }",
+  );
+  const cGraph = generateHarness(
+    "c",
+    judges["clone-graph"],
+    "struct Node* replicateTopology(struct Node* s) { return s; }",
+  );
+  const nextTree = generateHarness(
+    "cpp",
+    judges["populating-next-right-pointers-in-each-node-ii"],
+    "class Solution { public: Node* linkRowNeighbors(Node* root) { return root; } };",
+  );
+  const quadTree = generateHarness(
+    "cpp",
+    judges["construct-quad-tree"],
+    "class Solution { public: Node* buildTileTree(vector<vector<int>>& grid) { return new Node(grid[0][0], true); } };",
+  );
+  const cQuadTree = generateHarness(
+    "c",
+    judges["construct-quad-tree"],
+    "struct Node* buildTileTree(int** grid, int gridSize, int* gridColSize) { return NULL; }",
+  );
+  const javaQuadTree = generateHarness(
+    "java",
+    judges["construct-quad-tree"],
+    "class Solution { public Node buildTileTree(int[][] grid) { return new Node(grid[0][0], true); } }",
+  );
 
   assert.match(cList, /interleaveEvents\(list1, list2\)/);
   assert.doesNotMatch(cList, /interleaveEvents\(list1, list1Size/);
   assert.match(cTree, /nearestSharedApprover\(root, p, q\)/);
   assert.match(cTree, /findTreeNode\(root, 5\)/);
-  assert.match(cSurrounded, /backfillSealedPockets\(board, boardSize, boardColSize\)/);
-  assert.match(cSurrounded, /json_char_matrix\(stdout, board, boardSize, boardColSize\)/);
+  assert.match(
+    cSurrounded,
+    /backfillSealedPockets\(board, boardSize, boardColSize\)/,
+  );
+  assert.match(
+    cSurrounded,
+    /json_char_matrix\(stdout, board, boardSize, boardColSize\)/,
+  );
   assert.match(cycle, /ListNode\* head = listNode\(\{3, 2, 0, -4\}, 1\)/);
   assert.match(cycle, /solution\.hasHandoffLoop\(head\)/);
   assert.doesNotMatch(cycle, /solution\.hasHandoffLoop\(head, pos\)/);
   assert.match(lca, /TreeNode p = findTreeNode\(root, 5\)/);
   assert.match(lca, /solution\.nearestSharedApprover\(root, p, q\)/);
-  assert.match(surrounded, /char\[\]\[\] board = new char\[\]\[\]\{new char\[\]\{'X', 'X', 'X', 'X'\}/);
+  assert.match(
+    surrounded,
+    /char\[\]\[\] board = new char\[\]\[\]\{new char\[\]\{'X', 'X', 'X', 'X'\}/,
+  );
   assert.match(surrounded, /jsonAny\(actual\)/);
   assert.match(randomList, /\{13, 0\}, \{11, 4\}, \{10, 2\}, \{1, 0\}/);
   assert.match(randomList, /\{3, nullopt\}/);
   assert.match(randomList, /Returned list must be a deep copy/);
-  assert.match(randomList, /Returned random pointer must stay inside the copied list/);
+  assert.match(
+    randomList,
+    /Returned random pointer must stay inside the copied list/,
+  );
   assert.match(randomList, /set<Node\*> seen/);
   assert.match(cRandomList, /Returned list must be a deep copy/);
-  assert.match(cRandomList, /Returned random pointer must stay inside the copied list/);
+  assert.match(
+    cRandomList,
+    /Returned random pointer must stay inside the copied list/,
+  );
   assert.match(graph, /Returned graph must be a deep copy/);
   assert.match(cGraph, /Returned graph must be a deep copy/);
   assert.match(nextTree, /next pointers do not match the tree level order/);
@@ -559,10 +864,16 @@ test("harness generator prepares adapter arguments and mutable char matrices", (
 
 test("compiler output helpers parse results and map failures to setupError", () => {
   assert.equal(stripAnsi("\u001b[31merror\u001b[0m"), "error");
-  assert.deepEqual(parseCompilerResults([{ text: "noise " }, { text: "{\"results\":[{\"actual\":[0,1],\"timeMs\":1.2}]}" }]), {
-    results: [{ actual: [0, 1], timeMs: 1.2 }],
-  });
-  assert.deepEqual(parseCompilerResults("debug {\"foo\":1}\n{\"results\":[]}"), {
+  assert.deepEqual(
+    parseCompilerResults([
+      { text: "noise " },
+      { text: '{"results":[{"actual":[0,1],"timeMs":1.2}]}' },
+    ]),
+    {
+      results: [{ actual: [0, 1], timeMs: 1.2 }],
+    },
+  );
+  assert.deepEqual(parseCompilerResults('debug {"foo":1}\n{"results":[]}'), {
     results: [],
   });
   assert.deepEqual(parseCompilerResults("{bad"), {
@@ -572,10 +883,16 @@ test("compiler output helpers parse results and map failures to setupError", () 
     setupError: "Compiler Explorer timed out before the run completed.",
     diagnostic: { category: "timeout" },
   });
-  assert.deepEqual(mapCompilerResponse({ didExecute: false, buildResult: { stderr: [{ text: "\u001b[31mbuild failed\u001b[0m" }] } }), {
-    setupError: "build failed",
-    diagnostic: { category: "other" },
-  });
+  assert.deepEqual(
+    mapCompilerResponse({
+      didExecute: false,
+      buildResult: { stderr: [{ text: "\u001b[31mbuild failed\u001b[0m" }] },
+    }),
+    {
+      setupError: "build failed",
+      diagnostic: { category: "other" },
+    },
+  );
   assert.deepEqual(mapCompilerResponse({ stdout: "not json" }), {
     setupError: "The run produced no JSON results.",
   });
@@ -593,15 +910,24 @@ function bankFunctionTypes() {
 
 test("a class-style judge withholds C, and says why", () => {
   assert.equal(judges["lru-cache"].kind, "class");
-  assert.deepEqual(languagesFor(judges["lru-cache"]), ALL_LANGUAGES.filter((one) => one !== "c"));
-  assert.match(harnessGap("c", judges["lru-cache"]), /only builds function judges/);
+  assert.deepEqual(
+    languagesFor(judges["lru-cache"]),
+    ALL_LANGUAGES.filter((one) => one !== "c"),
+  );
+  assert.match(
+    harnessGap("c", judges["lru-cache"]),
+    /only builds function judges/,
+  );
   assert.equal(harnessGap("cpp", judges["lru-cache"]), null);
 });
 
 test("C is offered only once a function-style judge is known", () => {
   assert.equal(judges["two-sum"].kind, "function");
   assert.deepEqual(languagesFor(judges["two-sum"]), ALL_LANGUAGES);
-  assert.deepEqual(languagesFor(null), ALL_LANGUAGES.filter((one) => one !== "c"));
+  assert.deepEqual(
+    languagesFor(null),
+    ALL_LANGUAGES.filter((one) => one !== "c"),
+  );
   assert.match(harnessGap("c", null), /only after function-style tests load/);
 });
 
@@ -618,7 +944,8 @@ test("disabled compiled runners withhold their languages for every judge", () =>
       }
     }
   } finally {
-    if (previous === undefined) delete globalThis.CODETRIAL_COMPILER_EXPLORER_ENABLED;
+    if (previous === undefined)
+      delete globalThis.CODETRIAL_COMPILER_EXPLORER_ENABLED;
     else globalThis.CODETRIAL_COMPILER_EXPLORER_ENABLED = previous;
   }
 });

@@ -58,6 +58,20 @@ indent` runs it with `--write` and the gate runs it with `--check`, against a
 copy of the tree so a check never rewrites what it is judging. `shfmt` takes
 its style from `.editorconfig` and is passed no style flags anywhere.
 
+`npm ci` installs the pinned Prettier version used for HTML and JavaScript
+(`.js`, `.mjs` and `.cjs`). Its style lives in `.prettierrc.json`;
+`.prettierignore` excludes vendored and generated files. Prettier shares no
+file with the rest of the chain, so the check runs it in place rather than on
+the copy, alongside the chain, with `--cache` so a rerun skips unchanged
+files. The generated problem-card section in `web/index.html` has a
+`prettier-ignore` marker so the rest of the page can be formatted without
+changing the generator's output. As with the other formatter lanes, an absent
+Prettier is reported and skipped locally; CI installs it through `npm ci`.
+
+The commits that only reformatted are listed in `.git-blame-ignore-revs`, so
+`git blame` skips them. GitHub reads the file on its own; a local blame needs
+`git config blame.ignoreRevsFile .git-blame-ignore-revs` once per clone.
+
 ## Comments that count things
 
 Comments here carry the reasoning, deliberately, and that is not the part worth
@@ -92,7 +106,8 @@ somebody's next commit.
 
 `make hooks` installs wrappers in `.git/hooks` that resolve the active
 worktree's `scripts/git-*.sh`. The pre-commit hook
-runs `rustfmt`, ESLint, `ruff`, `shellcheck`, `shfmt` and `commentflow` over a
+runs `rustfmt`, ESLint, Prettier, `ruff`, `shellcheck`, `shfmt` and
+`commentflow` over a
 checkout of the index, so an unstaged edit neither fails a commit nor passes
 one; the commit-msg hook
 holds the subject to 50 characters and the body to 72, imperative and ASCII.

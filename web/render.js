@@ -3,7 +3,13 @@
 // return strings; the transcript view takes the document and panel it renders
 // into. interview.js owns the wiring, this owns the output.
 
-import { escapeHtml, formatTime, loopLabel, modeLabel, orPlaceholder } from "./lib.js";
+import {
+  escapeHtml,
+  formatTime,
+  loopLabel,
+  modeLabel,
+  orPlaceholder,
+} from "./lib.js";
 
 export function runnerStatusMarkup(status) {
   const text = {
@@ -12,7 +18,9 @@ export function runnerStatusMarkup(status) {
     running: "Running test cases...",
     done: "Run finished.",
   }[status];
-  return text ? `<p class="muted small" data-runner-status="${escapeHtml(status)}">${escapeHtml(text)}</p>` : "";
+  return text
+    ? `<p class="muted small" data-runner-status="${escapeHtml(status)}">${escapeHtml(text)}</p>`
+    : "";
 }
 
 export function finalRunnerStatus(summary, currentStatus) {
@@ -33,9 +41,13 @@ export function resultsMarkup(summary, status = null) {
     // places that used to re-derive it had to agree on what null meant.
     const observed = item.pass === null;
     // Only a case that did not pass shows it, and most cases pass.
-    const detail = item.pass ? "" : item.error ? escapeHtml(item.error)
-      : observed ? `got ${escapeHtml(item.got)}`
-        : `expected ${escapeHtml(item.expected)}\ngot ${escapeHtml(item.got)}`;
+    const detail = item.pass
+      ? ""
+      : item.error
+        ? escapeHtml(item.error)
+        : observed
+          ? `got ${escapeHtml(item.got)}`
+          : `expected ${escapeHtml(item.expected)}\ngot ${escapeHtml(item.got)}`;
     return `
       <li>
         <div><span class="${observed || item.pass ? "good" : "critical"}">${observed ? "OUTPUT" : item.pass ? "OK" : "FAIL"}</span> ${escapeHtml(item.label)} <span>${escapeHtml(item.timeMs)}ms</span></div>
@@ -43,8 +55,14 @@ export function resultsMarkup(summary, status = null) {
       </li>
     `;
   };
-  const judgeCases = summary.cases.filter((item) => !item.candidate).map(caseMarkup).join("");
-  const candidateCases = summary.cases.filter((item) => item.candidate).map(caseMarkup).join("");
+  const judgeCases = summary.cases
+    .filter((item) => !item.candidate)
+    .map(caseMarkup)
+    .join("");
+  const candidateCases = summary.cases
+    .filter((item) => item.candidate)
+    .map(caseMarkup)
+    .join("");
   return {
     label: `Test results · ${summary.passed}/${summary.total}`,
     body: `
@@ -57,7 +75,10 @@ export function resultsMarkup(summary, status = null) {
 }
 
 export function feedbackMarkup(title, section) {
-  const list = (items) => orPlaceholder(items).map((item) => `<li>${escapeHtml(item)}</li>`).join("");
+  const list = (items) =>
+    orPlaceholder(items)
+      .map((item) => `<li>${escapeHtml(item)}</li>`)
+      .join("");
   return `<section><h3>${escapeHtml(title)}</h3><h4>Strengths</h4><ul>${list(section.strengths)}</ul><h4>Improve</h4><ul>${list(section.improvements)}</ul></section>`;
 }
 
@@ -68,18 +89,24 @@ export function feedbackMarkup(title, section) {
 /// what keeps the page and the exported markdown saying the same thing.
 function integrityEventText(event) {
   if (event.type === "CAMERA_NOT_USED") {
-    return { label: `Camera not used (${event.detail || "declined"})`, detail: null };
+    return {
+      label: `Camera not used (${event.detail || "declined"})`,
+      detail: null,
+    };
   }
   return { label: event.type, detail: event.detail || null };
 }
 
 function integrityEvidenceMarkup(report = {}) {
-  const rows = (report.integrityEvents || []).map((event, index) => {
-    const { label, detail } = integrityEventText(event);
-    return `
+  const rows =
+    (report.integrityEvents || [])
+      .map((event, index) => {
+        const { label, detail } = integrityEventText(event);
+        return `
     <li data-integrity-index="${index}"><strong>${escapeHtml(event.severity)}</strong> ${escapeHtml(label)} <span>${escapeHtml(event.at)}</span>${detail ? `<p>${escapeHtml(detail)}</p>` : ""}${sourceEventMarkup(event)}</li>
   `;
-  }).join("") || "<li>(none captured)</li>";
+      })
+      .join("") || "<li>(none captured)</li>";
   return `<section><h3>Integrity Evidence</h3><ul>${rows}</ul><p class="muted small">${escapeHtml(chainSentence(report))}</p></section>`;
 }
 
@@ -128,8 +155,12 @@ export function problemMarkup(problem) {
           <section>
             <h2>Example ${index + 1}</h2>
             <pre><span>Input: </span>${escapeHtml(example.input)}
-<span>Output: </span>${escapeHtml(example.output)}${example.explanation ? `
-<span>Explanation: </span>${escapeHtml(example.explanation)}` : ""}</pre>
+<span>Output: </span>${escapeHtml(example.output)}${
+    example.explanation
+      ? `
+<span>Explanation: </span>${escapeHtml(example.explanation)}`
+      : ""
+  }</pre>
           </section>
         `;
   return `
@@ -147,9 +178,12 @@ export function problemMarkup(problem) {
 }
 
 export function reportSaveStatus(result) {
-  if (result === null) return { message: "Saving report...", className: "muted small" };
-  if (result.account === "saved") return { message: "Saved to your account", className: "muted small" };
-  if (result.local === "saved") return { message: "Saved on this device only", className: "muted small" };
+  if (result === null)
+    return { message: "Saving report...", className: "muted small" };
+  if (result.account === "saved")
+    return { message: "Saved to your account", className: "muted small" };
+  if (result.local === "saved")
+    return { message: "Saved on this device only", className: "muted small" };
   return { message: "Report was not saved", className: "critical small" };
 }
 
@@ -160,9 +194,17 @@ export function reportSaveStatus(result) {
 /// Exactly one expression in this file emits `/ 100`, and it sits behind the
 /// guard, so "no scores in an incomplete report" is structural rather than
 /// something a test has to catch after the fact.
-export function reportMarkup({ report, problemTitle, language, code, saveResult }) {
+export function reportMarkup({
+  report,
+  problemTitle,
+  language,
+  code,
+  saveResult,
+}) {
   const hire = report.decision === "HIRE";
-  const heading = report.incomplete ? "No evaluation" : "Your performance packet";
+  const heading = report.incomplete
+    ? "No evaluation"
+    : "Your performance packet";
   const practiceLevel = report.incomplete
     ? ""
     : report.practiceLevel
@@ -182,14 +224,19 @@ export function reportMarkup({ report, problemTitle, language, code, saveResult 
   const feedback = report.incomplete
     ? ""
     : `${feedbackMarkup("Coding", report.codingFeedback)}${feedbackMarkup("Communication", report.communicationFeedback)}`;
-  const practiceNext = report.incomplete || !report.improvementPlan?.length
-    ? ""
-    : `<section><h3>Practice next</h3><ol>${report.improvementPlan.map((item) => `
+  const practiceNext =
+    report.incomplete || !report.improvementPlan?.length
+      ? ""
+      : `<section><h3>Practice next</h3><ol>${report.improvementPlan
+          .map(
+            (item) => `
       <li><strong>${escapeHtml(item.phase)} · ${escapeHtml(item.durationMin)} min · ${escapeHtml(item.impact)} impact</strong>
         <p>${escapeHtml(item.drill)}</p>
         <p><strong>Success:</strong> ${escapeHtml(item.successCriterion)}</p>
         <ul>${item.selfReview.map((check) => `<li>${escapeHtml(check)}</li>`).join("")}</ul>
-      </li>`).join("")}</ol></section>`;
+      </li>`,
+          )
+          .join("")}</ol></section>`;
   const debrief = report.debrief
     ? `<details class="report-debrief"><summary>What the interviewer held back</summary>
       <p>Spaced review will bring this problem back, so your next attempt tests recall.</p>
@@ -205,14 +252,19 @@ export function reportMarkup({ report, problemTitle, language, code, saveResult 
     ? `<p class="muted small">REACTO/STAR phase scores are formative coaching signals, not calibrated hiring evidence.</p>`
     : "";
   // Only where the report recorded one, like the mode beside it in the header.
-  const loop = report.interviewLoop ? ` · ${loopLabel(report.interviewLoop)}` : "";
-  const rounds = report.rounds?.length ? `<section><h3>Interview rounds</h3><ul>${report.rounds.map((round) => `<li>${escapeHtml(round.kind)} · ${escapeHtml(round.budgetMin)} min · ${escapeHtml(round.status)}</li>`).join("")}</ul></section>` : "";
+  const loop = report.interviewLoop
+    ? ` · ${loopLabel(report.interviewLoop)}`
+    : "";
+  const rounds = report.rounds?.length
+    ? `<section><h3>Interview rounds</h3><ul>${report.rounds.map((round) => `<li>${escapeHtml(round.kind)} · ${escapeHtml(round.budgetMin)} min · ${escapeHtml(round.status)}</li>`).join("")}</ul></section>`
+    : "";
   const contract = report.interviewContract
     ? `Contract bundle ${report.interviewContract.bundleVersion} · rubric ${report.interviewContract.rubricVersion} · report schema ${report.interviewContract.reportSchemaVersion}`
     : "Legacy/unversioned contract";
   // Replay renders reports it did not create, so only the interview caller
   // supplies this field and mounts a live region for the pending save.
-  const saveStatus = saveResult === undefined ? null : reportSaveStatus(saveResult);
+  const saveStatus =
+    saveResult === undefined ? null : reportSaveStatus(saveResult);
 
   return `
     <div class="report-card">
@@ -237,7 +289,14 @@ export function reportMarkup({ report, problemTitle, language, code, saveResult 
 
 /// The downloadable report. Pure so the export can be tested without a DOM;
 /// `at` is injected because a timestamp would otherwise make it unassertable.
-export function reportMarkdown({ report, problemTitle, language, code, transcript, at }) {
+export function reportMarkdown({
+  report,
+  problemTitle,
+  language,
+  code,
+  transcript,
+  at,
+}) {
   // One rule for every untrusted string in this document, where there used to
   // be three. Evidence rows ran through escapeHtml, feedback bullets and
   // transcript turns ran through nothing. escapeHtml was the wrong escaper for
@@ -269,62 +328,107 @@ export function reportMarkdown({ report, problemTitle, language, code, transcrip
   // indent, the leading-character rule below never saw the `#`, and feedback
   // text could still write a heading. The leading-character rule runs last,
   // once trimming has decided what the line actually starts with.
-  const mdText = (value) => String(value ?? "")
-    .replace(/\\/g, "\\\\")
-    .replace(/([|`<\[])/g, "\\$1")
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/^([#>*+=~_-])/, "\\$1")
-    // The delimiter, not the digits: a digit is not escapable punctuation, so
-    // `\3.` rendered a literal backslash and corrupted numbered feedback, which
-    // is the shape a grader writes in. `)` is an ordered-list delimiter too.
-    .replace(/^(\d+)([.)])/, "$1\\$2");
-  const bullets = (items) => orPlaceholder(items).map((item) => `- ${mdText(item)}`).join("\n");
-  const section = (title, feedbackSection) => `### ${title}\n\n**Strengths**\n${bullets(feedbackSection.strengths)}\n\n**Improvements**\n${bullets(feedbackSection.improvements)}\n`;
-  const evidence = (report.integrityEvents || []).map((event) => {
-    const sources = event.sourceEventIds?.length ? ` - sources: ${event.sourceEventIds.map(mdText).join(", ")}` : "";
-    const { label, detail } = integrityEventText(event);
-    return `- ${mdText(event.at)} [${mdText(event.severity)}] ${mdText(label)}${detail ? ` - ${mdText(detail)}` : ""}${sources}`;
-  }).join("\n") || "(none captured)";
-  const practiceNext = report.incomplete || !report.improvementPlan?.length
-    ? []
-    : [
-      "## Practice next",
-      "",
-      ...report.improvementPlan.flatMap((item, index) => [
-        `${index + 1}. **${mdText(item.phase)} · ${mdText(item.durationMin)} min · ${mdText(item.impact)} impact**`,
-        `   - Drill: ${mdText(item.drill)}`,
-        `   - Success: ${mdText(item.successCriterion)}`,
-        ...item.selfReview.map((check) => `   - Check: ${mdText(check)}`),
-      ]),
-      "",
-    ];
+  const mdText = (value) =>
+    String(value ?? "")
+      .replace(/\\/g, "\\\\")
+      .replace(/([|`<\[])/g, "\\$1")
+      .replace(/\s+/g, " ")
+      .trim()
+      .replace(/^([#>*+=~_-])/, "\\$1")
+      // The delimiter, not the digits: a digit is not escapable punctuation, so
+      // `\3.` rendered a literal backslash and corrupted numbered feedback, which
+      // is the shape a grader writes in. `)` is an ordered-list delimiter too.
+      .replace(/^(\d+)([.)])/, "$1\\$2");
+  const bullets = (items) =>
+    orPlaceholder(items)
+      .map((item) => `- ${mdText(item)}`)
+      .join("\n");
+  const section = (title, feedbackSection) =>
+    `### ${title}\n\n**Strengths**\n${bullets(feedbackSection.strengths)}\n\n**Improvements**\n${bullets(feedbackSection.improvements)}\n`;
+  const evidence =
+    (report.integrityEvents || [])
+      .map((event) => {
+        const sources = event.sourceEventIds?.length
+          ? ` - sources: ${event.sourceEventIds.map(mdText).join(", ")}`
+          : "";
+        const { label, detail } = integrityEventText(event);
+        return `- ${mdText(event.at)} [${mdText(event.severity)}] ${mdText(label)}${detail ? ` - ${mdText(detail)}` : ""}${sources}`;
+      })
+      .join("\n") || "(none captured)";
+  const practiceNext =
+    report.incomplete || !report.improvementPlan?.length
+      ? []
+      : [
+          "## Practice next",
+          "",
+          ...report.improvementPlan.flatMap((item, index) => [
+            `${index + 1}. **${mdText(item.phase)} · ${mdText(item.durationMin)} min · ${mdText(item.impact)} impact**`,
+            `   - Drill: ${mdText(item.drill)}`,
+            `   - Success: ${mdText(item.successCriterion)}`,
+            ...item.selfReview.map((check) => `   - Check: ${mdText(check)}`),
+          ]),
+          "",
+        ];
   const debrief = report.debrief
     ? [
-      "## What the interviewer held back",
-      "",
-      "Spaced review will bring this problem back, so your next attempt tests recall.",
-      ...(report.debrief.scenarioContract ? [`**Scenario contract:** ${mdText(report.debrief.scenarioContract)}`] : []),
-      ...(report.debrief.approach ? [`**Approach and complexity:** ${mdText(report.debrief.approach)}`] : []),
-      ...(report.debrief.pitfalls ? [`**Common pitfalls:** ${mdText(report.debrief.pitfalls)}`] : []),
-      ...(report.debrief.hints?.length ? ["", "### Hint ladder", "", `Reached hint ${report.debrief.hints.filter((hint) => hint.given).length} of ${report.debrief.hints.length}.`, "", ...report.debrief.hints.map((hint) => `- **${hint.given ? "Given" : "Held back"}:** ${mdText(hint.text)}`)] : []),
-      ...(report.debrief.followUps?.length ? ["", "### Follow-ups this problem offers", "", ...report.debrief.followUps.map((followUp) => `- ${mdText(followUp)}`)] : []),
-      "",
-    ]
+        "## What the interviewer held back",
+        "",
+        "Spaced review will bring this problem back, so your next attempt tests recall.",
+        ...(report.debrief.scenarioContract
+          ? [
+              `**Scenario contract:** ${mdText(report.debrief.scenarioContract)}`,
+            ]
+          : []),
+        ...(report.debrief.approach
+          ? [`**Approach and complexity:** ${mdText(report.debrief.approach)}`]
+          : []),
+        ...(report.debrief.pitfalls
+          ? [`**Common pitfalls:** ${mdText(report.debrief.pitfalls)}`]
+          : []),
+        ...(report.debrief.hints?.length
+          ? [
+              "",
+              "### Hint ladder",
+              "",
+              `Reached hint ${report.debrief.hints.filter((hint) => hint.given).length} of ${report.debrief.hints.length}.`,
+              "",
+              ...report.debrief.hints.map(
+                (hint) =>
+                  `- **${hint.given ? "Given" : "Held back"}:** ${mdText(hint.text)}`,
+              ),
+            ]
+          : []),
+        ...(report.debrief.followUps?.length
+          ? [
+              "",
+              "### Follow-ups this problem offers",
+              "",
+              ...report.debrief.followUps.map(
+                (followUp) => `- ${mdText(followUp)}`,
+              ),
+            ]
+          : []),
+        "",
+      ]
     : [];
   const frameworkTimeline = report.frameworkEvidence?.length
     ? [
-      "## Framework evidence",
-      "",
-      ...report.frameworkEvidence.map((item) =>
-        `- ${frameworkTime(item.atMs)} · **${mdText(item.phase)}** · ${mdText(item.kind)} · ${mdText(item.source)} · ${mdText(item.confidence)}% · v${mdText(item.frameworkVersion)} — ${mdText(item.summary)}`),
-      "",
-    ]
+        "## Framework evidence",
+        "",
+        ...report.frameworkEvidence.map(
+          (item) =>
+            `- ${frameworkTime(item.atMs)} · **${mdText(item.phase)}** · ${mdText(item.kind)} · ${mdText(item.source)} · ${mdText(item.confidence)}% · v${mdText(item.frameworkVersion)} — ${mdText(item.summary)}`,
+        ),
+        "",
+      ]
     : [];
   const chainNote = mdText(chainSentence(report));
   const conversation = transcript
     .filter((segment) => segment.final || segment.text.trim())
-    .map((segment) => `**${segment.speaker === "interviewer" ? "Jim" : "You"}:** ${mdText(segment.text.trim())}`)
+    .map(
+      (segment) =>
+        `**${segment.speaker === "interviewer" ? "Jim" : "You"}:** ${mdText(segment.text.trim())}`,
+    )
     .join("\n\n");
   // Candidate code is the one field here that must not be escaped, so when it
   // contains a run of backticks the fence is what has to give. Without this, a
@@ -336,7 +440,10 @@ export function reportMarkdown({ report, problemTitle, language, code, transcrip
   // thousand runs the call blows the argument limit and throws a RangeError, so
   // the candidate's own download button would do nothing.
   const body = code.trimEnd() || "(editor was empty)";
-  const longestRun = (body.match(/`+/g) || []).reduce((longest, run) => Math.max(longest, run.length), 0);
+  const longestRun = (body.match(/`+/g) || []).reduce(
+    (longest, run) => Math.max(longest, run.length),
+    0,
+  );
   const fence = "`".repeat(Math.max(2, longestRun) + 1);
   // The info string is the one place this document emits a value unescaped, so
   // it takes the only characters a language tag can be. Today `language` comes
@@ -349,41 +456,56 @@ export function reportMarkdown({ report, problemTitle, language, code, transcrip
   // four ways, including an untagged code fence and two different names for the
   // same section.
   const head = report.incomplete
-    ? [
-      "## No evaluation",
-      "",
-      mdText(report.summary) || "(none)",
-    ]
+    ? ["## No evaluation", "", mdText(report.summary) || "(none)"]
     : [
-      `## Verdict: ${report.decision === "HIRE" ? "HIRE" : "NO HIRE"}`,
-      "",
-      report.practiceLevel
-        ? `Judged against a mid-level bar; practiced for: ${mdText(report.practiceLevel)}`
-        : "Judged against a mid-level bar",
-      "",
-      "| Metric | Score |",
-      "|---|---|",
-      `| Coding | ${mdText(report.codingScore)} / 100 |`,
-      `| Communication | ${mdText(report.communicationScore)} / 100 |`,
-      `| Hints used | ${mdText(report.hintsUsed)} |`,
-      "",
-      "## Committee summary",
-      mdText(report.summary) || "(none)",
-      "",
-      section("Coding feedback", report.codingFeedback),
-      section("Communication feedback", report.communicationFeedback).trimEnd(),
-    ];
+        `## Verdict: ${report.decision === "HIRE" ? "HIRE" : "NO HIRE"}`,
+        "",
+        report.practiceLevel
+          ? `Judged against a mid-level bar; practiced for: ${mdText(report.practiceLevel)}`
+          : "Judged against a mid-level bar",
+        "",
+        "| Metric | Score |",
+        "|---|---|",
+        `| Coding | ${mdText(report.codingScore)} / 100 |`,
+        `| Communication | ${mdText(report.communicationScore)} / 100 |`,
+        `| Hints used | ${mdText(report.hintsUsed)} |`,
+        "",
+        "## Committee summary",
+        mdText(report.summary) || "(none)",
+        "",
+        section("Coding feedback", report.codingFeedback),
+        section(
+          "Communication feedback",
+          report.communicationFeedback,
+        ).trimEnd(),
+      ];
 
   return [
     `# Interview Report - ${mdText(problemTitle)}`,
     `_${at}_`,
     ...(report.mode ? [`Mode: ${modeLabel(report.mode)}`] : []),
-    ...(report.interviewLoop ? [`Loop: ${loopLabel(report.interviewLoop)}`] : []),
+    ...(report.interviewLoop
+      ? [`Loop: ${loopLabel(report.interviewLoop)}`]
+      : []),
     report.interviewContract
       ? `Contract: bundle ${report.interviewContract.bundleVersion}; live prompt ${report.interviewContract.livePromptVersion}; report prompt ${report.interviewContract.reportPromptVersion}; rubric ${report.interviewContract.rubricVersion}; report schema ${report.interviewContract.reportSchemaVersion}`
       : "Contract: legacy/unversioned",
-    ...(report.rounds?.length ? ["Rounds: " + report.rounds.map((round) => `${round.kind} (${round.budgetMin} min, ${round.status})`).join("; ")] : []),
-    ...(report.frameworkAssessment ? ["REACTO/STAR phase scores are formative coaching signals, not calibrated hiring evidence."] : []),
+    ...(report.rounds?.length
+      ? [
+          "Rounds: " +
+            report.rounds
+              .map(
+                (round) =>
+                  `${round.kind} (${round.budgetMin} min, ${round.status})`,
+              )
+              .join("; "),
+        ]
+      : []),
+    ...(report.frameworkAssessment
+      ? [
+          "REACTO/STAR phase scores are formative coaching signals, not calibrated hiring evidence.",
+        ]
+      : []),
     "",
     ...head,
     "",
@@ -417,11 +539,15 @@ function frameworkEvidenceMarkup(items) {
   if (!items?.length) return "";
   return `<section aria-labelledby="framework-evidence-title">
     <h3 id="framework-evidence-title">Framework evidence</h3>
-    <ol class="framework-timeline">${items.map((item) => `<li>
+    <ol class="framework-timeline">${items
+      .map(
+        (item) => `<li>
       <strong>${escapeHtml(item.phase)}</strong>
       <span>${frameworkTime(item.atMs)} · ${escapeHtml(item.kind)} · ${escapeHtml(item.source)} · ${escapeHtml(item.confidence)}% confidence · v${escapeHtml(item.frameworkVersion)}</span>
       <p>${escapeHtml(item.summary)}</p>
-    </li>`).join("")}</ol>
+    </li>`,
+      )
+      .join("")}</ol>
   </section>`;
 }
 

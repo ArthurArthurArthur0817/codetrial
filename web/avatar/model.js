@@ -25,7 +25,8 @@ import { LOAD_TIMEOUT_MS } from "./avatar.js";
 // language boundary forces; a test pins it against this one.
 export const MODEL_URL =
   "https://raw.githubusercontent.com/vrm-c/vrm-specification/837f156dbce43ad69183ce1bdab549961ae1c1ee/samples/Seed-san/vrm/Seed-san.vrm";
-export const MODEL_SHA256 = "624d0d554bc205bbdc33e22a68a2c3c20edebb3e573011ead8878a65e5329b23";
+export const MODEL_SHA256 =
+  "624d0d554bc205bbdc33e22a68a2c3c20edebb3e573011ead8878a65e5329b23";
 
 // What the fetch will accept, in binary megabytes. `docs/avatar-contract.md`
 // sets 5 to 15 MB as the budget for a commissioned replacement and records the
@@ -46,7 +47,9 @@ export const MODEL_CACHE = `${CACHE_PREFIX}${MODEL_SHA256}`;
 
 async function sha256Hex(bytes) {
   const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
 }
 
 /// Storage, not integrity, which is why every failure here returns null instead
@@ -77,7 +80,8 @@ export async function openModelCache(caches = globalThis.caches) {
 export async function evictSuperseded(caches) {
   try {
     for (const name of await caches.keys()) {
-      if (SUPERSEDED_CACHE.test(name) && name !== MODEL_CACHE) await caches.delete(name);
+      if (SUPERSEDED_CACHE.test(name) && name !== MODEL_CACHE)
+        await caches.delete(name);
     }
   } catch {
     // A sweep that cannot run costs disk, not correctness.
@@ -137,7 +141,10 @@ export async function modelBytes(url, cache, expected, deadline) {
   // twice fails the second time for the reason it failed the first, and the
   // read above has already deleted it anyway.
   deadline ??= AbortSignal.timeout(LOAD_TIMEOUT_MS);
-  const bytes = await onceMore(() => download(url, expected, deadline), deadline);
+  const bytes = await onceMore(
+    () => download(url, expected, deadline),
+    deadline,
+  );
   // Not awaited: the write is bookkeeping for a later interview, and `new
   // Response` copies 11 MB before the storage round-trip even begins. Nothing
   // downstream reads it back, which the swallowed failure is the proof of.
@@ -236,11 +243,15 @@ function declaredBytes(url, response) {
   if (!/^\d+$/.test(declared.trim())) {
     // Truncated because the value is the origin's, unbounded, and about to be
     // interpolated into a string somebody may one day put somewhere else.
-    throw new Error(`${url} declared an unreadable Content-Length: ${declared.slice(0, 64)}`);
+    throw new Error(
+      `${url} declared an unreadable Content-Length: ${declared.slice(0, 64)}`,
+    );
   }
   const length = Number(declared);
   if (length > MODEL_MAX_BYTES) {
-    throw new Error(`${url} declared ${length} bytes, over the ${MODEL_MAX_BYTES} byte ceiling`);
+    throw new Error(
+      `${url} declared ${length} bytes, over the ${MODEL_MAX_BYTES} byte ceiling`,
+    );
   }
   return length;
 }
@@ -276,7 +287,8 @@ async function capped(url, response) {
     void release(response.body);
     throw refusal;
   }
-  if (!response.body) throw new Error(`${url} answered ${response.status} with no body`);
+  if (!response.body)
+    throw new Error(`${url} answered ${response.status} with no body`);
   const reader = response.body.getReader();
   let bytes = new Uint8Array(declared ?? 64 * 1024);
   let total = 0;
@@ -286,7 +298,9 @@ async function capped(url, response) {
       if (done) break;
       const needed = total + value.byteLength;
       if (needed > MODEL_MAX_BYTES) {
-        throw new Error(`${url} sent more than the ${MODEL_MAX_BYTES} byte ceiling`);
+        throw new Error(
+          `${url} sent more than the ${MODEL_MAX_BYTES} byte ceiling`,
+        );
       }
       if (needed > bytes.byteLength) {
         // The clamp can never land below `needed`, because the line above has
@@ -325,7 +339,9 @@ async function capped(url, response) {
   // view -- but `GLTFLoader.parseAsync` in `vrm.js` branches on
   // `instanceof ArrayBuffer` and would quietly read a view as JSON, so the copy
   // goes when that caller does and not before.
-  return total === bytes.byteLength ? bytes.buffer : bytes.buffer.slice(0, total);
+  return total === bytes.byteLength
+    ? bytes.buffer
+    : bytes.buffer.slice(0, total);
 }
 
 /// A connection that drops eight megabytes in is the same event as one that
@@ -338,7 +354,9 @@ async function readChunk(url, reader) {
   try {
     return await reader.read();
   } catch (cause) {
-    throw new Transient(`${url} stopped sending partway through the body`, { cause });
+    throw new Transient(`${url} stopped sending partway through the body`, {
+      cause,
+    });
   }
 }
 
@@ -374,7 +392,9 @@ async function store(cache, url, bytes) {
 /// check the pin gets the neutral panel, which is a state the page already has.
 export async function loadModelBytes() {
   if (!globalThis.crypto?.subtle) {
-    throw new Error("the avatar model cannot be verified without a secure context");
+    throw new Error(
+      "the avatar model cannot be verified without a secure context",
+    );
   }
   return modelBytes(MODEL_URL, await openModelCache(), MODEL_SHA256);
 }

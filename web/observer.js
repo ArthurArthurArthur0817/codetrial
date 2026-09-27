@@ -13,8 +13,12 @@ join.addEventListener("click", async () => {
       body: JSON.stringify({ roomName }),
     });
     const connection = await response.json();
-    if (!response.ok) throw new Error(connection.error || "Could not join this room.");
-    const room = new window.LivekitClient.Room({ adaptiveStream: true, dynacast: true });
+    if (!response.ok)
+      throw new Error(connection.error || "Could not join this room.");
+    const room = new window.LivekitClient.Room({
+      adaptiveStream: true,
+      dynacast: true,
+    });
     room.on(window.LivekitClient.RoomEvent.TrackSubscribed, (track) => {
       if (track.kind !== "audio") return;
       const audio = track.attach();

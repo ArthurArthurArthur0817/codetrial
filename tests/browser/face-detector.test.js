@@ -12,11 +12,16 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join, resolve } from "node:path";
 
 import { launchChromium, root } from "./source.js";
-
 
 /// Asked for rather than picked. A fixed port collides with a second copy of
 /// this suite and with whatever else on the machine happened to want it.
@@ -81,7 +86,10 @@ before(async () => {
   mkdirSync(resolve(root, "target"), { recursive: true });
   workDir = mkdtempSync(join(root, "target", "face-detector-"));
   const configPath = join(workDir, "codetrial.env.local");
-  writeFileSync(configPath, "LIVEKIT_URL=wss://example.livekit.cloud\nLIVEKIT_API_KEY=face-detector-key\nLIVEKIT_API_SECRET=face-detector-secret\n");
+  writeFileSync(
+    configPath,
+    "LIVEKIT_URL=wss://example.livekit.cloud\nLIVEKIT_API_KEY=face-detector-key\nLIVEKIT_API_SECRET=face-detector-secret\n",
+  );
 
   // Three ports before giving up. A lost race is a fresh number and another
   // try; three lost in a row is not a race any more.
@@ -90,11 +98,22 @@ before(async () => {
     BASE = `http://127.0.0.1:${PORT}/`;
     server = spawn(
       binary,
-      ["web", "--config", configPath, "--web-addr", `127.0.0.1:${PORT}`, "--web-dir", resolve(root, "web")],
+      [
+        "web",
+        "--config",
+        configPath,
+        "--web-addr",
+        `127.0.0.1:${PORT}`,
+        "--web-dir",
+        resolve(root, "web"),
+      ],
       {
         cwd: root,
         stdio: "ignore",
-        env: { ...process.env, CODETRIAL_DB_PATH: join(workDir, "accounts.db") },
+        env: {
+          ...process.env,
+          CODETRIAL_DB_PATH: join(workDir, "accounts.db"),
+        },
       },
     );
     if (await reachable()) return;
@@ -103,7 +122,9 @@ before(async () => {
   }
   // Built, launched, and never answered. Skipping here would report the same
   // thing as an unbuilt checkout, and the two are not the same thing at all.
-  throw new Error(`the server never answered on 127.0.0.1:${PORT} after three ports`);
+  throw new Error(
+    `the server never answered on 127.0.0.1:${PORT} after three ports`,
+  );
 });
 
 after(async () => {
@@ -162,7 +183,13 @@ async function watchFrames() {
         at += 400;
         const frame = await createImageBitmap(canvas);
         worker.postMessage(
-          { type: "frame", source: "camera", at, transport: "ImageBitmap", frame },
+          {
+            type: "frame",
+            source: "camera",
+            at,
+            transport: "ImageBitmap",
+            frame,
+          },
           [frame],
         );
       };
@@ -176,7 +203,12 @@ async function watchFrames() {
         while (Date.now() < deadline) {
           await send(canvas);
           if (events.some((event) => event.eventType === wanted)) return true;
-          if (events.some((event) => event.eventType === "FACE_DETECTOR_UNAVAILABLE")) return false;
+          if (
+            events.some(
+              (event) => event.eventType === "FACE_DETECTOR_UNAVAILABLE",
+            )
+          )
+            return false;
           await new Promise((done) => setTimeout(done, 250));
         }
         return false;
@@ -202,7 +234,9 @@ test("the whole camera pipeline detects a face and reports it losing one", async
   // The symptom every failure in this chain produces: a renamed vendored asset,
   // a DOM member the bridge does not supply, a wasm body served untyped, or a
   // frame type MediaPipe cannot read. `detail` carries which.
-  const unavailable = all.find((event) => event.eventType === "FACE_DETECTOR_UNAVAILABLE");
+  const unavailable = all.find(
+    (event) => event.eventType === "FACE_DETECTOR_UNAVAILABLE",
+  );
   assert.equal(
     unavailable,
     undefined,
@@ -210,7 +244,10 @@ test("the whole camera pipeline detects a face and reports it losing one", async
   );
 
   const seen = all.map((event) => event.eventType);
-  assert.ok(seen.includes("FACE_DETECTED"), `expected a detection, saw ${JSON.stringify(seen)}`);
+  assert.ok(
+    seen.includes("FACE_DETECTED"),
+    `expected a detection, saw ${JSON.stringify(seen)}`,
+  );
 
   // Losing the face has to reach the tracker too, or nothing downstream of it
   // ever fires.
@@ -248,7 +285,11 @@ test("a VideoFrame is not a frame this detector can read", async (t) => {
         const timer = setTimeout(() => done("timeout"), 60000);
         worker.onmessage = (event) => {
           clearTimeout(timer);
-          done(event.data.type === "result" ? "accepted" : event.data.reason || "unavailable");
+          done(
+            event.data.type === "result"
+              ? "accepted"
+              : event.data.reason || "unavailable",
+          );
         };
         worker.postMessage({ type: "detect", id: 1, frame }, [frame]);
       });
@@ -263,7 +304,11 @@ test("a VideoFrame is not a frame this detector can read", async (t) => {
       "accepted",
       "VideoFrame is now readable: postIntegrityFrame can go back to the zero-copy handle",
     );
-    assert.notEqual(reason, "timeout", "the detector should refuse a VideoFrame, not hang");
+    assert.notEqual(
+      reason,
+      "timeout",
+      "the detector should refuse a VideoFrame, not hang",
+    );
   } finally {
     await page.close();
   }
@@ -284,14 +329,22 @@ test("the setup face check detects a face under the page's own policy", async (t
       const { createFacePresenceDetector } = await import("/face-presence.js");
       const detector = await createFacePresenceDetector();
       try {
-        return { face: await detector.detect(draw(true)), empty: await detector.detect(draw(false)) };
+        return {
+          face: await detector.detect(draw(true)),
+          empty: await detector.detect(draw(false)),
+        };
       } finally {
         // An unavailable detector has nothing to close.
         detector.close?.();
       }
     }, DRAW_FACE);
     assert.deepEqual(
-      [samples.face.available, samples.face.count, samples.empty.available, samples.empty.count],
+      [
+        samples.face.available,
+        samples.face.count,
+        samples.empty.available,
+        samples.empty.count,
+      ],
       [true, 1, true, 0],
     );
   } finally {

@@ -60,7 +60,12 @@ export function mediaReadiness({
   const steps = {
     output: Boolean(outputConfirmed),
     mic: !micError && micPeak >= MIC_SILENT_PEAK,
-    camera: cameraSkipped || (!cameraError && !faceError && Boolean(cameraReady) && Boolean(faceReady)),
+    camera:
+      cameraSkipped ||
+      (!cameraError &&
+        !faceError &&
+        Boolean(cameraReady) &&
+        Boolean(faceReady)),
   };
 
   if (!browserSupported) {
@@ -68,7 +73,8 @@ export function mediaReadiness({
       steps,
       ready: false,
       blocker: "browser",
-      message: "This browser cannot start the required camera and microphone checks.",
+      message:
+        "This browser cannot start the required camera and microphone checks.",
     };
   }
   if (micError) {
@@ -100,7 +106,8 @@ export function mediaReadiness({
       steps,
       ready: false,
       blocker: "mic-silent",
-      message: "No sound is reaching the microphone yet. Say something to test it.",
+      message:
+        "No sound is reaching the microphone yet. Say something to test it.",
     };
   }
   if (!steps.camera) {
@@ -108,7 +115,8 @@ export function mediaReadiness({
       steps,
       ready: false,
       blocker: "camera",
-      message: "Camera video or face presence is not ready yet. Keep one person in frame.",
+      message:
+        "Camera video or face presence is not ready yet. Keep one person in frame.",
     };
   }
   if (!steps.output) {
@@ -128,7 +136,12 @@ export function mediaReadiness({
 }
 
 export function videoTrackReady(track) {
-  return Boolean(track) && track.readyState === "live" && track.enabled !== false && track.muted !== true;
+  return (
+    Boolean(track) &&
+    track.readyState === "live" &&
+    track.enabled !== false &&
+    track.muted !== true
+  );
 }
 
 /// Whether the browser will actually emit sound. A context stays suspended
@@ -165,7 +178,11 @@ export function preflightReadiness({
   // denied -- with "no active video track" on every frame, and paint the panel
   // red while the prompt is still on screen.
   const camera = pool.trackOf("video");
-  if (camera) pool.setError("video", videoTrackReady(camera) ? null : "no active video track");
+  if (camera)
+    pool.setError(
+      "video",
+      videoTrackReady(camera) ? null : "no active video track",
+    );
   // An ended track never revives, and while it sits in the stream the retry
   // sees a device of that kind and asks for nothing. The gate has no bypass,
   // so an unplugged device would strand the candidate. A muted track can come

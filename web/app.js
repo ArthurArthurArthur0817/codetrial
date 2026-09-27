@@ -1,10 +1,29 @@
 import { FRAMEWORKS, codingLoop } from "./lib.js";
-import { clearReportHistory, deleteReport, readDeviceHistory, renameLocalHistory } from "./history.js";
-import { pickProblem, practiceFocus, storeSharedFocus, suggestDifficulty } from "./problem-picker.js";
-import { normalizeProgressEntries, pickerEntry, progressModelFrom } from "./progress.js";
+import {
+  clearReportHistory,
+  deleteReport,
+  readDeviceHistory,
+  renameLocalHistory,
+} from "./history.js";
+import {
+  pickProblem,
+  practiceFocus,
+  storeSharedFocus,
+  suggestDifficulty,
+} from "./problem-picker.js";
+import {
+  normalizeProgressEntries,
+  pickerEntry,
+  progressModelFrom,
+} from "./progress.js";
 import { reportMarkup } from "./render.js";
 import { loadPageMap } from "./problem-data.js";
-import { parseGroundingFile, retainedSelection, selectedGroundingPacket, storeGroundingPacket } from "./document-grounding.js";
+import {
+  parseGroundingFile,
+  retainedSelection,
+  selectedGroundingPacket,
+  storeGroundingPacket,
+} from "./document-grounding.js";
 
 const requestTimeoutMs = 10_000;
 
@@ -61,7 +80,9 @@ const nodes = {
   randomProblem: document.querySelector("#random-problem"),
   practiceFocus: document.querySelector("#practice-focus"),
   practiceFocusShare: document.querySelector("#practice-focus-share"),
-  practiceFocusShareInput: document.querySelector("#practice-focus-share-input"),
+  practiceFocusShareInput: document.querySelector(
+    "#practice-focus-share-input",
+  ),
   progressSummary: document.querySelector("#progress-summary"),
   attemptHistory: document.querySelector("#attempt-history"),
   progressTrends: document.querySelector("#progress-trends"),
@@ -87,11 +108,13 @@ const nodes = {
 // Every card carries the pressed state from the start, not only the one that
 // is on: one pressed button among 149 plain ones does not read as a choice.
 // A card's id is its page name, the only name the browser has for a problem.
-const cards = [...document.querySelectorAll("[data-problem]")].map((button) => ({
-  id: button.dataset.problem,
-  difficulty: button.dataset.difficulty,
-  button,
-}));
+const cards = [...document.querySelectorAll("[data-problem]")].map(
+  (button) => ({
+    id: button.dataset.problem,
+    difficulty: button.dataset.difficulty,
+    button,
+  }),
+);
 const cardIds = new Set(cards.map((card) => card.id));
 for (const card of cards) mark(card.button, false);
 
@@ -102,18 +125,23 @@ const SHOW_SOURCES_KEY = "codetrial.showProblemSources";
 const showSources = document.querySelector("#show-sources");
 try {
   showSources.checked = localStorage.getItem(SHOW_SOURCES_KEY) === "1";
-} catch { /* off */ }
+} catch {
+  /* off */
+}
 // The published names are not in the page: they arrive with the map, fetched
 // the first time the candidate turns them on.
 const applySources = async () => {
   if (showSources.checked) {
     const pages = await loadPageMap().catch(() => null);
-    const sourceOf = new Map(Object.values(pages ?? {})
-      .filter((entry) => entry.source)
-      .map((entry) => [entry.page, entry.source]));
+    const sourceOf = new Map(
+      Object.values(pages ?? {})
+        .filter((entry) => entry.source)
+        .map((entry) => [entry.page, entry.source]),
+    );
     for (const card of cards) {
       const source = card.button.querySelector(".problem-source");
-      if (sourceOf.has(card.id)) source.textContent = `LeetCode: ${sourceOf.get(card.id)}`;
+      if (sourceOf.has(card.id))
+        source.textContent = `LeetCode: ${sourceOf.get(card.id)}`;
     }
   }
   for (const source of document.querySelectorAll(".problem-source")) {
@@ -124,7 +152,9 @@ showSources.addEventListener("change", () => {
   void applySources();
   try {
     localStorage.setItem(SHOW_SOURCES_KEY, showSources.checked ? "1" : "0");
-  } catch { /* the page still shows what was chosen */ }
+  } catch {
+    /* the page still shows what was chosen */
+  }
 });
 void applySources();
 const levels = [...document.querySelectorAll('[name="difficulty"]')];
@@ -163,7 +193,8 @@ for (const input of levels) {
     applyDifficulties();
     // A pick made by hand survives a filter that still includes it. Only one
     // that now hides it hands the choice back to the lobby.
-    if (manualProblem && selectedDifficulties().has(problem?.difficulty)) return;
+    if (manualProblem && selectedDifficulties().has(problem?.difficulty))
+      return;
     manualProblem = false;
     roll = Math.random();
     avoidedProblem = undefined;
@@ -185,7 +216,9 @@ let grounding = { requirements: [], skills: [], anchors: [] };
 const groundingReads = { jd: 0, resume: 0 };
 
 nodes.groundingJd.addEventListener("change", () => loadGroundingFile("jd"));
-nodes.groundingResume.addEventListener("change", () => loadGroundingFile("resume"));
+nodes.groundingResume.addEventListener("change", () =>
+  loadGroundingFile("resume"),
+);
 nodes.groundingClear.addEventListener("click", clearGrounding);
 
 let progressNormalized = [];
@@ -195,14 +228,20 @@ let progressSuffix = "saved";
 /// browser that knows there is nothing on the server.
 let accountHistory = null;
 
-for (const filter of [nodes.progressDifficulty, nodes.progressLanguage, nodes.progressDuration]) {
+for (const filter of [
+  nodes.progressDifficulty,
+  nodes.progressLanguage,
+  nodes.progressDuration,
+]) {
   filter.addEventListener("change", renderProgress);
 }
 nodes.deleteReports.addEventListener("click", deleteSavedReports);
 
 const durations = [...document.querySelectorAll("[data-duration]")];
 for (const button of durations) {
-  button.addEventListener("click", () => setDuration(Number(button.dataset.duration), true));
+  button.addEventListener("click", () =>
+    setDuration(Number(button.dataset.duration), true),
+  );
 }
 
 for (const button of document.querySelectorAll("[data-loop]")) {
@@ -247,12 +286,20 @@ start.addEventListener("click", async () => {
     targetCompany: nodes.profileCompany.value.trim(),
   };
   if (profile.role) destination.searchParams.set("role", profile.role);
-  if (profile.seniority) destination.searchParams.set("seniority", profile.seniority);
-  if (profile.targetCompany) destination.searchParams.set("company", profile.targetCompany);
-  const focus = nodes.practiceFocusShareInput.checked ? practiceFocus(reports) : null;
+  if (profile.seniority)
+    destination.searchParams.set("seniority", profile.seniority);
+  if (profile.targetCompany)
+    destination.searchParams.set("company", profile.targetCompany);
+  const focus = nodes.practiceFocusShareInput.checked
+    ? practiceFocus(reports)
+    : null;
   let packet;
   try {
-    packet = selectedGroundingPacket(grounding, checkedGrounding(), nodes.groundingConsent.checked);
+    packet = selectedGroundingPacket(
+      grounding,
+      checkedGrounding(),
+      nodes.groundingConsent.checked,
+    );
   } catch (error) {
     nodes.groundingError.textContent = error.message;
     return;
@@ -293,7 +340,8 @@ start.addEventListener("click", async () => {
 
 async function loadGroundingFile(kind) {
   const input = kind === "jd" ? nodes.groundingJd : nodes.groundingResume;
-  const status = kind === "jd" ? nodes.groundingJdStatus : nodes.groundingResumeStatus;
+  const status =
+    kind === "jd" ? nodes.groundingJdStatus : nodes.groundingResumeStatus;
   const read = ++groundingReads[kind];
   status.textContent = "Reading locally...";
   let parsed = null;
@@ -305,20 +353,28 @@ async function loadGroundingFile(kind) {
   }
   if (read !== groundingReads[kind]) return;
   if (kind === "jd") grounding.requirements = parsed?.requirements ?? [];
-  else { grounding.skills = parsed?.skills ?? []; grounding.anchors = parsed?.anchors ?? []; }
+  else {
+    grounding.skills = parsed?.skills ?? [];
+    grounding.anchors = parsed?.anchors ?? [];
+  }
   status.textContent = message;
   renderGroundingChoices(retainedSelection(checkedGrounding(), kind));
 }
 
 function checkedGrounding() {
   const selected = { requirements: [], skills: [], anchors: [] };
-  for (const input of nodes.groundingChoices.querySelectorAll("input:checked")) selected[input.dataset.group].push(Number(input.value));
+  for (const input of nodes.groundingChoices.querySelectorAll("input:checked"))
+    selected[input.dataset.group].push(Number(input.value));
   return selected;
 }
 
 function renderGroundingChoices(selected) {
   nodes.groundingChoices.replaceChildren();
-  for (const [group, label] of [["requirements", "JD requirements"], ["skills", "Resume skills"], ["anchors", "Resume experience/project anchors"]]) {
+  for (const [group, label] of [
+    ["requirements", "JD requirements"],
+    ["skills", "Resume skills"],
+    ["anchors", "Resume experience/project anchors"],
+  ]) {
     if (!grounding[group].length) continue;
     const fieldset = document.createElement("fieldset");
     const legend = document.createElement("legend");
@@ -349,7 +405,11 @@ function clearGrounding() {
   nodes.groundingConsent.checked = false;
   nodes.groundingError.textContent = "";
   nodes.groundingChoices.replaceChildren();
-  try { storeGroundingPacket(sessionStorage, null); } catch { /* clearing is best effort */ }
+  try {
+    storeGroundingPacket(sessionStorage, null);
+  } catch {
+    /* clearing is best effort */
+  }
 }
 
 // Returning from the media preflight can restore this page from the browser's
@@ -373,7 +433,8 @@ window.addEventListener("pageshow", (event) => {
 nodes.githubLogin.addEventListener("keydown", (event) => {
   // Some input methods end composition before its confirming keydown. The
   // legacy IME code remains 229 even when isComposing is already false.
-  if (event.key !== "Enter" || event.isComposing || event.keyCode === 229) return;
+  if (event.key !== "Enter" || event.isComposing || event.keyCode === 229)
+    return;
   event.preventDefault();
   nodes.loginLink.click();
 });
@@ -400,11 +461,16 @@ nodes.loginLink.addEventListener("click", async () => {
 function syncLobbyControls() {
   const accountBusy = accountUpdatePending();
   start.disabled = !problem || starting || accountBusy || deletingReports;
-  nodes.loginLink.disabled = starting || loginPending || historyRefreshing || deletingReports;
-  nodes.randomProblem.disabled = !historyReady || accountBusy || deletingReports;
+  nodes.loginLink.disabled =
+    starting || loginPending || historyRefreshing || deletingReports;
+  nodes.randomProblem.disabled =
+    !historyReady || accountBusy || deletingReports;
   const deleteBlocked = reportDeletesBlocked();
   nodes.deleteReports.disabled = deleteBlocked;
-  for (const remove of nodes.attemptHistory.querySelectorAll("[data-delete-report]")) remove.disabled = deleteBlocked;
+  for (const remove of nodes.attemptHistory.querySelectorAll(
+    "[data-delete-report]",
+  ))
+    remove.disabled = deleteBlocked;
 }
 
 function accountUpdatePending() {
@@ -485,8 +551,10 @@ async function loadAccount(generation) {
   try {
     const session = await fetchJson("/api/session");
     if (generation !== historyLoad) return;
-    if (typeof session?.signedIn !== "boolean" ||
-        (session.signedIn && typeof session.user?.login !== "string")) {
+    if (
+      typeof session?.signedIn !== "boolean" ||
+      (session.signedIn && typeof session.user?.login !== "string")
+    ) {
       throw new Error("Invalid account response");
     }
     accountHistory = false;
@@ -505,9 +573,10 @@ async function loadAccount(generation) {
     }
     const unconfirmedLogin = loginResult !== null;
     if (unconfirmedLogin) {
-      signedOutMessage = loginResult === "recorded"
-        ? "GitHub username recorded, but no signed-in session was found. Try signing in again."
-        : "No signed-in session was found. Try signing in again.";
+      signedOutMessage =
+        loginResult === "recorded"
+          ? "GitHub username recorded, but no signed-in session was found. Try signing in again."
+          : "No signed-in session was found. Try signing in again.";
     }
     loginResult = null;
     nodes.loginLink.textContent = "Use GitHub";
@@ -540,14 +609,17 @@ async function loadAccount(generation) {
 }
 
 function showAccountCheckError() {
-  nodes.accountStatus.textContent = loginResult === "recorded"
-    ? "GitHub username recorded, but the account could not be refreshed."
-    : "Could not confirm the sign-in result. Retry the account check.";
+  nodes.accountStatus.textContent =
+    loginResult === "recorded"
+      ? "GitHub username recorded, but the account could not be refreshed."
+      : "Could not confirm the sign-in result. Retry the account check.";
   nodes.githubLogin.hidden = true;
   nodes.loginLink.hidden = false;
   nodes.loginLink.textContent = "Retry account check";
   nodes.logout.hidden = false;
-  showProgressError("Could not load account progress. Retry the account check.");
+  showProgressError(
+    "Could not load account progress. Retry the account check.",
+  );
 }
 
 async function recordGitHubLogin() {
@@ -568,7 +640,8 @@ async function recordGitHubLogin() {
       // The server already said what is wrong (bad handle, rate limited, not
       // configured); replacing that with a generic line throws it away.
       const body = await response.json().catch(() => null);
-      nodes.accountStatus.textContent = body?.error || "Could not record GitHub username.";
+      nodes.accountStatus.textContent =
+        body?.error || "Could not record GitHub username.";
       return false;
     }
     return true;
@@ -611,8 +684,13 @@ async function renderLocalHistory(generation = historyLoad) {
     // attempts long after the 20-row history has dropped them, so it can hold
     // a published id the history no longer shows.
     let entries = readDeviceHistory();
-    if (entries.some((entry) =>
-      !cardIds.has(pickerEntry(entry).problemId) && entry?.pageMapChecked !== true)) {
+    if (
+      entries.some(
+        (entry) =>
+          !cardIds.has(pickerEntry(entry).problemId) &&
+          entry?.pageMapChecked !== true,
+      )
+    ) {
       const pages = await loadHistoryPageMap();
       if (generation !== historyLoad) return;
       if (pages) {
@@ -635,14 +713,17 @@ async function loadHistoryPageMap() {
     // wait without cancelling the lookup for its other consumers.
     return await Promise.race([
       loadPageMap().catch(() => null),
-      new Promise((resolve) => { timer = setTimeout(() => resolve(null), requestTimeoutMs); }),
+      new Promise((resolve) => {
+        timer = setTimeout(() => resolve(null), requestTimeoutMs);
+      }),
     ]);
   } finally {
     clearTimeout(timer);
   }
 }
 
-const deleteFailedMessage = "Could not delete saved reports. Your reports may not have been removed.";
+const deleteFailedMessage =
+  "Could not delete saved reports. Your reports may not have been removed.";
 
 async function deleteSavedReports() {
   if (starting || accountUpdatePending() || deletingReports) return;
@@ -656,7 +737,10 @@ async function deleteSavedReports() {
   try {
     const result = await clearReportHistory({ account: accountHistory });
     if (result === "cleared") {
-      showReportDeleteStatus("Saved reports and progress were deleted.", "good small");
+      showReportDeleteStatus(
+        "Saved reports and progress were deleted.",
+        "good small",
+      );
       reports = [];
       showProgress([], "saved");
       settle();
@@ -672,7 +756,8 @@ async function deleteSavedReports() {
     }
     showReportDeleteStatus(deleteFailedMessage);
   } catch {
-    if (!nodes.reportDeleteStatus.textContent) showReportDeleteStatus(deleteFailedMessage);
+    if (!nodes.reportDeleteStatus.textContent)
+      showReportDeleteStatus(deleteFailedMessage);
     nodes.reportDeleteStatus.focus();
   } finally {
     deletingReports = false;
@@ -688,7 +773,9 @@ async function deleteSavedReport(attempt, when, button) {
     `Delete the ${when} report for ${attempt.problemTitle}? Recording files follow their separate retention policy. This cannot be undone.`,
   );
   if (!confirmed) return;
-  const position = [...nodes.attemptHistory.children].indexOf(button.closest("li"));
+  const position = [...nodes.attemptHistory.children].indexOf(
+    button.closest("li"),
+  );
   deletingReports = true;
   syncLobbyControls();
   nodes.reportDeleteStatus.textContent = "";
@@ -697,10 +784,13 @@ async function deleteSavedReport(attempt, when, button) {
   try {
     // `accountHistory` is null when the session never answered, and the list
     // drawn then is this device's, so only `true` names an account list.
-    const result = await deleteReport(attempt.id, { account: accountHistory === true });
+    const result = await deleteReport(attempt.id, {
+      account: accountHistory === true,
+    });
     if (result !== "failed") {
       if (result === "account-deleted-local-failed") {
-        message = "The report was deleted from your account, but its copy on this device could not be deleted.";
+        message =
+          "The report was deleted from your account, but its copy on this device could not be deleted.";
       } else if (result === "missing") {
         message = "That report was not found, so nothing was deleted.";
       } else {
@@ -750,19 +840,26 @@ function focusAttemptRow(position, button) {
   }
   const rows = nodes.attemptHistory.children;
   const row = rows[Math.min(position, rows.length - 1)];
-  const target = row?.querySelector("[data-delete-report]") ?? row?.querySelector("button");
+  const target =
+    row?.querySelector("[data-delete-report]") ?? row?.querySelector("button");
   if (target) target.focus();
   else nodes.reportDeleteStatus.focus();
 }
 
-function showReportDeleteStatus(message, className = "critical small", focus = true) {
+function showReportDeleteStatus(
+  message,
+  className = "critical small",
+  focus = true,
+) {
   nodes.reportDeleteStatus.className = className;
   nodes.reportDeleteStatus.textContent = message;
   if (focus) nodes.reportDeleteStatus.focus();
 }
 
 function selectedDifficulties() {
-  return new Set(levels.filter((input) => input.checked).map((input) => input.value));
+  return new Set(
+    levels.filter((input) => input.checked).map((input) => input.value),
+  );
 }
 
 /// The checkboxes moved, so everything read off them moves too: which cards the
@@ -772,7 +869,8 @@ function applyDifficulties() {
   const difficulties = selectedDifficulties();
   // The picker is a shortcut to one problem, not a second copy of the wall the
   // checkboxes just hid, so it shows what the checkboxes selected.
-  for (const card of cards) card.button.hidden = !difficulties.has(card.difficulty);
+  for (const card of cards)
+    card.button.hidden = !difficulties.has(card.difficulty);
   setDuration(suggestedDuration(difficulties));
 }
 
@@ -783,7 +881,14 @@ function recommend(note = "") {
   // it stays answered. Naming a different problem here contradicted the card
   // they had just selected.
   if (manualProblem) return;
-  const choice = pickProblem(cards, selectedDifficulties(), reports, () => roll, undefined, avoidedProblem);
+  const choice = pickProblem(
+    cards,
+    selectedDifficulties(),
+    reports,
+    () => roll,
+    undefined,
+    avoidedProblem,
+  );
   // Nothing to offer is still an answer, and it has to go through `setProblem`
   // like every other one. Returning here left whatever was picked for the
   // levels this call just replaced sitting selected behind a live button, on a
@@ -802,8 +907,7 @@ function recommend(note = "") {
       ? ""
       : ` (${choice.picked.difficulty})`;
     const days = choice.review.intervalDays;
-    nodes.recommendation.textContent =
-      `${note}Selected problem: ${title(choice.picked)}. Review due after ${days} day${days === 1 ? "" : "s"}${level}.`;
+    nodes.recommendation.textContent = `${note}Selected problem: ${title(choice.picked)}. Review due after ${days} day${days === 1 ? "" : "s"}${level}.`;
     return;
   }
   nodes.recommendation.textContent = choice.repeat
@@ -822,7 +926,8 @@ function renderPracticeFocus() {
   nodes.practiceFocusShare.hidden = focus === null;
   // Consent is to share this text. Reloaded history can change it, and a box
   // left ticked would then send words the candidate never saw beside it.
-  if (focus?.weakness !== sharedFocus) nodes.practiceFocusShareInput.checked = false;
+  if (focus?.weakness !== sharedFocus)
+    nodes.practiceFocusShareInput.checked = false;
   sharedFocus = focus?.weakness ?? null;
 }
 
@@ -836,7 +941,8 @@ function applySuggestedLevel() {
     applyDifficulties();
     return "";
   }
-  for (const input of levels) input.checked = input.value === suggestion.difficulty;
+  for (const input of levels)
+    input.checked = input.value === suggestion.difficulty;
   applyDifficulties();
   // Named after the level just finished, not the one being suggested: those
   // differ whenever the streak actually moves the candidate.
@@ -891,7 +997,10 @@ function setDuration(minutes, chosen = false) {
   if (manualDuration && !chosen) return;
   manualDuration ||= chosen;
   duration = underCeiling(minutes);
-  select("[data-duration]", document.querySelector(`[data-duration="${duration}"]`));
+  select(
+    "[data-duration]",
+    document.querySelector(`[data-duration="${duration}"]`),
+  );
 }
 
 /// Snapped to a length the row actually offers, not to the cap itself: a cap
@@ -912,7 +1021,9 @@ function underCeiling(minutes) {
 function applyDurationCeiling(minutes) {
   if (!Number.isFinite(minutes)) return;
   durationCeiling = minutes;
-  const over = durations.filter((button) => Number(button.dataset.duration) > minutes);
+  const over = durations.filter(
+    (button) => Number(button.dataset.duration) > minutes,
+  );
   // A cap under every length on offer is a misconfigured deployment, not a
   // lobby with nothing to press. Leave the row alone and let the server's own
   // floor decide, rather than handing back a page that cannot start anything.
@@ -927,7 +1038,10 @@ function applyDurationCeiling(minutes) {
   // this server can record.
   if (duration > durationCeiling) {
     duration = underCeiling(duration);
-    select("[data-duration]", document.querySelector(`[data-duration="${duration}"]`));
+    select(
+      "[data-duration]",
+      document.querySelector(`[data-duration="${duration}"]`),
+    );
   }
 }
 
@@ -962,9 +1076,17 @@ function showProgress(entries, suffix) {
   nodes.historyHeader.hidden = !erasable;
   nodes.history.hidden = false;
   const model = progressModelFrom(progressNormalized);
-  syncFilter(nodes.progressDifficulty, model.options.difficulty, (value) => value);
+  syncFilter(
+    nodes.progressDifficulty,
+    model.options.difficulty,
+    (value) => value,
+  );
   syncFilter(nodes.progressLanguage, model.options.language, languageLabel);
-  syncFilter(nodes.progressDuration, model.options.durationMin, (value) => `${value} min`);
+  syncFilter(
+    nodes.progressDuration,
+    model.options.durationMin,
+    (value) => `${value} min`,
+  );
   renderProgress();
 }
 
@@ -978,7 +1100,9 @@ function renderAttemptHistory(attempts) {
   for (const attempt of [...attempts].reverse()) {
     const item = document.createElement("li");
     const date = new Date(attempt.at).toLocaleDateString();
-    const verdict = attempt.report.incomplete ? "INCOMPLETE" : attempt.report.decision ?? "UNSCORED";
+    const verdict = attempt.report.incomplete
+      ? "INCOMPLETE"
+      : (attempt.report.decision ?? "UNSCORED");
     const label = document.createElement("p");
     label.textContent = `${date} · ${attempt.problemTitle} · ${languageLabel(attempt.language ?? "not recorded")} · ${verdict}`;
     const open = document.createElement("button");
@@ -1006,7 +1130,9 @@ function renderAttemptHistory(attempts) {
       open.textContent = "Collapse report";
     });
     retry.addEventListener("click", () => {
-      const card = cards.find((candidate) => candidate.id === attempt.problemId);
+      const card = cards.find(
+        (candidate) => candidate.id === attempt.problemId,
+      );
       if (!card) return;
       manualProblem = true;
       card.button.hidden = false;
@@ -1021,14 +1147,22 @@ function renderAttemptHistory(attempts) {
       // The time as well as the day: `Try again` makes two attempts at one
       // problem on one day, and the confirmation and the accessible name are
       // all that tells their two Delete buttons apart.
-      const when = new Date(attempt.at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+      const when = new Date(attempt.at).toLocaleString(undefined, {
+        dateStyle: "medium",
+        timeStyle: "short",
+      });
       const remove = document.createElement("button");
       remove.type = "button";
       remove.dataset.deleteReport = "";
       remove.textContent = "Delete";
-      remove.setAttribute("aria-label", `Delete the ${when} report for ${attempt.problemTitle}`);
+      remove.setAttribute(
+        "aria-label",
+        `Delete the ${when} report for ${attempt.problemTitle}`,
+      );
       remove.disabled = reportDeletesBlocked();
-      remove.addEventListener("click", () => deleteSavedReport(attempt, when, remove));
+      remove.addEventListener("click", () =>
+        deleteSavedReport(attempt, when, remove),
+      );
       item.append(remove);
     }
     item.append(report);
@@ -1071,10 +1205,13 @@ function renderProgress() {
     nodes.progressSummary.textContent = `No saved attempts match these filters. ${model.total} remain ${progressSuffix}.`;
     return;
   }
-  const assessed = model.attempts.filter((attempt) => attempt.report.frameworkAssessment).length;
-  nodes.progressSummary.textContent = assessed === 0
-    ? `${model.attempts.length} of ${model.total} attempts shown · these legacy or unassessed reports have no versioned phase scores, so no zeroes are plotted · ${progressSuffix}.`
-    : `${model.attempts.length} of ${model.total} attempts shown · ${assessed} have comparable formative phase scores, not calibrated hiring evidence · ${progressSuffix}.`;
+  const assessed = model.attempts.filter(
+    (attempt) => attempt.report.frameworkAssessment,
+  ).length;
+  nodes.progressSummary.textContent =
+    assessed === 0
+      ? `${model.attempts.length} of ${model.total} attempts shown · these legacy or unassessed reports have no versioned phase scores, so no zeroes are plotted · ${progressSuffix}.`
+      : `${model.attempts.length} of ${model.total} attempts shown · ${assessed} have comparable formative phase scores, not calibrated hiring evidence · ${progressSuffix}.`;
   // A table each, not one table with the two as groups inside it. They score
   // different exercises: REACTO is how a problem was worked, STAR is how past
   // work was recounted. A single Phase column ran them together as one
@@ -1102,7 +1239,12 @@ function renderProgress() {
       const trend = row.insertCell();
       const segments = model.series[step.label];
       trend.textContent = segments.length
-        ? segments.map((segment) => `Rubric v${segment.rubricVersion}: ${segment.points.map((point) => `attempt ${point.attemptIndex + 1}: ${point.score}`).join(" → ")}`).join(" | ")
+        ? segments
+            .map(
+              (segment) =>
+                `Rubric v${segment.rubricVersion}: ${segment.points.map((point) => `attempt ${point.attemptIndex + 1}: ${point.score}`).join(" → ")}`,
+            )
+            .join(" | ")
         : "Not assessed in these attempts";
     }
     nodes.progressTrends.append(table);
@@ -1116,7 +1258,10 @@ function renderProgress() {
       const item = document.createElement("li");
       const heading = document.createElement("p");
       heading.textContent = `${weakness.framework} · ${weakness.phase} · flagged in ${weakness.count} of ${weakness.assessed} assessed attempt${weakness.assessed === 1 ? "" : "s"}`;
-      item.append(heading, weaknessList(weakness.tags.slice(0, MAX_WEAKNESSES_SHOWN)));
+      item.append(
+        heading,
+        weaknessList(weakness.tags.slice(0, MAX_WEAKNESSES_SHOWN)),
+      );
       // Folded rather than dropped, and outside the list so the fold is not
       // announced as one more weakness.
       const rest = weakness.tags.slice(MAX_WEAKNESSES_SHOWN);
@@ -1146,18 +1291,30 @@ function renderProgress() {
 function syncFilter(select, values, label) {
   const selected = select.value;
   select.replaceChildren(new Option("All", "all"));
-  for (const value of values) select.add(new Option(label(value), String(value)));
-  select.value = [...select.options].some((option) => option.value === selected) ? selected : "all";
+  for (const value of values)
+    select.add(new Option(label(value), String(value)));
+  select.value = [...select.options].some((option) => option.value === selected)
+    ? selected
+    : "all";
 }
 
 function languageLabel(value) {
-  return ({ cpp: "C++", c: "C", java: "Java", javascript: "JavaScript", python: "Python" })[value] || value;
+  return (
+    {
+      cpp: "C++",
+      c: "C",
+      java: "Java",
+      javascript: "JavaScript",
+      python: "Python",
+    }[value] || value
+  );
 }
-
 
 async function fetchJson(url) {
   // Keep the deadline attached while the response body is being read too.
-  const response = await fetch(url, { signal: AbortSignal.timeout(requestTimeoutMs) });
+  const response = await fetch(url, {
+    signal: AbortSignal.timeout(requestTimeoutMs),
+  });
   if (!response.ok) throw new Error(`${url} returned ${response.status}`);
   return response.json();
 }

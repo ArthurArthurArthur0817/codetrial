@@ -36,7 +36,9 @@ const encoder = new TextEncoder();
 /// The body an event goes in, and the event alone. The separators are counted
 /// where the batch is, because there is one fewer of them than there are
 /// events and a batch of exactly the budget must not be split.
-const REPLAY_ENVELOPE_BYTES = encoder.encode(JSON.stringify({ events: [] })).length;
+const REPLAY_ENVELOPE_BYTES = encoder.encode(
+  JSON.stringify({ events: [] }),
+).length;
 
 function eventBytes(event) {
   return encoder.encode(JSON.stringify(event)).length;
@@ -74,7 +76,8 @@ export function recordReplay(kind, payload) {
   replayQueue.push(event);
   queuedBytes += eventBytes(event);
   const full =
-    replayQueue.length >= REPLAY_MAX_BATCH || queuedBodyBytes() > REPLAY_KEEPALIVE_MAX_BYTES;
+    replayQueue.length >= REPLAY_MAX_BATCH ||
+    queuedBodyBytes() > REPLAY_KEEPALIVE_MAX_BYTES;
   if (full && Date.now() >= retryAfter) {
     void flushReplay();
     return;
@@ -83,7 +86,9 @@ export function recordReplay(kind, payload) {
 }
 
 function queuedBodyBytes() {
-  return REPLAY_ENVELOPE_BYTES + queuedBytes + Math.max(0, replayQueue.length - 1);
+  return (
+    REPLAY_ENVELOPE_BYTES + queuedBytes + Math.max(0, replayQueue.length - 1)
+  );
 }
 
 function scheduleFlush() {
@@ -99,7 +104,8 @@ function scheduleFlush() {
 /// asking for an hour would hold the rest of the interview in memory.
 function retryDelayMs(header) {
   const seconds = Number(header);
-  const wanted = Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : REPLAY_RETRY_MS;
+  const wanted =
+    Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : REPLAY_RETRY_MS;
   return Math.min(wanted, REPLAY_RETRY_MAX_MS);
 }
 
@@ -163,12 +169,16 @@ async function sendQueuedBatch() {
     // keeps a batch inside the budget, except for a single event that is over
     // it on its own, which the server still accepts and a keepalive fetch would
     // reject outright.
-    const response = await fetch(`/api/interviews/${encodeURIComponent(state.interviewId)}/events`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body,
-      keepalive: new TextEncoder().encode(body).length <= REPLAY_KEEPALIVE_MAX_BYTES,
-    });
+    const response = await fetch(
+      `/api/interviews/${encodeURIComponent(state.interviewId)}/events`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+        keepalive:
+          new TextEncoder().encode(body).length <= REPLAY_KEEPALIVE_MAX_BYTES,
+      },
+    );
     // 404 is an interview whose consent has been withdrawn, and quota is an
     // interview that has recorded all it may. Both mean the server will refuse
     // everything after this, and a producer that kept posting would spend the
@@ -203,8 +213,12 @@ async function sendQueuedBatch() {
     // event after it: a limit answered by asking harder.
     if (response.status === 429) {
       replayQueue.unshift(...batch);
-      queuedBytes += batch.reduce((total, event) => total + eventBytes(event), 0);
-      retryAfter = Date.now() + retryDelayMs(response.headers.get("Retry-After"));
+      queuedBytes += batch.reduce(
+        (total, event) => total + eventBytes(event),
+        0,
+      );
+      retryAfter =
+        Date.now() + retryDelayMs(response.headers.get("Retry-After"));
     }
   } catch {
     // Offline. The interview is what matters and it is still running.
@@ -290,7 +304,11 @@ function compactSupersededRestates() {
 /// heading with nothing, and a reader who joined late would find the problem
 /// title blank.
 function stagePayload(extra) {
-  return { title: nodes.title.textContent, meta: nodes.meta.textContent, ...extra };
+  return {
+    title: nodes.title.textContent,
+    meta: nodes.meta.textContent,
+    ...extra,
+  };
 }
 
 export function recordStage() {
@@ -315,11 +333,13 @@ export async function recordConsent() {
     body: JSON.stringify({ consentVersion }),
   });
   if (!response.ok) {
-    throw new Error((await response.json())?.error || "Could not record your recording consent.");
+    throw new Error(
+      (await response.json())?.error ||
+        "Could not record your recording consent.",
+    );
   }
   return (await response.json()).interviewId;
 }
-
 
 /// The clock and the problem heading, restated on a throttle.
 ///
@@ -341,7 +361,10 @@ export function recordAvatarState(value) {
   if (opensWindow) replayWindow += 1;
   replayWindowOpen = opensWindow;
   replayAvatarState = value;
-  recordReplay("avatar", { state: value, responseWindow: opensWindow ? replayWindow : null });
+  recordReplay("avatar", {
+    state: value,
+    responseWindow: opensWindow ? replayWindow : null,
+  });
 }
 
 export function responseWindowIndex() {

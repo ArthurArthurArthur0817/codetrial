@@ -27,7 +27,9 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 /// writes is about the level just finished, which is not the level being
 /// suggested whenever the streak moves the candidate.
 export function suggestDifficulty(problems, reports) {
-  const levelOf = new Map(problems.map((problem) => [problem.id, problem.difficulty]));
+  const levelOf = new Map(
+    problems.map((problem) => [problem.id, problem.difficulty]),
+  );
   const attempts = reports
     .map((entry) => ({
       level: levelOf.get(entry?.problemId),
@@ -40,12 +42,15 @@ export function suggestDifficulty(problems, reports) {
     // ever graded.
     .filter(
       (attempt) =>
-        attempt.level && (attempt.decision === "HIRE" || attempt.decision === "NO_HIRE"),
+        attempt.level &&
+        (attempt.decision === "HIRE" || attempt.decision === "NO_HIRE"),
     );
   if (!attempts.length) return null;
 
   const from = attempts[0].level;
-  const recent = attempts.filter((attempt) => attempt.level === from).slice(0, STREAK);
+  const recent = attempts
+    .filter((attempt) => attempt.level === from)
+    .slice(0, STREAK);
   if (recent.length < STREAK) return null;
   if (recent.every((attempt) => attempt.decision === "HIRE")) {
     return { difficulty: step(from, 1), from, reason: "passed" };
@@ -67,7 +72,9 @@ export function storeSharedFocus(storage, focus) {
   try {
     if (focus) storage.setItem(sharedFocusKey, focus);
     else storage.removeItem(sharedFocusKey);
-  } catch { /* an unshared focus is the safe outcome */ }
+  } catch {
+    /* an unshared focus is the safe outcome */
+  }
 }
 
 export function consumeSharedFocus(storage) {
@@ -92,22 +99,38 @@ export function practiceFocus(reports) {
   const focuses = new Map();
   for (const { report } of reports) {
     if (
-      report?.incomplete
-      || (report?.decision !== "HIRE" && report?.decision !== "NO_HIRE")
-      || !Array.isArray(report?.improvementPlan)
-    ) continue;
+      report?.incomplete ||
+      (report?.decision !== "HIRE" && report?.decision !== "NO_HIRE") ||
+      !Array.isArray(report?.improvementPlan)
+    )
+      continue;
     const reported = new Set();
     for (const item of report.improvementPlan) {
-      if (!text(item?.weakness) || !text(item?.drill) || !text(item?.successCriterion)) continue;
+      if (
+        !text(item?.weakness) ||
+        !text(item?.drill) ||
+        !text(item?.successCriterion)
+      )
+        continue;
       const weakness = item.weakness.trim();
       if (reported.has(weakness)) continue;
       reported.add(weakness);
       const existing = focuses.get(weakness);
       if (existing) existing.occurrences += 1;
-      else focuses.set(weakness, { weakness, drill: item.drill.trim(), successCriterion: item.successCriterion.trim(), occurrences: 1 });
+      else
+        focuses.set(weakness, {
+          weakness,
+          drill: item.drill.trim(),
+          successCriterion: item.successCriterion.trim(),
+          occurrences: 1,
+        });
     }
   }
-  return [...focuses.values()].sort((left, right) => right.occurrences - left.occurrences)[0] ?? null;
+  return (
+    [...focuses.values()].sort(
+      (left, right) => right.occurrences - left.occurrences,
+    )[0] ?? null
+  );
 }
 
 /// Clamped at both ends: passing two Hard problems leaves the candidate on
@@ -124,43 +147,72 @@ function step(level, by) {
 ///
 /// The optional clock keeps the scheduling rule deterministic in its tests.
 /// An explicit redraw avoids the current problem whenever another is available.
-export function pickProblem(problems, difficulties, reports, random = Math.random, now = Date.now(), avoid) {
-  const eligible = problems.filter((problem) => difficulties.has(problem.difficulty));
+export function pickProblem(
+  problems,
+  difficulties,
+  reports,
+  random = Math.random,
+  now = Date.now(),
+  avoid,
+) {
+  const eligible = problems.filter((problem) =>
+    difficulties.has(problem.difficulty),
+  );
   const reportList = Array.isArray(reports) ? reports : [];
   const reviews = reviewStatus(reportList, now);
   const passed = new Set(
-    reportList.filter((entry) => entry?.report?.decision === "HIRE").map((entry) => entry.problemId),
+    reportList
+      .filter((entry) => entry?.report?.decision === "HIRE")
+      .map((entry) => entry.problemId),
   );
   const due = problems.filter((problem) => reviews.get(problem.id)?.due);
   const fresh = eligible.filter((problem) => !passed.has(problem.id));
-  const choices = [due, fresh, eligible]
-    .map((pool) => pool.filter((problem) => problem.id !== avoid))
-    .find((pool) => pool.length) ?? (due.length ? due : fresh.length ? fresh : eligible);
+  const choices =
+    [due, fresh, eligible]
+      .map((pool) => pool.filter((problem) => problem.id !== avoid))
+      .find((pool) => pool.length) ??
+    (due.length ? due : fresh.length ? fresh : eligible);
   const picked = choices[Math.floor(random() * choices.length)];
   if (!picked) return null;
   const review = reviews.get(picked.id);
-  return { picked, repeat: !fresh.length, review: due.includes(picked) ? review : null };
+  return {
+    picked,
+    repeat: !fresh.length,
+    review: due.includes(picked) ? review : null,
+  };
 }
 
 function reviewStatus(reports, now) {
   const outcomes = new Map();
   for (const entry of reports) {
     const decision = entry?.report?.decision;
-    if ((decision !== "HIRE" && decision !== "NO_HIRE") || !Number.isFinite(entry.at)) continue;
+    if (
+      (decision !== "HIRE" && decision !== "NO_HIRE") ||
+      !Number.isFinite(entry.at)
+    )
+      continue;
     const entries = outcomes.get(entry.problemId) ?? [];
     entries.push({ at: entry.at, decision });
     outcomes.set(entry.problemId, entries);
   }
-  return new Map([...outcomes].map(([problemId, entries]) => {
-    // History is persisted newest first, while a failed result resets only
-    // the streak that follows it. Ordering explicitly keeps an older miss
-    // from erasing newer successful reviews and leaving no interval.
-    entries.sort((left, right) => left.at - right.at);
-    let successes = 0;
-    for (const entry of entries) successes = entry.decision === "HIRE" ? successes + 1 : 0;
-    const latest = entries.at(-1);
-    const intervalDays =
-      REVIEW_INTERVAL_DAYS[Math.max(Math.min(successes, REVIEW_INTERVAL_DAYS.length) - 1, 0)];
-    return [problemId, { due: latest.at + intervalDays * DAY_MS <= now, intervalDays }];
-  }));
+  return new Map(
+    [...outcomes].map(([problemId, entries]) => {
+      // History is persisted newest first, while a failed result resets only
+      // the streak that follows it. Ordering explicitly keeps an older miss
+      // from erasing newer successful reviews and leaving no interval.
+      entries.sort((left, right) => left.at - right.at);
+      let successes = 0;
+      for (const entry of entries)
+        successes = entry.decision === "HIRE" ? successes + 1 : 0;
+      const latest = entries.at(-1);
+      const intervalDays =
+        REVIEW_INTERVAL_DAYS[
+          Math.max(Math.min(successes, REVIEW_INTERVAL_DAYS.length) - 1, 0)
+        ];
+      return [
+        problemId,
+        { due: latest.at + intervalDays * DAY_MS <= now, intervalDays },
+      ];
+    }),
+  );
 }

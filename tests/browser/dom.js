@@ -86,8 +86,13 @@ class Element {
     // test needs to see the result. `add`, `remove` and `contains` on the class
     // list itself went unused; `current` below is what a test asks.
     const classes = new Set();
-    this.classList = { toggle: (name, on) => void (on ? classes.add(name) : classes.delete(name)) };
-    Object.defineProperty(this, "current", { get: () => classes.has("current") });
+    this.classList = {
+      toggle: (name, on) =>
+        void (on ? classes.add(name) : classes.delete(name)),
+    };
+    Object.defineProperty(this, "current", {
+      get: () => classes.has("current"),
+    });
   }
 
   /// A browser's `textContent` is the concatenation of every descendant's text,
@@ -95,7 +100,9 @@ class Element {
   /// that set it above a list rendered a sentence a browser would show and this
   /// stub would drop.
   get textContent() {
-    return this.children.length ? this.children.map((child) => child.textContent).join("") : this.#text;
+    return this.children.length
+      ? this.children.map((child) => child.textContent).join("")
+      : this.#text;
   }
 
   set textContent(value) {
@@ -143,11 +150,14 @@ class Element {
   /// Stored under the property spelling, so `aria-label` and `ariaLabel` are one
   /// value rather than two the reader has to know to add up.
   setAttribute(name, value) {
-    this[name.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase())] = String(value);
+    this[name.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase())] =
+      String(value);
   }
 
   getAttribute(name) {
-    const property = name.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
+    const property = name.replace(/-([a-z])/g, (_, letter) =>
+      letter.toUpperCase(),
+    );
     return property in this ? String(this[property]) : null;
   }
 
@@ -189,9 +199,13 @@ class Element {
       if (!name.startsWith("data-")) {
         throw new Error(`the stub does not implement the selector ${selector}`);
       }
-      return name.slice(5).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
+      return name
+        .slice(5)
+        .replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
     });
-    return [...this.descendants()].filter((node) => keys.some((key) => key in node.dataset));
+    return [...this.descendants()].filter((node) =>
+      keys.some((key) => key in node.dataset),
+    );
   }
 
   /// Every string this element and its descendants would put in front of a
@@ -199,20 +213,22 @@ class Element {
   /// assigned through a markup property, and the dataset, which a stylesheet can
   /// draw with `content: attr(data-...)`.
   spoken() {
-    return [...this.walk()]
-      .flatMap((node) => [
-        node.ownText,
-        ...SPOKEN_ATTRIBUTES.map((key) => node[key]),
-        ...node.markup,
-        ...Object.values(node.dataset),
-      ])
-      // Stringified rather than filtered to strings. A browser stringifies every
-      // dataset value and every reflected attribute on its way into the markup,
-      // so `dataset.note = ["likely", "assisted"]` draws as text there and was
-      // invisible here.
-      .filter((value) => value !== undefined && value !== null)
-      .map((value) => String(value))
-      .filter((value) => value.trim());
+    return (
+      [...this.walk()]
+        .flatMap((node) => [
+          node.ownText,
+          ...SPOKEN_ATTRIBUTES.map((key) => node[key]),
+          ...node.markup,
+          ...Object.values(node.dataset),
+        ])
+        // Stringified rather than filtered to strings. A browser stringifies every
+        // dataset value and every reflected attribute on its way into the markup,
+        // so `dataset.note = ["likely", "assisted"]` draws as text there and was
+        // invisible here.
+        .filter((value) => value !== undefined && value !== null)
+        .map((value) => String(value))
+        .filter((value) => value.trim())
+    );
   }
 }
 
@@ -260,19 +276,24 @@ export function installDocument(markup) {
   // the markup is the same thing the id scan here always did. So a selector
   // that asks about structure is refused loudly below rather than answered
   // with a guess.
-  const declared = [...markup.matchAll(/<([a-zA-Z][\w-]*)((?:\s+[\w:-]+(?:="[^"]*")?)*)\s*\/?>/g)].map(
-    (match) => {
-      const attributes = Object.fromEntries(
-        [...match[2].matchAll(/([\w:-]+)(?:="([^"]*)")?/g)].map((it) => [it[1], it[2] ?? ""]),
-      );
-      return {
-        tag: match[1].toLowerCase(),
-        id: attributes.id,
-        classes: new Set((attributes.class || "").split(/\s+/).filter(Boolean)),
-        attributes,
-      };
-    },
-  );
+  const declared = [
+    ...markup.matchAll(
+      /<([a-zA-Z][\w-]*)((?:\s+[\w:-]+(?:="[^"]*")?)*)\s*\/?>/g,
+    ),
+  ].map((match) => {
+    const attributes = Object.fromEntries(
+      [...match[2].matchAll(/([\w:-]+)(?:="([^"]*)")?/g)].map((it) => [
+        it[1],
+        it[2] ?? "",
+      ]),
+    );
+    return {
+      tag: match[1].toLowerCase(),
+      id: attributes.id,
+      classes: new Set((attributes.class || "").split(/\s+/).filter(Boolean)),
+      attributes,
+    };
+  });
   const nodes = new Map();
   /// One selector against one scanned element. Supported: `#id`, `.class`,
   /// `tag`, `[attr]` and `[attr="value"]`, and a concatenation of those on one
@@ -280,18 +301,28 @@ export function installDocument(markup) {
   /// model, and throwing is what stops a test quietly asserting over nothing.
   const matches = (selector, element) => {
     if (/[\s>+~,]/.test(selector.trim())) {
-      throw new Error(`the document stub models no structure, so it cannot match: ${selector}`);
+      throw new Error(
+        `the document stub models no structure, so it cannot match: ${selector}`,
+      );
     }
-    const parts = selector.trim().match(/^[a-zA-Z][\w-]*|#[\w:-]+|\.[\w-]+|\[[^\]]+\]/g);
+    const parts = selector
+      .trim()
+      .match(/^[a-zA-Z][\w-]*|#[\w:-]+|\.[\w-]+|\[[^\]]+\]/g);
     if (!parts || parts.join("") !== selector.trim()) {
-      throw new Error(`the document stub does not implement the selector: ${selector}`);
+      throw new Error(
+        `the document stub does not implement the selector: ${selector}`,
+      );
     }
     return parts.every((part) => {
       if (part.startsWith("#")) return element.id === part.slice(1);
       if (part.startsWith(".")) return element.classes.has(part.slice(1));
       if (part.startsWith("[")) {
-        const [, name, value] = part.slice(1, -1).match(/^([\w:-]+)(?:="?([^"]*)"?)?$/) || [];
-        if (!name) throw new Error(`the document stub cannot read the attribute selector: ${part}`);
+        const [, name, value] =
+          part.slice(1, -1).match(/^([\w:-]+)(?:="?([^"]*)"?)?$/) || [];
+        if (!name)
+          throw new Error(
+            `the document stub cannot read the attribute selector: ${part}`,
+          );
         if (!(name in element.attributes)) return false;
         return value === undefined || element.attributes[name] === value;
       }
@@ -326,11 +357,20 @@ export function installDocument(markup) {
   // somebody reads `window.location.href` back, and one that does not is not
   // made to care.
   globalThis.window = {
-    location: { origin: "https://codetrial.test", href: "", search: "", reload() {} },
+    location: {
+      origin: "https://codetrial.test",
+      href: "",
+      search: "",
+      reload() {},
+    },
     addEventListener() {},
   };
   // Whatever the page fetches at import is refused rather than answered, so a
   // test drives the render with the state it chose rather than with a response.
-  failFetchWith(async () => ({ ok: false, status: 500, json: async () => ({}) }));
+  failFetchWith(async () => ({
+    ok: false,
+    status: 500,
+    json: async () => ({}),
+  }));
   return { node: (id) => document.querySelector(`#${id}`) };
 }

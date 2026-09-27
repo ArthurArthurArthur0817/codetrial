@@ -30,25 +30,39 @@ const roundTrips = (code, language) =>
   );
 
 test("python keywords, strings, comments, and numbers are marked", () => {
-  const html = highlight('def f(n):\n    # add\n    return n + 1 if n else "x"', "python");
+  const html = highlight(
+    'def f(n):\n    # add\n    return n + 1 if n else "x"',
+    "python",
+  );
 
   assert.match(html, /<span class="tok-keyword">def<\/span>/);
   assert.match(html, /<span class="tok-keyword">return<\/span>/);
   assert.match(html, /<span class="tok-comment"># add<\/span>/);
   assert.match(html, /<span class="tok-number">1<\/span>/);
   assert.match(html, /<span class="tok-string">&quot;x&quot;<\/span>/);
-  assert.doesNotMatch(html, /<span class="tok-keyword">f<\/span>/, "a plain name is not a keyword");
+  assert.doesNotMatch(
+    html,
+    /<span class="tok-keyword">f<\/span>/,
+    "a plain name is not a keyword",
+  );
 });
 
 test("python literals and triple-quoted strings", () => {
   const html = highlight('x = True\ns = """a\nb"""\n', "python");
 
   assert.match(html, /<span class="tok-literal">True<\/span>/);
-  assert.match(html, /<span class="tok-string">(?:&quot;){3}a\nb(?:&quot;){3}<\/span>/, "triple quotes span lines");
+  assert.match(
+    html,
+    /<span class="tok-string">(?:&quot;){3}a\nb(?:&quot;){3}<\/span>/,
+    "triple quotes span lines",
+  );
 });
 
 test("javascript keywords, template strings, and both comment forms", () => {
-  const html = highlight("const a = `t${x}`; // note\n/* block */ let b = 0x1f;", "javascript");
+  const html = highlight(
+    "const a = `t${x}`; // note\n/* block */ let b = 0x1f;",
+    "javascript",
+  );
 
   assert.match(html, /<span class="tok-keyword">const<\/span>/);
   assert.match(html, /<span class="tok-keyword">let<\/span>/);
@@ -58,18 +72,24 @@ test("javascript keywords, template strings, and both comment forms", () => {
 });
 
 test("compiled language keywords, literals, strings, and comments are marked", () => {
-  const c = highlight('int f(char* s) { // return\n  return NULL;\n}', "c");
+  const c = highlight("int f(char* s) { // return\n  return NULL;\n}", "c");
   assert.match(c, /<span class="tok-keyword">int<\/span>/);
   assert.match(c, /<span class="tok-keyword">return<\/span>/);
   assert.match(c, /<span class="tok-literal">NULL<\/span>/);
   assert.match(c, /<span class="tok-comment">\/\/ return<\/span>/);
 
-  const cpp = highlight('class Solution { int f() { string s = "return"; return 1; } };', "cpp");
+  const cpp = highlight(
+    'class Solution { int f() { string s = "return"; return 1; } };',
+    "cpp",
+  );
   assert.match(cpp, /<span class="tok-keyword">class<\/span>/);
   assert.match(cpp, /<span class="tok-keyword">return<\/span>/);
   assert.match(cpp, /<span class="tok-string">&quot;return&quot;<\/span>/);
 
-  const java = highlight("public class Solution { boolean ok = true; }", "java");
+  const java = highlight(
+    "public class Solution { boolean ok = true; }",
+    "java",
+  );
   assert.match(java, /<span class="tok-keyword">public<\/span>/);
   assert.match(java, /<span class="tok-keyword">boolean<\/span>/);
   assert.match(java, /<span class="tok-literal">true<\/span>/);
@@ -80,20 +100,35 @@ test("a keyword inside a string or comment stays part of it", () => {
 
   assert.match(html, /<span class="tok-string">&quot;return 1&quot;<\/span>/);
   assert.match(html, /<span class="tok-comment"># def g<\/span>/);
-  assert.doesNotMatch(html, /tok-keyword/, "no keyword escapes its enclosing token");
+  assert.doesNotMatch(
+    html,
+    /tok-keyword/,
+    "no keyword escapes its enclosing token",
+  );
 
   for (const language of ["c", "cpp", "java"]) {
     const compiled = highlight('value = "return"; // class', language);
-    assert.match(compiled, /<span class="tok-string">&quot;return&quot;<\/span>/);
+    assert.match(
+      compiled,
+      /<span class="tok-string">&quot;return&quot;<\/span>/,
+    );
     assert.match(compiled, /<span class="tok-comment">\/\/ class<\/span>/);
-    assert.doesNotMatch(compiled, /tok-keyword/, `${language} keyword escaped its enclosing token`);
+    assert.doesNotMatch(
+      compiled,
+      /tok-keyword/,
+      `${language} keyword escaped its enclosing token`,
+    );
   }
 });
 
 test("markup in code is escaped, never emitted", () => {
   const html = highlight('x = "<img src=q onerror=alert(1)>"', "python");
 
-  assert.doesNotMatch(html, /<img/, "candidate code must not become live markup");
+  assert.doesNotMatch(
+    html,
+    /<img/,
+    "candidate code must not become live markup",
+  );
   assert.match(html, /&lt;img src=q onerror=alert\(1\)&gt;/);
 });
 
@@ -106,7 +141,10 @@ test("ampersands and angle brackets outside strings are escaped too", () => {
 });
 
 test("every character survives highlighting", () => {
-  roundTrips("def two_sum(nums, target):\n    seen = {}\n    return []\n", "python");
+  roundTrips(
+    "def two_sum(nums, target):\n    seen = {}\n    return []\n",
+    "python",
+  );
   roundTrips("const f = (a) => a ?? `x${a}`;\n\n// tail\n", "javascript");
   roundTrips("int f(char* s) {\n    return 0;\n}\n", "c");
   roundTrips("vector<int> f(vector<int>& nums) { return {}; }\n", "cpp");
@@ -127,7 +165,11 @@ test("a trailing newline gains the extra line the textarea shows", () => {
 test("an unterminated string does not swallow the rest of the buffer", () => {
   const html = highlight('s = "oops\nreturn 1\n', "python");
 
-  assert.match(html, /<span class="tok-keyword">return<\/span>/, "code after it still highlights");
+  assert.match(
+    html,
+    /<span class="tok-keyword">return<\/span>/,
+    "code after it still highlights",
+  );
   roundTrips('s = "oops\nreturn 1\n', "python");
 });
 

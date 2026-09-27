@@ -64,7 +64,9 @@ const EXPRESSION_BY_STATE = {
 // Every preset the pose can carry a weight for. The renderer writes all of
 // them every frame, so an outgoing expression fades out on the same curve the
 // incoming one fades in on, instead of being cut to zero.
-export const EXPRESSION_NAMES = [...new Set(Object.values(EXPRESSION_BY_STATE).map((each) => each.name))];
+export const EXPRESSION_NAMES = [
+  ...new Set(Object.values(EXPRESSION_BY_STATE).map((each) => each.name)),
+];
 
 function clamp01(value) {
   if (!Number.isFinite(value)) return 0;
@@ -81,17 +83,24 @@ function clampTo(value, bound) {
 }
 
 export function mouthFromAmplitude(amplitude) {
-  if (!Number.isFinite(amplitude) || amplitude <= MOUTH_OPEN_THRESHOLD) return 0;
-  return clamp01((amplitude - MOUTH_OPEN_THRESHOLD) / (MOUTH_FULL_AMPLITUDE - MOUTH_OPEN_THRESHOLD));
+  if (!Number.isFinite(amplitude) || amplitude <= MOUTH_OPEN_THRESHOLD)
+    return 0;
+  return clamp01(
+    (amplitude - MOUTH_OPEN_THRESHOLD) /
+      (MOUTH_FULL_AMPLITUDE - MOUTH_OPEN_THRESHOLD),
+  );
 }
 
 // Deterministic in `now`, so a fake clock reproduces a blink exactly. A random
 // interval would look better and could not be asserted.
 export function blinkWeight(now) {
-  const phase = ((now % BLINK_INTERVAL_MS) + BLINK_INTERVAL_MS) % BLINK_INTERVAL_MS;
+  const phase =
+    ((now % BLINK_INTERVAL_MS) + BLINK_INTERVAL_MS) % BLINK_INTERVAL_MS;
   if (phase >= BLINK_DURATION_MS) return 0;
   const half = BLINK_DURATION_MS / 2;
-  return clamp01(phase <= half ? phase / half : (BLINK_DURATION_MS - phase) / half);
+  return clamp01(
+    phase <= half ? phase / half : (BLINK_DURATION_MS - phase) / half,
+  );
 }
 
 export function breathOffset(now) {
@@ -122,8 +131,8 @@ export function expressionForState(agentState) {
 /// applied after it and visually finished at three times it. Nothing overshoots
 /// and no clamp is needed, because the factor can never exceed 1.
 function approach(current, target, dt, durationMs) {
-  if (!(durationMs > 0)) return target;  // reduced motion: no easing at all
-  if (!(dt > 0)) return current;         // no time has passed, so nothing moves
+  if (!(durationMs > 0)) return target; // reduced motion: no easing at all
+  if (!(dt > 0)) return current; // no time has passed, so nothing moves
   return current + (target - current) * (1 - Math.exp(-dt / durationMs));
 }
 
@@ -186,7 +195,8 @@ export function createAvatar({
   const ready = withTimeout(loading, timeoutMs)
     .then((loaded) => {
       if (phase === "stopped") return false;
-      if (!loaded || typeof loaded.apply !== "function") throw new Error("avatar model has no apply()");
+      if (!loaded || typeof loaded.apply !== "function")
+        throw new Error("avatar model has no apply()");
       model = loaded;
       setPhase("ready");
       return true;
@@ -334,7 +344,12 @@ function withTimeout(promise, timeoutMs) {
   if (!(timeoutMs > 0)) return Promise.resolve(promise);
   let timer = null;
   const expiry = new Promise((_resolve, reject) => {
-    timer = setTimeout(() => reject(new Error("avatar model load timed out")), timeoutMs);
+    timer = setTimeout(
+      () => reject(new Error("avatar model load timed out")),
+      timeoutMs,
+    );
   });
-  return Promise.race([Promise.resolve(promise), expiry]).finally(() => clearTimeout(timer));
+  return Promise.race([Promise.resolve(promise), expiry]).finally(() =>
+    clearTimeout(timer),
+  );
 }

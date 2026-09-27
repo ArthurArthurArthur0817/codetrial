@@ -150,13 +150,20 @@ fn static_interview_script_keeps_transcript_and_report_contract() {
     );
     let guard = source_block(
         &source,
-        "room.on(livekit.RoomEvent.DataReceived",
-        "room.on(livekit.RoomEvent.ParticipantAttributesChanged",
+        "livekit.RoomEvent.DataReceived",
+        "livekit.RoomEvent.ParticipantAttributesChanged",
     );
     let report = source_block(
         &source,
         "function receiveReport",
         "function playRemoteAudio",
+    );
+
+    // The anchor above is only the event name, because the formatter wraps the
+    // call; compare compacted to pin that the handler is on the room.
+    assert!(
+        compact(&source).contains("room.on(livekit.RoomEvent.DataReceived,"),
+        "DataReceived handler must stay registered with room.on"
     );
 
     // acceptsReport itself is covered by tests/browser/lib.test.js; this only
@@ -168,6 +175,7 @@ fn static_interview_script_keeps_transcript_and_report_contract() {
 
     // LiveKit stream attribute names, which the Rust side sets in
     // transcript_stream_options.
+    let transcript = compact(transcript);
     for snippet in [
         r#"attrs["lk.segment_id"]"#,
         r#"attrs["lk.transcription_final"] === "true""#,
@@ -175,7 +183,7 @@ fn static_interview_script_keeps_transcript_and_report_contract() {
         "updateTranscriptSegment(id, speaker, text",
     ] {
         assert!(
-            transcript.contains(snippet),
+            transcript.contains(&compact(snippet)),
             "missing static transcript contract: {snippet}"
         );
     }
@@ -183,8 +191,12 @@ fn static_interview_script_keeps_transcript_and_report_contract() {
     // The report card and markdown export are asserted behaviorally in
     // tests/browser/render.test.js. What only Rust can check is that the
     // browser still routes a report through the sanitizer before rendering it.
+    assert_eq!(
+        call_arguments(report, "sanitizeReport("),
+        ["JSON.parse(new TextDecoder().decode(payload))"]
+    );
+    let report = compact(report);
     for snippet in [
-        "sanitizeReport(JSON.parse(new TextDecoder().decode(payload)))",
         "setLocalAudioEnabled(false)",
         "saveHistory()",
         "renderReport()",
@@ -192,7 +204,7 @@ fn static_interview_script_keeps_transcript_and_report_contract() {
         "state.room = null",
     ] {
         assert!(
-            report.contains(snippet),
+            report.contains(&compact(snippet)),
             "missing static report receive contract: {snippet}"
         );
     }
@@ -206,10 +218,9 @@ fn static_interview_script_keeps_transcript_and_report_contract() {
 fn static_interview_script_leaves_candidate_identity_to_the_server() {
     let source = fs::read_to_string("web/interview.js").unwrap();
 
-    assert!(
-        source
-            .contains("JSON.stringify({ problemId: problem.page, durationMin, interviewId, interviewLoop, interviewProfile, ...(interviewGrounding ? { interviewGrounding } : {}) })")
-    );
+    assert!(compact(&source).contains(
+        "JSON.stringify({problemId:problem.page,durationMin,interviewId,interviewLoop,interviewProfile,...(interviewGrounding?{interviewGrounding}:{})})"
+    ));
     assert!(!source.contains("candidateIdentity"));
 }
 
@@ -897,11 +908,9 @@ fn static_interview_script_marks_agent_ready_visually() {
 
     assert!(source.contains("function setAgentStateLabel"));
     assert!(source.contains(r#"setAgentStateLabel("Waiting", false)"#));
-    assert!(
-        source.contains(
-            r#"setAgentStateLabel(labels[value] || providerUiState("live").label, value === "listening")"#
-        )
-    );
+    assert!(compact(&source).contains(
+        r#"setAgentStateLabel(labels[value]||providerUiState("live").label,value==="listening")"#
+    ));
     assert!(source.contains(r#"classList.toggle("ready", ready)"#));
     assert!(styles.contains(".agent-pill.ready"));
 }

@@ -22,7 +22,16 @@ import {
 } from "../../web/render.js";
 import { sanitizeReport } from "../../web/lib.js";
 
-const events = [{ type: "CAMERA_STOPPED", at: "00:01", severity: "high", source: "camera", detail: null, sourceEventIds: [] }];
+const events = [
+  {
+    type: "CAMERA_STOPPED",
+    at: "00:01",
+    severity: "high",
+    source: "camera",
+    detail: null,
+    sourceEventIds: [],
+  },
+];
 
 // --- smallest document that satisfies the view -----------------------------
 class StubElement {
@@ -54,8 +63,10 @@ const newPanel = () => {
   return panel;
 };
 
-const rowLabel = (panel, i) => panel.children[i].children[0].children[0].textContent;
-const rowText = (panel, i) => panel.children[i].children[0].children[1].textContent;
+const rowLabel = (panel, i) =>
+  panel.children[i].children[0].children[0].textContent;
+const rowText = (panel, i) =>
+  panel.children[i].children[0].children[1].textContent;
 
 test("first transcript row replaces the empty-state placeholder", () => {
   const panel = newPanel();
@@ -64,9 +75,17 @@ test("first transcript row replaces the empty-state placeholder", () => {
 
   view.upsert("a", "interviewer", "Hello", false);
 
-  assert.equal(panel.children.length, 1, "placeholder replaced, not appended to");
+  assert.equal(
+    panel.children.length,
+    1,
+    "placeholder replaced, not appended to",
+  );
   assert.equal(rowLabel(panel, 0), "Jim");
-  assert.equal(rowText(panel, 0), "Hello...", "interim speech gets the ellipsis");
+  assert.equal(
+    rowText(panel, 0),
+    "Hello...",
+    "interim speech gets the ellipsis",
+  );
 });
 
 test("streamed chunks patch one row instead of appending", () => {
@@ -82,7 +101,11 @@ test("streamed chunks patch one row instead of appending", () => {
   assert.equal(rowText(panel, 0), "Walk me through it...");
 
   view.upsert("a", "interviewer", "Walk me through it", true);
-  assert.equal(rowText(panel, 0), "Walk me through it", "final chunk drops the ellipsis");
+  assert.equal(
+    rowText(panel, 0),
+    "Walk me through it",
+    "final chunk drops the ellipsis",
+  );
 });
 
 test("one segment id is one turn, patched in place as the agent republishes it", () => {
@@ -93,10 +116,19 @@ test("one segment id is one turn, patched in place as the agent republishes it",
   // stable id, so the row grows rather than the panel.
   view.upsert("interviewer-0", "interviewer", "Hey, I'm", false, 1_000);
   view.upsert("interviewer-0", "interviewer", "Hey, I'm Jim.", false, 1_500);
-  view.upsert("interviewer-0", "interviewer", "Hey, I'm Jim. Today we're matching chargebacks,", true, 2_000);
+  view.upsert(
+    "interviewer-0",
+    "interviewer",
+    "Hey, I'm Jim. Today we're matching chargebacks,",
+    true,
+    2_000,
+  );
 
   assert.equal(panel.children.length, 1);
-  assert.equal(rowText(panel, 0), "Hey, I'm Jim. Today we're matching chargebacks,");
+  assert.equal(
+    rowText(panel, 0),
+    "Hey, I'm Jim. Today we're matching chargebacks,",
+  );
   assert.deepEqual(
     view.values().map((segment) => `${segment.speaker}:${segment.text}`),
     ["interviewer:Hey, I'm Jim. Today we're matching chargebacks,"],
@@ -121,7 +153,13 @@ test("a stale republish does not shorten a turn or reopen it", () => {
   const panel = newPanel();
   const view = createTranscriptView(stubDocument, panel);
 
-  view.upsert("interviewer-0", "interviewer", "Today we're matching chargebacks", true, 1_300);
+  view.upsert(
+    "interviewer-0",
+    "interviewer",
+    "Today we're matching chargebacks",
+    true,
+    1_300,
+  );
   view.upsert("interviewer-0", "interviewer", "Today", false, 1_200);
 
   assert.equal(rowText(panel, 0), "Today we're matching chargebacks");
@@ -138,7 +176,11 @@ test("a second speaker appends without disturbing the first", () => {
   assert.equal(rowText(panel, 0), "Ready?", "first row survives");
 
   view.upsert("a", "interviewer", "Edited", true);
-  assert.equal(rowText(panel, 0), "Edited", "interleaved updates hit the right row");
+  assert.equal(
+    rowText(panel, 0),
+    "Edited",
+    "interleaved updates hit the right row",
+  );
   assert.equal(rowText(panel, 1), "Sure");
   assert.deepEqual(
     view.values().map((segment) => `${segment.speaker}:${segment.text}`),
@@ -152,7 +194,11 @@ test("remote transcript text cannot inject markup", () => {
   const view = createTranscriptView(stubDocument, panel);
   view.upsert("a", "interviewer", "<img src=x onerror=alert(1)>", true);
 
-  assert.equal(rowText(panel, 0), "<img src=x onerror=alert(1)>", "kept as text");
+  assert.equal(
+    rowText(panel, 0),
+    "<img src=x onerror=alert(1)>",
+    "kept as text",
+  );
   assert.equal(
     panel.children[0].children[0].children[1].children.length,
     0,
@@ -166,24 +212,42 @@ test("results markup reports counts and marks each case", () => {
     total: 2,
     cases: [
       { label: "ok case", pass: true, timeMs: 3 },
-      { label: "bad case", pass: false, expected: "[0,1]", got: "[1,0]", error: "", timeMs: 4 },
+      {
+        label: "bad case",
+        pass: false,
+        expected: "[0,1]",
+        got: "[1,0]",
+        error: "",
+        timeMs: 4,
+      },
     ],
   });
 
   assert.equal(label, "Test results · 1/2");
   assert.match(body, /1\/2 test cases passed/);
-  assert.match(body, /class="critical small"/, "a partial pass is not styled as good");
+  assert.match(
+    body,
+    /class="critical small"/,
+    "a partial pass is not styled as good",
+  );
   assert.match(body, />OK</);
   assert.match(body, />FAIL</);
-  assert.match(body, /expected \[0,1\]\ngot \[1,0\]/, "expected and got sit on separate lines");
+  assert.match(
+    body,
+    /expected \[0,1\]\ngot \[1,0\]/,
+    "expected and got sit on separate lines",
+  );
 });
 
 test("results markup can include runner status without changing counts", () => {
-  const { label, body } = resultsMarkup({
-    passed: 1,
-    total: 1,
-    cases: [{ label: "ok case", pass: true, timeMs: 3 }],
-  }, "done");
+  const { label, body } = resultsMarkup(
+    {
+      passed: 1,
+      total: 1,
+      cases: [{ label: "ok case", pass: true, timeMs: 3 }],
+    },
+    "done",
+  );
 
   assert.equal(label, "Test results · 1/1");
   assert.match(body, /data-runner-status="done"/);
@@ -192,7 +256,9 @@ test("results markup can include runner status without changing counts", () => {
 });
 
 test("results markup surfaces a setup error instead of case rows", () => {
-  const { label, body } = resultsMarkup({ setupError: "SyntaxError: bad <input>" });
+  const { label, body } = resultsMarkup({
+    setupError: "SyntaxError: bad <input>",
+  });
 
   assert.equal(label, "Test results");
   assert.match(body, /Couldn't run your code/);
@@ -201,26 +267,56 @@ test("results markup surfaces a setup error instead of case rows", () => {
 });
 
 test("results markup keeps first-run timeout errors visible", () => {
-  const pyodide = resultsMarkup({ setupError: "The Python runtime did not start in time." }, "booting");
-  const compiler = resultsMarkup({ setupError: "Compiler Explorer did not respond within 20 seconds. Try again later." }, "compiling");
+  const pyodide = resultsMarkup(
+    { setupError: "The Python runtime did not start in time." },
+    "booting",
+  );
+  const compiler = resultsMarkup(
+    {
+      setupError:
+        "Compiler Explorer did not respond within 20 seconds. Try again later.",
+    },
+    "compiling",
+  );
 
   assert.match(pyodide.body, /Starting the Python runtime/);
   assert.match(pyodide.body, /The Python runtime did not start in time/);
   assert.match(compiler.body, /Compiling with Compiler Explorer/);
-  assert.match(compiler.body, /Compiler Explorer did not respond within 20 seconds/);
+  assert.match(
+    compiler.body,
+    /Compiler Explorer did not respond within 20 seconds/,
+  );
 });
 
 test("runner status markup names booting compiling running and done", () => {
   assert.match(runnerStatusMarkup("booting"), /Starting the Python runtime/);
-  assert.match(runnerStatusMarkup("compiling"), /Compiling with Compiler Explorer/);
+  assert.match(
+    runnerStatusMarkup("compiling"),
+    /Compiling with Compiler Explorer/,
+  );
   assert.match(runnerStatusMarkup("running"), /Running test cases/);
   assert.match(runnerStatusMarkup("done"), /Run finished/);
 });
 
 test("final runner status preserves setup phase for setup errors", () => {
-  assert.equal(finalRunnerStatus({ setupError: "The Python runtime did not start in time." }, "booting"), "booting");
-  assert.equal(finalRunnerStatus({ setupError: "Compiler Explorer did not respond within 20 seconds." }, "compiling"), "compiling");
-  assert.equal(finalRunnerStatus({ passed: 1, total: 1, cases: [] }, "running"), "done");
+  assert.equal(
+    finalRunnerStatus(
+      { setupError: "The Python runtime did not start in time." },
+      "booting",
+    ),
+    "booting",
+  );
+  assert.equal(
+    finalRunnerStatus(
+      { setupError: "Compiler Explorer did not respond within 20 seconds." },
+      "compiling",
+    ),
+    "compiling",
+  );
+  assert.equal(
+    finalRunnerStatus({ passed: 1, total: 1, cases: [] }, "running"),
+    "done",
+  );
 });
 
 test("results markup escapes everything a candidate's code can produce", () => {
@@ -239,7 +335,11 @@ test("results markup escapes everything a candidate's code can produce", () => {
     ],
   });
 
-  assert.doesNotMatch(body, /<script>/, "candidate output must not reach the page as markup");
+  assert.doesNotMatch(
+    body,
+    /<script>/,
+    "candidate output must not reach the page as markup",
+  );
   assert.match(body, /&lt;script&gt;/);
 });
 
@@ -252,7 +352,12 @@ test("results markup escapes everything a candidate's code can produce", () => {
 // and no scores at all.
 test("report markup refuses to score a session with nothing in it", () => {
   const body = reportMarkup({
-    report: { incomplete: true, summary: "The interviewer disconnected and this session produced no evaluation.", hintsUsed: 0 },
+    report: {
+      incomplete: true,
+      summary:
+        "The interviewer disconnected and this session produced no evaluation.",
+      hintsUsed: 0,
+    },
     problemTitle: "Two Sum",
     language: "python",
     code: "def two_sum(): pass",
@@ -273,7 +378,11 @@ test("report markup refuses to score a session with nothing in it", () => {
 
 test("markdown export of an empty session carries no verdict either", () => {
   const markdown = reportMarkdown({
-    report: { incomplete: true, summary: "No interviewer joined and this session produced no evaluation.", hintsUsed: 0 },
+    report: {
+      incomplete: true,
+      summary: "No interviewer joined and this session produced no evaluation.",
+      hintsUsed: 0,
+    },
     problemTitle: "Two Sum",
     language: "python",
     code: "",
@@ -302,7 +411,15 @@ test("report markup renders scores, verdict, and escaped feedback", () => {
       summary: "Solid <session>",
       codingFeedback: { strengths: ["clear"], improvements: [] },
       communicationFeedback: { strengths: [], improvements: ["slow down"] },
-      integrityEvents: [{ type: "REVIEW_EVENT", at: "now", severity: "warning", detail: "SCREEN_INTERRUPTION_WITH_FACE_MISSING", sourceEventIds: ["2", "5"] }],
+      integrityEvents: [
+        {
+          type: "REVIEW_EVENT",
+          at: "now",
+          severity: "warning",
+          detail: "SCREEN_INTERRUPTION_WITH_FACE_MISSING",
+          sourceEventIds: ["2", "5"],
+        },
+      ],
       hintsUsed: 2,
       interviewLoop: "coding_behavioral",
       rounds: [
@@ -323,11 +440,23 @@ test("report markup renders scores, verdict, and escaped feedback", () => {
   assert.match(body, /<strong>2<\/strong> hints used/);
   assert.match(body, /Solid &lt;session&gt;/, "summary is escaped");
   assert.match(body, /Integrity Evidence/);
-  assert.match(body, /data-integrity-index="0"/, "snapshot actions target integrity rows only");
+  assert.match(
+    body,
+    /data-integrity-index="0"/,
+    "snapshot actions target integrity rows only",
+  );
   assert.match(body, /SCREEN_INTERRUPTION_WITH_FACE_MISSING/);
   assert.match(body, /source event 2/);
-  assert.match(body, /<li>\(none captured\)<\/li>/, "empty feedback gets the placeholder");
-  assert.match(body, /<pre>print\(1\)<\/pre>/, "trailing blank lines are trimmed");
+  assert.match(
+    body,
+    /<li>\(none captured\)<\/li>/,
+    "empty feedback gets the placeholder",
+  );
+  assert.match(
+    body,
+    /<pre>print\(1\)<\/pre>/,
+    "trailing blank lines are trimmed",
+  );
   assert.match(body, /id="download-report"/);
   assert.match(body, /id="done"/);
 });
@@ -337,7 +466,14 @@ test("report names a skipped camera and its reason neutrally", () => {
     report: {
       incomplete: true,
       summary: "Session complete.",
-      integrityEvents: [{ type: "CAMERA_NOT_USED", at: "now", severity: "info", detail: "denied" }],
+      integrityEvents: [
+        {
+          type: "CAMERA_NOT_USED",
+          at: "now",
+          severity: "info",
+          detail: "denied",
+        },
+      ],
     },
     problemTitle: "Two Sum",
     language: "python",
@@ -346,7 +482,10 @@ test("report names a skipped camera and its reason neutrally", () => {
   };
 
   assert.match(reportMarkup(session), /Camera not used \(denied\)/);
-  assert.match(reportMarkdown({ ...session, at: "2026-09-16" }), /Camera not used \(denied\)/);
+  assert.match(
+    reportMarkdown({ ...session, at: "2026-09-16" }),
+    /Camera not used \(denied\)/,
+  );
 });
 
 test("report markup states every save outcome without hiding Download", () => {
@@ -365,7 +504,10 @@ test("report markup states every save outcome without hiding Download", () => {
     [{ local: "failed", account: "skipped" }, "Report was not saved"],
   ]) {
     const body = reportMarkup({ ...session, saveResult });
-    assert.match(body, new RegExp(`<p id="report-save-status"[^>]*>${message}</p>`));
+    assert.match(
+      body,
+      new RegExp(`<p id="report-save-status"[^>]*>${message}</p>`),
+    );
     assert.match(body, /id="download-report"/);
   }
   const saving = reportMarkup({ ...session, saveResult: null });
@@ -393,12 +535,34 @@ test("report markup states every save outcome without hiding Download", () => {
 
 test("practice-next drills render accessibly in HTML and Markdown", () => {
   const report = {
-    codingScore: 70, communicationScore: 70, decision: "HIRE", summary: "Grounded",
+    codingScore: 70,
+    communicationScore: 70,
+    decision: "HIRE",
+    summary: "Grounded",
     codingFeedback: { strengths: [], improvements: ["Test boundaries"] },
-    communicationFeedback: { strengths: [], improvements: [] }, hintsUsed: 0,
-    improvementPlan: [{ phase: "Test", weakness: "Test boundaries", impact: "high", frequency: 2, drill: "Build a test table", durationMin: 10, successCriterion: "Cover four case classes", selfReview: ["Predicted outputs", "Included a boundary"] }],
+    communicationFeedback: { strengths: [], improvements: [] },
+    hintsUsed: 0,
+    improvementPlan: [
+      {
+        phase: "Test",
+        weakness: "Test boundaries",
+        impact: "high",
+        frequency: 2,
+        drill: "Build a test table",
+        durationMin: 10,
+        successCriterion: "Cover four case classes",
+        selfReview: ["Predicted outputs", "Included a boundary"],
+      },
+    ],
   };
-  const session = { report, problemTitle: "Two Sum", language: "python", code: "pass", transcript: [], at: "now" };
+  const session = {
+    report,
+    problemTitle: "Two Sum",
+    language: "python",
+    code: "pass",
+    transcript: [],
+    at: "now",
+  };
   const html = reportMarkup(session);
   const markdown = reportMarkdown(session);
   assert.match(html, /<h3>Practice next<\/h3>/);
@@ -416,7 +580,10 @@ test("the report shows the debrief collapsed", () => {
         scenarioContract: "Return the matching positions.",
         approach: "Use one pass and a map in O(n) time.",
         pitfalls: "Do not reuse a position.",
-        hints: [{ text: "What should the map remember?", given: true }, { text: "Check before inserting.", given: false }],
+        hints: [
+          { text: "What should the map remember?", given: true },
+          { text: "Check before inserting.", given: false },
+        ],
         followUps: ["How would repeated queries change the design?"],
       },
     },
@@ -424,7 +591,10 @@ test("the report shows the debrief collapsed", () => {
     language: "python",
     code: "pass",
   });
-  assert.match(body, /<details class="report-debrief"><summary>What the interviewer held back<\/summary>/);
+  assert.match(
+    body,
+    /<details class="report-debrief"><summary>What the interviewer held back<\/summary>/,
+  );
   assert.doesNotMatch(body, /<details class="report-debrief" open>/);
   assert.match(body, /Spaced review will bring this problem back/);
   assert.match(body, /Given:<\/strong> What should the map remember\?/);
@@ -433,27 +603,68 @@ test("the report shows the debrief collapsed", () => {
 });
 
 test("the report shows the hint rung reached", () => {
-  const report = { incomplete: true, summary: "Unavailable", debrief: { hints: [{ text: "First", given: true }, { text: "Second", given: true }, { text: "Third", given: false }] } };
-  assert.match(reportMarkup({ report, problemTitle: "Two Sum", language: "python", code: "" }), /Reached hint 2 of 3/);
+  const report = {
+    incomplete: true,
+    summary: "Unavailable",
+    debrief: {
+      hints: [
+        { text: "First", given: true },
+        { text: "Second", given: true },
+        { text: "Third", given: false },
+      ],
+    },
+  };
+  assert.match(
+    reportMarkup({
+      report,
+      problemTitle: "Two Sum",
+      language: "python",
+      code: "",
+    }),
+    /Reached hint 2 of 3/,
+  );
 });
 
 test("the report shows the level practiced for", () => {
   const report = {
-    codingScore: 70, communicationScore: 70, decision: "HIRE", summary: "Grounded",
+    codingScore: 70,
+    communicationScore: 70,
+    decision: "HIRE",
+    summary: "Grounded",
     codingFeedback: { strengths: [], improvements: [] },
-    communicationFeedback: { strengths: [], improvements: [] }, hintsUsed: 0,
+    communicationFeedback: { strengths: [], improvements: [] },
+    hintsUsed: 0,
     practiceLevel: "intern",
   };
   assert.match(
-    reportMarkup({ report, problemTitle: "Two Sum", language: "python", code: "" }),
+    reportMarkup({
+      report,
+      problemTitle: "Two Sum",
+      language: "python",
+      code: "",
+    }),
     /Judged against a mid-level bar; practiced for: intern/,
   );
   assert.doesNotMatch(
-    reportMarkup({ report: { ...report, practiceLevel: null }, problemTitle: "Two Sum", language: "python", code: "" }),
+    reportMarkup({
+      report: { ...report, practiceLevel: null },
+      problemTitle: "Two Sum",
+      language: "python",
+      code: "",
+    }),
     /practiced for:/,
   );
   assert.doesNotMatch(
-    reportMarkup({ report: { incomplete: true, summary: "Unavailable", practiceLevel: "intern" }, problemTitle: "Two Sum", language: "python", code: "" }),
+    reportMarkup({
+      report: {
+        incomplete: true,
+        summary: "Unavailable",
+        practiceLevel: "intern",
+      },
+      problemTitle: "Two Sum",
+      language: "python",
+      code: "",
+    }),
     /Judged against/,
   );
 });
@@ -484,52 +695,136 @@ test("the markdown report carries the debrief", () => {
 });
 
 test("the markdown report states the hint rung", () => {
-  const report = { incomplete: true, summary: "Unavailable", debrief: { hints: [{ text: "First", given: true }, { text: "Second", given: false }, { text: "Third", given: false }] } };
-  assert.match(reportMarkdown({ report, problemTitle: "Two Sum", language: "python", code: "", transcript: [], at: "now" }), /Reached hint 1 of 3/);
+  const report = {
+    incomplete: true,
+    summary: "Unavailable",
+    debrief: {
+      hints: [
+        { text: "First", given: true },
+        { text: "Second", given: false },
+        { text: "Third", given: false },
+      ],
+    },
+  };
+  assert.match(
+    reportMarkdown({
+      report,
+      problemTitle: "Two Sum",
+      language: "python",
+      code: "",
+      transcript: [],
+      at: "now",
+    }),
+    /Reached hint 1 of 3/,
+  );
 });
 
 test("the markdown report shows the level practiced for", () => {
   const report = {
-    codingScore: 70, communicationScore: 70, decision: "HIRE", summary: "Grounded",
+    codingScore: 70,
+    communicationScore: 70,
+    decision: "HIRE",
+    summary: "Grounded",
     codingFeedback: { strengths: [], improvements: [] },
-    communicationFeedback: { strengths: [], improvements: [] }, hintsUsed: 0,
+    communicationFeedback: { strengths: [], improvements: [] },
+    hintsUsed: 0,
     practiceLevel: "intern",
   };
   assert.match(
-    reportMarkdown({ report, problemTitle: "Two Sum", language: "python", code: "", transcript: [], at: "now" }),
+    reportMarkdown({
+      report,
+      problemTitle: "Two Sum",
+      language: "python",
+      code: "",
+      transcript: [],
+      at: "now",
+    }),
     /Judged against a mid-level bar; practiced for: intern/,
   );
 });
 
 test("framework phase scores are labeled formative in HTML and Markdown", () => {
   const report = {
-    codingScore: 70, communicationScore: 70, decision: "HIRE", summary: "Grounded",
+    codingScore: 70,
+    communicationScore: 70,
+    decision: "HIRE",
+    summary: "Grounded",
     codingFeedback: { strengths: [], improvements: [] },
-    communicationFeedback: { strengths: [], improvements: [] }, hintsUsed: 0,
+    communicationFeedback: { strengths: [], improvements: [] },
+    hintsUsed: 0,
     frameworkAssessment: { rubricVersion: 1, phases: [] },
   };
-  const session = { report, problemTitle: "Two Sum", language: "python", code: "pass", transcript: [], at: "now" };
+  const session = {
+    report,
+    problemTitle: "Two Sum",
+    language: "python",
+    code: "pass",
+    transcript: [],
+    at: "now",
+  };
   for (const output of [reportMarkup(session), reportMarkdown(session)]) {
-    assert.match(output, /formative coaching signals, not calibrated hiring evidence/);
+    assert.match(
+      output,
+      /formative coaching signals, not calibrated hiring evidence/,
+    );
   }
 });
 
 test("framework evidence timeline distinguishes observed inferred and skipped rows", () => {
   const report = {
-    codingScore: 70, communicationScore: 70, decision: "HIRE", summary: "Grounded",
+    codingScore: 70,
+    communicationScore: 70,
+    decision: "HIRE",
+    summary: "Grounded",
     codingFeedback: { strengths: [], improvements: [] },
-    communicationFeedback: { strengths: [], improvements: [] }, hintsUsed: 0,
+    communicationFeedback: { strengths: [], improvements: [] },
+    hintsUsed: 0,
     frameworkEvidence: [
-      { atMs: 65000, phase: "algorithm", source: "candidate_speech", kind: "observed", confidence: 95, summary: "Explained an invariant", frameworkVersion: 1, futurePrivateField: "must-not-render" },
-      { atMs: 70000, phase: "test", source: "test_event", kind: "inferred", confidence: 60, summary: "A test suggests coverage", frameworkVersion: 1 },
-      { atMs: 300000, phase: "result", source: "session_timing", kind: "skipped", confidence: 100, summary: "Cutoff prevented assessment", frameworkVersion: 1 },
+      {
+        atMs: 65000,
+        phase: "algorithm",
+        source: "candidate_speech",
+        kind: "observed",
+        confidence: 95,
+        summary: "Explained an invariant",
+        frameworkVersion: 1,
+        futurePrivateField: "must-not-render",
+      },
+      {
+        atMs: 70000,
+        phase: "test",
+        source: "test_event",
+        kind: "inferred",
+        confidence: 60,
+        summary: "A test suggests coverage",
+        frameworkVersion: 1,
+      },
+      {
+        atMs: 300000,
+        phase: "result",
+        source: "session_timing",
+        kind: "skipped",
+        confidence: 100,
+        summary: "Cutoff prevented assessment",
+        frameworkVersion: 1,
+      },
     ],
   };
-  const session = { report, problemTitle: "Two Sum", language: "python", code: "pass", transcript: [], at: "now" };
+  const session = {
+    report,
+    problemTitle: "Two Sum",
+    language: "python",
+    code: "pass",
+    transcript: [],
+    at: "now",
+  };
   const html = reportMarkup(session);
   const markdown = reportMarkdown(session);
   assert.match(html, /id="framework-evidence-title"/);
-  assert.match(html, /01:05 · observed · candidate_speech · 95% confidence · v1/);
+  assert.match(
+    html,
+    /01:05 · observed · candidate_speech · 95% confidence · v1/,
+  );
   for (const kind of ["observed", "inferred", "skipped"]) {
     assert.match(html, new RegExp(kind));
     assert.match(markdown, new RegExp(kind));
@@ -572,7 +867,11 @@ test("problem markup escapes every field a problem carries", () => {
     ],
   });
 
-  assert.doesNotMatch(body, /<script>/, "no problem field may become live markup");
+  assert.doesNotMatch(
+    body,
+    /<script>/,
+    "no problem field may become live markup",
+  );
   for (const marker of ["t", "s", "i", "o", "x"]) {
     assert.match(body, new RegExp(`&lt;script&gt;${marker}&lt;/script&gt;`));
   }
@@ -602,7 +901,10 @@ test("problem markup names the published title once, small, and only when it has
   assert.equal(body.match(/Two Sum/g).length, 1);
   assert.match(body, /<p class="problem-source">LeetCode: Two Sum<\/p>/);
 
-  const unnamed = problemMarkup({ brief: ["one"], examples: [{ input: "a", output: "b" }] });
+  const unnamed = problemMarkup({
+    brief: ["one"],
+    examples: [{ input: "a", output: "b" }],
+  });
   assert.doesNotMatch(unnamed, /problem-source|LeetCode|undefined/);
 });
 
@@ -635,7 +937,15 @@ test("markdown export carries the whole session", () => {
       summary: "Solid.",
       codingFeedback: { strengths: ["clear"], improvements: [] },
       communicationFeedback: { strengths: [], improvements: ["slow down"] },
-      integrityEvents: [{ type: "REVIEW_EVENT", at: "2026-08-15", severity: "info", detail: "<ok>|fine", sourceEventIds: ["1", "2"] }],
+      integrityEvents: [
+        {
+          type: "REVIEW_EVENT",
+          at: "2026-08-15",
+          severity: "info",
+          detail: "<ok>|fine",
+          sourceEventIds: ["1", "2"],
+        },
+      ],
       hintsUsed: 2,
       interviewLoop: "coding_only",
       rounds: [
@@ -656,7 +966,10 @@ test("markdown export carries the whole session", () => {
 
   assert.match(markdown, /^# Interview Report - Two Sum$/m);
   assert.match(markdown, /^Loop: Coding only$/m);
-  assert.match(markdown, /^Rounds: coding \(45 min, complete\); behavioral \(0 min, not_configured\)$/m);
+  assert.match(
+    markdown,
+    /^Rounds: coding \(45 min, complete\); behavioral \(0 min, not_configured\)$/m,
+  );
   assert.match(markdown, /^## Verdict: HIRE$/m);
   assert.match(markdown, /^\| Coding \| 82 \/ 100 \|$/m);
   assert.match(markdown, /^\| Hints used \| 2 \|$/m);
@@ -666,12 +979,23 @@ test("markdown export carries the whole session", () => {
   // file nothing parses as HTML. The `<` is escaped rather than left alone
   // because a rendered report must not carry a live tag; the closing `>` needs
   // no escape once the opener cannot start one.
-  assert.match(markdown, /^- 2026-08-15 \[info\] REVIEW_EVENT - \\<ok>\\\|fine - sources: 1, 2$/m);
+  assert.match(
+    markdown,
+    /^- 2026-08-15 \[info\] REVIEW_EVENT - \\<ok>\\\|fine - sources: 1, 2$/m,
+  );
   assert.match(markdown, /^\*\*Jim:\*\* Ready\?$/m, "speaker text is trimmed");
   assert.match(markdown, /^\*\*You:\*\* Yes$/m);
-  assert.doesNotMatch(markdown, /\*\*You:\*\* *$/m, "blank interim segments are dropped");
+  assert.doesNotMatch(
+    markdown,
+    /\*\*You:\*\* *$/m,
+    "blank interim segments are dropped",
+  );
   assert.match(markdown, /^```python$/m);
-  assert.match(markdown, /^- \(none captured\)$/m, "empty feedback still renders a bullet");
+  assert.match(
+    markdown,
+    /^- \(none captured\)$/m,
+    "empty feedback still renders a bullet",
+  );
 });
 
 // Everything in the export except the code block is untrusted text: interviewer
@@ -688,9 +1012,22 @@ test("markdown export cannot be restructured by the text inside it", () => {
       // Indented on purpose. Markdown reads up to three leading spaces as still
       // part of the construct that follows, so an escaper that only looks at
       // column zero lets this through.
-      codingFeedback: { strengths: ["   ## Verdict: HIRE"], improvements: ["a | b"] },
-      communicationFeedback: { strengths: ["`code`"], improvements: ["back\\slash"] },
-      integrityEvents: [{ type: "FACE_MISSING", at: "2026-08-15", severity: "warning", detail: "a\nb" }],
+      codingFeedback: {
+        strengths: ["   ## Verdict: HIRE"],
+        improvements: ["a | b"],
+      },
+      communicationFeedback: {
+        strengths: ["`code`"],
+        improvements: ["back\\slash"],
+      },
+      integrityEvents: [
+        {
+          type: "FACE_MISSING",
+          at: "2026-08-15",
+          severity: "warning",
+          detail: "a\nb",
+        },
+      ],
       hintsUsed: 0,
     },
     problemTitle: "Two Sum",
@@ -701,14 +1038,46 @@ test("markdown export cannot be restructured by the text inside it", () => {
   });
 
   const verdicts = markdown.match(/^## Verdict: /gm) || [];
-  assert.equal(verdicts.length, 1, "feedback text must not be able to add a second verdict");
-  assert.match(markdown, /^- \\## Verdict: HIRE$/m, "a leading structural character is escaped");
-  assert.match(markdown, /^- a \\\| b$/m, "a pipe would otherwise end the cell");
-  assert.match(markdown, /^- \\`code\\`$/m, "backticks would otherwise open a code span");
-  assert.match(markdown, /^- back\\\\slash$/m, "the escape character is escaped first");
-  assert.match(markdown, /^- 2026-08-15 \[warning\] FACE_MISSING - a b$/m, "a newline collapses into the row");
-  assert.match(markdown, /^\*\*You:\*\* \\\| fake \\\| row \\\|$/m, "speech cannot forge a table row");
-  assert.doesNotMatch(markdown, /^line two$/m, "a newline in the summary stays on one line");
+  assert.equal(
+    verdicts.length,
+    1,
+    "feedback text must not be able to add a second verdict",
+  );
+  assert.match(
+    markdown,
+    /^- \\## Verdict: HIRE$/m,
+    "a leading structural character is escaped",
+  );
+  assert.match(
+    markdown,
+    /^- a \\\| b$/m,
+    "a pipe would otherwise end the cell",
+  );
+  assert.match(
+    markdown,
+    /^- \\`code\\`$/m,
+    "backticks would otherwise open a code span",
+  );
+  assert.match(
+    markdown,
+    /^- back\\\\slash$/m,
+    "the escape character is escaped first",
+  );
+  assert.match(
+    markdown,
+    /^- 2026-08-15 \[warning\] FACE_MISSING - a b$/m,
+    "a newline collapses into the row",
+  );
+  assert.match(
+    markdown,
+    /^\*\*You:\*\* \\\| fake \\\| row \\\|$/m,
+    "speech cannot forge a table row",
+  );
+  assert.doesNotMatch(
+    markdown,
+    /^line two$/m,
+    "a newline in the summary stays on one line",
+  );
 
   // The whole document, not just the section under test: an injected heading
   // anywhere changes what a reader takes the report to say.
@@ -740,9 +1109,21 @@ test("markdown export cannot be restructured by the text inside it", () => {
 // for `\<img ...>` while still containing `<img ...>`.
 test("markdown export neutralizes every injection vector reviewers found", () => {
   const vectors = [
-    ["html script", "<script>alert(1)</script>", "\\<script>alert(1)\\</script>"],
-    ["html img", "<img src=x onerror=alert(1)>", "\\<img src=x onerror=alert(1)>"],
-    ["md image", "![pixel](http://tracker/p.gif)", "!\\[pixel](http://tracker/p.gif)"],
+    [
+      "html script",
+      "<script>alert(1)</script>",
+      "\\<script>alert(1)\\</script>",
+    ],
+    [
+      "html img",
+      "<img src=x onerror=alert(1)>",
+      "\\<img src=x onerror=alert(1)>",
+    ],
+    [
+      "md image",
+      "![pixel](http://tracker/p.gif)",
+      "!\\[pixel](http://tracker/p.gif)",
+    ],
     ["md link", "[click](http://evil)", "\\[click](http://evil)"],
     ["reference definition", "[ref]: http://evil", "\\[ref]: http://evil"],
     ["autolink", "<http://evil>", "\\<http://evil>"],
@@ -762,7 +1143,9 @@ test("markdown export neutralizes every injection vector reviewers found", () =>
       report: {
         incomplete: true,
         summary: payload,
-        integrityEvents: [{ type: "T", at: "a", severity: "info", detail: payload }],
+        integrityEvents: [
+          { type: "T", at: "a", severity: "info", detail: payload },
+        ],
       },
       problemTitle: "Two Sum",
       language: "python",
@@ -779,7 +1162,10 @@ test("markdown export neutralizes every injection vector reviewers found", () =>
     );
     assert.match(
       markdown,
-      new RegExp(`^\\*\\*You:\\*\\* ${escaped.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "m"),
+      new RegExp(
+        `^\\*\\*You:\\*\\* ${escaped.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`,
+        "m",
+      ),
       `${name} is not escaped in the transcript`,
     );
   }
@@ -792,14 +1178,26 @@ test("markdown export neutralizes every injection vector reviewers found", () =>
 // one enormous code block. This states the property that implies the rendering:
 // no line may begin a block construct the document did not write itself.
 test("markdown export starts no block construct it did not write", () => {
-  const payloads = ["~~~", "~~~~~~", "```", "<!-- x", "<div>", "___", "---", "===", "    indented"];
+  const payloads = [
+    "~~~",
+    "~~~~~~",
+    "```",
+    "<!-- x",
+    "<div>",
+    "___",
+    "---",
+    "===",
+    "    indented",
+  ];
 
   for (const payload of payloads) {
     const markdown = reportMarkdown({
       report: {
         incomplete: true,
         summary: payload,
-        integrityEvents: [{ type: "T", at: "a", severity: "info", detail: payload }],
+        integrityEvents: [
+          { type: "T", at: "a", severity: "info", detail: payload },
+        ],
       },
       problemTitle: "Two Sum",
       language: "python",
@@ -832,7 +1230,10 @@ test("markdown export escapes list delimiters without leaving the backslash visi
       incomplete: true,
       summary: "3. Use a hash map",
       integrityEvents: [],
-      codingFeedback: { strengths: ["12) Rename the variable"], improvements: [] },
+      codingFeedback: {
+        strengths: ["12) Rename the variable"],
+        improvements: [],
+      },
     },
     problemTitle: "Two Sum",
     language: "python",
@@ -841,8 +1242,16 @@ test("markdown export escapes list delimiters without leaving the backslash visi
     at: "2026-01-01",
   });
 
-  assert.match(markdown, /^3\\\. Use a hash map$/m, "the delimiter carries the escape, not the digit");
-  assert.doesNotMatch(markdown, /\\\d/, "a backslash before a digit renders literally");
+  assert.match(
+    markdown,
+    /^3\\\. Use a hash map$/m,
+    "the delimiter carries the escape, not the digit",
+  );
+  assert.doesNotMatch(
+    markdown,
+    /\\\d/,
+    "a backslash before a digit renders literally",
+  );
 });
 
 // A `===` line would underline the paragraph above it into a heading, but no
@@ -854,7 +1263,9 @@ test("markdown export gives untrusted text no bare line to underline", () => {
     report: {
       incomplete: true,
       summary: "===",
-      integrityEvents: [{ type: "T", at: "a", severity: "info", detail: "===" }],
+      integrityEvents: [
+        { type: "T", at: "a", severity: "info", detail: "===" },
+      ],
     },
     problemTitle: "Two Sum",
     language: "python",
@@ -870,7 +1281,11 @@ test("markdown export gives untrusted text no bare line to underline", () => {
   for (const [index, line] of lines.entries()) {
     if (!/^[=-]+$/.test(line.trim()) || !line.trim()) continue;
     const above = lines[index - 1] ?? "";
-    assert.equal(above.trim(), "", `a setext underline landed under ${JSON.stringify(above)}`);
+    assert.equal(
+      above.trim(),
+      "",
+      `a setext underline landed under ${JSON.stringify(above)}`,
+    );
   }
 });
 
@@ -886,8 +1301,16 @@ test("markdown export cannot have its code fence opened by the language", () => 
     at: "2026-01-01",
   });
 
-  assert.match(markdown, /^```pythonInjected$/m, "the fence header keeps only tag characters");
-  assert.doesNotMatch(markdown, /^ {0,3}## Injected$/m, "the language cannot write a heading");
+  assert.match(
+    markdown,
+    /^```pythonInjected$/m,
+    "the fence header keeps only tag characters",
+  );
+  assert.doesNotMatch(
+    markdown,
+    /^ {0,3}## Injected$/m,
+    "the language cannot write a heading",
+  );
 });
 
 // Candidate code is the one thing here that must not be escaped, so a run of
@@ -907,9 +1330,21 @@ test("markdown export fences code that contains backticks", () => {
     at: "2026-01-01",
   });
 
-  assert.match(markdown, /^````python$/m, "the fence outgrows the longest run inside it");
-  assert.match(markdown, /^# ```$/m, "the code itself is left exactly as the candidate wrote it");
-  assert.match(markdown, /^## Conversation transcript$/m, "the sections after the code survive");
+  assert.match(
+    markdown,
+    /^````python$/m,
+    "the fence outgrows the longest run inside it",
+  );
+  assert.match(
+    markdown,
+    /^# ```$/m,
+    "the code itself is left exactly as the candidate wrote it",
+  );
+  assert.match(
+    markdown,
+    /^## Conversation transcript$/m,
+    "the sections after the code survive",
+  );
 });
 
 test("markdown export handles an empty session", () => {
@@ -941,15 +1376,31 @@ test("the report says the event list is a subsequence, or says it cannot tell", 
   // told cannot distinguish "the agent dropped 380 for space" from "rows were
   // deleted from the stored report". That distinction is what the chain is for.
 
-  const dropped = reportMarkup({ report: sanitizeReport({
-    decision: "HIRE", integrityEvents: events, integrityChainSeq: 412, integrityDropped: 380,
-  }), problemTitle: "Two Sum", language: "python", code: "" });
+  const dropped = reportMarkup({
+    report: sanitizeReport({
+      decision: "HIRE",
+      integrityEvents: events,
+      integrityChainSeq: 412,
+      integrityDropped: 380,
+    }),
+    problemTitle: "Two Sum",
+    language: "python",
+    code: "",
+  });
   assert.match(dropped, /Chain verified through event 412/);
   assert.match(dropped, /380 more were verified and not kept/);
 
-  const complete = reportMarkup({ report: sanitizeReport({
-    decision: "HIRE", integrityEvents: events, integrityChainSeq: 1, integrityDropped: 0,
-  }), problemTitle: "Two Sum", language: "python", code: "" });
+  const complete = reportMarkup({
+    report: sanitizeReport({
+      decision: "HIRE",
+      integrityEvents: events,
+      integrityChainSeq: 1,
+      integrityDropped: 0,
+    }),
+    problemTitle: "Two Sum",
+    language: "python",
+    code: "",
+  });
   assert.match(complete, /every event it verified is listed above/);
 
   // A report with no checkpoint must not read as "nothing was dropped", which is
@@ -957,13 +1408,26 @@ test("the report says the event list is a subsequence, or says it cannot tell", 
   // before the field existed carries nothing, and the agent sends an explicit
   // null when the chain never advanced. `Number(null)` is 0, so the second one
   // used to render as "verified through event 0, every event is listed above".
-  for (const absent of [{}, { integrityChainSeq: null, integrityDropped: null }]) {
+  for (const absent of [
+    {},
+    { integrityChainSeq: null, integrityDropped: null },
+  ]) {
     const legacy = reportMarkup({
-      report: sanitizeReport({ decision: "HIRE", integrityEvents: events, ...absent }),
-      problemTitle: "Two Sum", language: "python", code: "",
+      report: sanitizeReport({
+        decision: "HIRE",
+        integrityEvents: events,
+        ...absent,
+      }),
+      problemTitle: "Two Sum",
+      language: "python",
+      code: "",
     });
     assert.match(legacy, /predates chain reporting/, JSON.stringify(absent));
-    assert.doesNotMatch(legacy, /every event it verified is listed above/, JSON.stringify(absent));
+    assert.doesNotMatch(
+      legacy,
+      /every event it verified is listed above/,
+      JSON.stringify(absent),
+    );
   }
 });
 
@@ -979,29 +1443,63 @@ test("the page and the exported markdown tell the same chain story", () => {
   // Both list shapes. Nothing retained is not a rare case: it is what a report
   // looks like when everything the chain verified was dropped for space, and it
   // is the case where the page used to stay silent while the export spoke.
-  for (const [report, list] of shapes.flatMap((r) => [[r, events], [r, []]])) {
-    const sentence = chainSentence(sanitizeReport({ decision: "HIRE", ...report }));
+  for (const [report, list] of shapes.flatMap((r) => [
+    [r, events],
+    [r, []],
+  ])) {
+    const sentence = chainSentence(
+      sanitizeReport({ decision: "HIRE", ...report }),
+    );
     const session = {
-      report: sanitizeReport({ decision: "HIRE", integrityEvents: list, ...report }),
-      problemTitle: "Two Sum", language: "python", code: "",
+      report: sanitizeReport({
+        decision: "HIRE",
+        integrityEvents: list,
+        ...report,
+      }),
+      problemTitle: "Two Sum",
+      language: "python",
+      code: "",
     };
     assert.ok(reportMarkup(session).includes(sentence), sentence);
-    assert.ok(reportMarkdown({ ...session, transcript: [] }).includes(sentence), sentence);
+    assert.ok(
+      reportMarkdown({ ...session, transcript: [] }).includes(sentence),
+      sentence,
+    );
   }
 });
 
 test("report views identify active and legacy scoring contracts", () => {
-  const active = sanitizeReport({ incomplete: true, interviewContract: {
-    bundleVersion: 6, livePromptVersion: 3, reportPromptVersion: 5,
-    rubricVersion: 1, reportSchemaVersion: 1,
-  } });
-  const session = { report: active, problemTitle: "Two Sum", language: "python", code: "" };
-  assert.match(reportMarkup(session), /Contract bundle 6 · rubric 1 · report schema 1/);
-  assert.match(reportMarkdown({ ...session, transcript: [] }), /Contract: bundle 6; live prompt 3; report prompt 5; rubric 1; report schema 1/);
+  const active = sanitizeReport({
+    incomplete: true,
+    interviewContract: {
+      bundleVersion: 6,
+      livePromptVersion: 3,
+      reportPromptVersion: 5,
+      rubricVersion: 1,
+      reportSchemaVersion: 1,
+    },
+  });
+  const session = {
+    report: active,
+    problemTitle: "Two Sum",
+    language: "python",
+    code: "",
+  };
+  assert.match(
+    reportMarkup(session),
+    /Contract bundle 6 · rubric 1 · report schema 1/,
+  );
+  assert.match(
+    reportMarkdown({ ...session, transcript: [] }),
+    /Contract: bundle 6; live prompt 3; report prompt 5; rubric 1; report schema 1/,
+  );
 
   const legacy = { ...session, report: sanitizeReport({ incomplete: true }) };
   assert.match(reportMarkup(legacy), /Legacy\/unversioned contract/);
-  assert.match(reportMarkdown({ ...legacy, transcript: [] }), /Contract: legacy\/unversioned/);
+  assert.match(
+    reportMarkdown({ ...legacy, transcript: [] }),
+    /Contract: legacy\/unversioned/,
+  );
 });
 
 test("a report that recorded no loop is not given one", () => {
@@ -1009,15 +1507,28 @@ test("a report that recorded no loop is not given one", () => {
   // and the exporter named one anyway, so a historical session was described
   // in the markdown as a shape it never ran.
   const session = (report) => ({
-    report: sanitizeReport(report), problemTitle: "Two Sum",
-    language: "python", code: "", transcript: [], at: "2026-01-01",
+    report: sanitizeReport(report),
+    problemTitle: "Two Sum",
+    language: "python",
+    code: "",
+    transcript: [],
+    at: "2026-01-01",
   });
   assert.doesNotMatch(reportMarkdown(session({ incomplete: true })), /^Loop:/m);
-  assert.match(reportMarkdown(session({ incomplete: true, interviewLoop: "coding_only" })), /^Loop: /m);
+  assert.match(
+    reportMarkdown(session({ incomplete: true, interviewLoop: "coding_only" })),
+    /^Loop: /m,
+  );
   // The on-screen report says it in the header rather than on its own line, and
   // was fabricating it there after the markdown export stopped.
-  assert.doesNotMatch(reportMarkup(session({ incomplete: true })), /Coding \+ behavioral/);
-  assert.match(reportMarkup(session({ incomplete: true, interviewLoop: "coding_only" })), /Coding only/);
+  assert.doesNotMatch(
+    reportMarkup(session({ incomplete: true })),
+    /Coding \+ behavioral/,
+  );
+  assert.match(
+    reportMarkup(session({ incomplete: true, interviewLoop: "coding_only" })),
+    /Coding only/,
+  );
 });
 
 // A case that threw is not a case that returned the wrong answer, and the card
@@ -1029,10 +1540,23 @@ test("a case that threw shows the exception instead of an expected/got pair", ()
   const { body } = resultsMarkup({
     passed: 0,
     total: 1,
-    cases: [{ label: "throws", pass: false, expected: "[0,1]", got: "", error: "TypeError: x is not a function", timeMs: 2 }],
+    cases: [
+      {
+        label: "throws",
+        pass: false,
+        expected: "[0,1]",
+        got: "",
+        error: "TypeError: x is not a function",
+        timeMs: 2,
+      },
+    ],
   });
   assert.match(body, /<pre>TypeError: x is not a function<\/pre>/);
-  assert.doesNotMatch(body, /expected/, "the exception replaces the comparison, it does not join it");
+  assert.doesNotMatch(
+    body,
+    /expected/,
+    "the exception replaces the comparison, it does not join it",
+  );
   assert.doesNotMatch(body, /\bgot\b/);
 });
 
@@ -1041,7 +1565,16 @@ test("a thrown exception cannot carry markup onto the report", () => {
   const { body } = resultsMarkup({
     passed: 0,
     total: 1,
-    cases: [{ label: "x", pass: false, expected: "", got: "", error: "<img src=x onerror=alert(1)>", timeMs: 0 }],
+    cases: [
+      {
+        label: "x",
+        pass: false,
+        expected: "",
+        got: "",
+        error: "<img src=x onerror=alert(1)>",
+        timeMs: 0,
+      },
+    ],
   });
   assert.doesNotMatch(body, /<img/);
   assert.match(body, /&lt;img src=x onerror=alert\(1\)&gt;/);
@@ -1052,22 +1585,40 @@ test("a thrown exception cannot carry markup onto the report", () => {
 // already pinned as `critical`; without this the class could be hard-wired to
 // `critical` and a clean run would still read as a failure.
 test("an all-pass run styles its count line as good, not critical", () => {
-  const allPass = resultsMarkup({ passed: 2, total: 2, cases: [
-    { label: "a", pass: true, timeMs: 1 },
-    { label: "b", pass: true, timeMs: 1 },
-  ] });
+  const allPass = resultsMarkup({
+    passed: 2,
+    total: 2,
+    cases: [
+      { label: "a", pass: true, timeMs: 1 },
+      { label: "b", pass: true, timeMs: 1 },
+    ],
+  });
   assert.match(allPass.body, /class="good small"/);
   assert.doesNotMatch(allPass.body, /class="critical small"/);
 
   // And the boundary is "every one", not "most": one failure out of many is
   // still critical.
-  const nearly = resultsMarkup({ passed: 1, total: 2, cases: [
-    { label: "a", pass: true, timeMs: 1 },
-    { label: "b", pass: false, expected: "1", got: "2", error: "", timeMs: 1 },
-  ] });
+  const nearly = resultsMarkup({
+    passed: 1,
+    total: 2,
+    cases: [
+      { label: "a", pass: true, timeMs: 1 },
+      {
+        label: "b",
+        pass: false,
+        expected: "1",
+        got: "2",
+        error: "",
+        timeMs: 1,
+      },
+    ],
+  });
   assert.match(nearly.body, /class="critical small"/);
   // A run with no cases at all passes vacuously and must not read as a failure.
-  assert.match(resultsMarkup({ passed: 0, total: 0, cases: [] }).body, /class="good small"/);
+  assert.match(
+    resultsMarkup({ passed: 0, total: 0, cases: [] }).body,
+    /class="good small"/,
+  );
 });
 
 // The second half of the stale-republish guard, which no fixture separated from
@@ -1080,14 +1631,23 @@ test("a closed turn is not reopened by an interim update at the same instant", (
   const panel = newPanel();
   const view = createTranscriptView(stubDocument, panel);
 
-  view.upsert("t1", "interviewer", "Walk me through your approach.", true, 5_000);
+  view.upsert(
+    "t1",
+    "interviewer",
+    "Walk me through your approach.",
+    true,
+    5_000,
+  );
   assert.equal(rowText(panel, 0), "Walk me through your approach.");
 
   // Same clock reading, final going true -> false. `at < row.at` is false here,
   // so the `row.final && !final` clause is the only thing refusing it.
   view.upsert("t1", "interviewer", "Walk me", false, 5_000);
-  assert.equal(rowText(panel, 0), "Walk me through your approach.",
-    "a closed turn does not reopen, and does not shorten");
+  assert.equal(
+    rowText(panel, 0),
+    "Walk me through your approach.",
+    "a closed turn does not reopen, and does not shorten",
+  );
 
   // A later interim is refused for the same reason, not because of the clock.
   view.upsert("t1", "interviewer", "Walk", false, 9_000);
@@ -1095,7 +1655,13 @@ test("a closed turn is not reopened by an interim update at the same instant", (
 
   // A later *final* correction is still accepted: the guard is about reopening
   // a closed turn, not about freezing it.
-  view.upsert("t1", "interviewer", "Walk me through your approach, please.", true, 9_000);
+  view.upsert(
+    "t1",
+    "interviewer",
+    "Walk me through your approach, please.",
+    true,
+    9_000,
+  );
   assert.equal(rowText(panel, 0), "Walk me through your approach, please.");
 });
 

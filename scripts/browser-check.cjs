@@ -12,13 +12,19 @@ const assert = require("node:assert/strict");
 const fs = require("fs");
 const http = require("http");
 const { spawn } = require("child_process");
-const { isGone, listRoomParticipants, removeParticipant } = require("./livekit-room-service.cjs");
+const {
+  isGone,
+  listRoomParticipants,
+  removeParticipant,
+} = require("./livekit-room-service.cjs");
 
 // The browser loads scenario names, while the checks stay keyed by the stable
 // bank ids that identify their judges and candidate programs. Reading the
 // generated map makes that boundary explicit instead of letting a removed
 // problem file decide which scenario each flow happens to exercise.
-const problemPages = JSON.parse(fs.readFileSync(`${__dirname}/../web/problem-pages.json`, "utf8"));
+const problemPages = JSON.parse(
+  fs.readFileSync(`${__dirname}/../web/problem-pages.json`, "utf8"),
+);
 
 function scenario(problemId) {
   const entry = problemPages[problemId];
@@ -37,37 +43,166 @@ function interviewUrl(problemId) {
 async function checkEditorNewlines(page) {
   const editor = page.getByLabel("Code editor");
   const cases = [
-    { name: "existing indentation", language: "JavaScript", value: "\t  call();", expected: "\t  call();\n\t  " },
-    { name: "matching delimiters", language: "JavaScript", value: "    {}", start: 5, expected: "    {\n        \n    }", caret: 14 },
-    { name: "selection replacement", language: "JavaScript", value: "    beforeREMOVEafter", start: 10, end: 16, expected: "    before\n    after", caret: 15 },
-    { name: "Python block", language: "Python 3", value: "    if ready:", expected: "    if ready:\n        " },
-    { name: "Python comment", language: "Python 3", value: "    # Steps:", expected: "    # Steps:\n    " },
-    { name: "non-Python colon", language: "JavaScript", value: "    case 1:", expected: "    case 1:\n    " },
-    { name: "line comment", language: "JavaScript", value: "    // setup {", expected: "    // setup {\n    " },
-    { name: "block comment", language: "C++", value: "    /* setup {", expected: "    /* setup {\n    " },
-    { name: "preprocessor directive", language: "C++", value: "    #define BLOCK {", expected: "    #define BLOCK {\n        " },
-    { name: "trailing line comment", language: "JavaScript", value: "    work(); // {", expected: "    work(); // {\n    " },
-    { name: "trailing Python comment", language: "Python 3", value: "    value = 1 # note:", expected: "    value = 1 # note:\n    " },
-    { name: "Python opener before comment", language: "Python 3", value: "    if ready: # note", expected: "    if ready: # note\n        " },
-    { name: "brace before comment", language: "JavaScript", value: "    if (ready) { // note", expected: "    if (ready) { // note\n        " },
-    { name: "code after block comment", language: "C++", value: "    /* seed */ if (ready) {", expected: "    /* seed */ if (ready) {\n        " },
-    { name: "trailing block comment", language: "C++", value: "    if (ready) { /* note */", expected: "    if (ready) { /* note */\n        " },
-    { name: "quoted comment marker", language: "JavaScript", value: '    if (url === "https://example.com") { // note', expected: '    if (url === "https://example.com") { // note\n        ' },
-    { name: "quoted Python comment marker", language: "Python 3", value: "    if tag == '#': # note", expected: "    if tag == '#': # note\n        " },
-    { name: "escaped quote before comment marker", language: "Python 3", value: String.raw`    if tag == 'can\'t #': # note`, expected: String.raw`    if tag == 'can\'t #': # note` + "\n        " },
-    { name: "delimiters in trailing comment", language: "JavaScript", value: "    work(); // {}", start: 16, expected: "    work(); // {\n    }", caret: 21 },
+    {
+      name: "existing indentation",
+      language: "JavaScript",
+      value: "\t  call();",
+      expected: "\t  call();\n\t  ",
+    },
+    {
+      name: "matching delimiters",
+      language: "JavaScript",
+      value: "    {}",
+      start: 5,
+      expected: "    {\n        \n    }",
+      caret: 14,
+    },
+    {
+      name: "selection replacement",
+      language: "JavaScript",
+      value: "    beforeREMOVEafter",
+      start: 10,
+      end: 16,
+      expected: "    before\n    after",
+      caret: 15,
+    },
+    {
+      name: "Python block",
+      language: "Python 3",
+      value: "    if ready:",
+      expected: "    if ready:\n        ",
+    },
+    {
+      name: "Python comment",
+      language: "Python 3",
+      value: "    # Steps:",
+      expected: "    # Steps:\n    ",
+    },
+    {
+      name: "non-Python colon",
+      language: "JavaScript",
+      value: "    case 1:",
+      expected: "    case 1:\n    ",
+    },
+    {
+      name: "line comment",
+      language: "JavaScript",
+      value: "    // setup {",
+      expected: "    // setup {\n    ",
+    },
+    {
+      name: "block comment",
+      language: "C++",
+      value: "    /* setup {",
+      expected: "    /* setup {\n    ",
+    },
+    {
+      name: "preprocessor directive",
+      language: "C++",
+      value: "    #define BLOCK {",
+      expected: "    #define BLOCK {\n        ",
+    },
+    {
+      name: "trailing line comment",
+      language: "JavaScript",
+      value: "    work(); // {",
+      expected: "    work(); // {\n    ",
+    },
+    {
+      name: "trailing Python comment",
+      language: "Python 3",
+      value: "    value = 1 # note:",
+      expected: "    value = 1 # note:\n    ",
+    },
+    {
+      name: "Python opener before comment",
+      language: "Python 3",
+      value: "    if ready: # note",
+      expected: "    if ready: # note\n        ",
+    },
+    {
+      name: "brace before comment",
+      language: "JavaScript",
+      value: "    if (ready) { // note",
+      expected: "    if (ready) { // note\n        ",
+    },
+    {
+      name: "code after block comment",
+      language: "C++",
+      value: "    /* seed */ if (ready) {",
+      expected: "    /* seed */ if (ready) {\n        ",
+    },
+    {
+      name: "trailing block comment",
+      language: "C++",
+      value: "    if (ready) { /* note */",
+      expected: "    if (ready) { /* note */\n        ",
+    },
+    {
+      name: "quoted comment marker",
+      language: "JavaScript",
+      value: '    if (url === "https://example.com") { // note',
+      expected: '    if (url === "https://example.com") { // note\n        ',
+    },
+    {
+      name: "quoted Python comment marker",
+      language: "Python 3",
+      value: "    if tag == '#': # note",
+      expected: "    if tag == '#': # note\n        ",
+    },
+    {
+      name: "escaped quote before comment marker",
+      language: "Python 3",
+      value: String.raw`    if tag == 'can\'t #': # note`,
+      expected: String.raw`    if tag == 'can\'t #': # note` + "\n        ",
+    },
+    {
+      name: "delimiters in trailing comment",
+      language: "JavaScript",
+      value: "    work(); // {}",
+      start: 16,
+      expected: "    work(); // {\n    }",
+      caret: 21,
+    },
   ];
-  for (const { name, language, value, start = value.length, end = start, expected, caret = expected.length } of cases) {
+  for (const {
+    name,
+    language,
+    value,
+    start = value.length,
+    end = start,
+    expected,
+    caret = expected.length,
+  } of cases) {
     await page.getByRole("button", { name: language, exact: true }).click();
     await editor.fill(value);
-    await editor.evaluate((node, range) => node.setSelectionRange(...range), [start, end]);
+    await editor.evaluate(
+      (node, range) => node.setSelectionRange(...range),
+      [start, end],
+    );
     await editor.press("Enter");
-    assert.deepEqual(await editor.evaluate((node) => ({
-      value: node.value, start: node.selectionStart, end: node.selectionEnd,
-    })), { value: expected, start: caret, end: caret }, name);
-    assert.equal(await page.locator("#editor-highlight code").textContent(), expected, `${name}: highlight`);
-    assert.equal(await page.locator("#editor-lines").textContent(),
-      expected.split("\n").map((_, index) => index + 1).join("\n"), `${name}: line numbers`);
+    assert.deepEqual(
+      await editor.evaluate((node) => ({
+        value: node.value,
+        start: node.selectionStart,
+        end: node.selectionEnd,
+      })),
+      { value: expected, start: caret, end: caret },
+      name,
+    );
+    assert.equal(
+      await page.locator("#editor-highlight code").textContent(),
+      expected,
+      `${name}: highlight`,
+    );
+    assert.equal(
+      await page.locator("#editor-lines").textContent(),
+      expected
+        .split("\n")
+        .map((_, index) => index + 1)
+        .join("\n"),
+      `${name}: line numbers`,
+    );
 
     await editor.press("ControlOrMeta+z");
     assert.equal(await editor.inputValue(), value, `${name}: undo`);
@@ -75,17 +210,27 @@ async function checkEditorNewlines(page) {
     assert.equal(await editor.inputValue(), expected, `${name}: redo`);
 
     const otherLanguage = language === "Python 3" ? "JavaScript" : "Python 3";
-    await page.getByRole("button", { name: otherLanguage, exact: true }).click();
+    await page
+      .getByRole("button", { name: otherLanguage, exact: true })
+      .click();
     await page.getByRole("button", { name: language, exact: true }).click();
-    assert.equal(await editor.inputValue(), expected, `${name}: retained after switching languages`);
+    assert.equal(
+      await editor.inputValue(),
+      expected,
+      `${name}: retained after switching languages`,
+    );
   }
-  console.log(`editor: ${cases.length} Enter cases passed, including undo, redo and language switching`);
+  console.log(
+    `editor: ${cases.length} Enter cases passed, including undo, redo and language switching`,
+  );
 }
 
 const soakSeconds = Number(process.env.BROWSER_CHECK_SOAK_SECONDS || "0");
 const requireModel = process.env.BROWSER_CHECK_REQUIRE_MODEL === "1";
 if (!Number.isSafeInteger(soakSeconds) || soakSeconds < 0) {
-  throw new Error("BROWSER_CHECK_SOAK_SECONDS must be a whole number of seconds");
+  throw new Error(
+    "BROWSER_CHECK_SOAK_SECONDS must be a whole number of seconds",
+  );
 }
 
 /// The Live API closes a socket at about ten minutes. A soak shorter than that
@@ -107,7 +252,12 @@ function redact(text) {
   let output = String(text);
   // GOOGLE_API_KEYS is the pooled spelling and holds a comma-separated list,
   // so the list as a whole never appears in a message; its members do.
-  for (const key of ["LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "GOOGLE_API_KEY", "GOOGLE_API_KEYS"]) {
+  for (const key of [
+    "LIVEKIT_API_KEY",
+    "LIVEKIT_API_SECRET",
+    "GOOGLE_API_KEY",
+    "GOOGLE_API_KEYS",
+  ]) {
     for (const value of String(process.env[key] ?? "").split(",")) {
       if (value.trim()) output = output.split(value.trim()).join("[redacted]");
     }
@@ -121,8 +271,14 @@ function redact(text) {
   // the last `@` inside it: the same reading `livekitHttpBase` in
   // livekit-room-service.cjs takes with `lastIndexOf("@")`, so a password
   // containing an `@` is masked whole here rather than left half in the log.
-  output = output.replace(/([a-z][a-z0-9+.-]*:\/\/)[^/?#\s]+@/gi, "$1[redacted]@");
-  return output.replace(/[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}/g, "[jwt]");
+  output = output.replace(
+    /([a-z][a-z0-9+.-]*:\/\/)[^/?#\s]+@/gi,
+    "$1[redacted]@",
+  );
+  return output.replace(
+    /[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}/g,
+    "[jwt]",
+  );
 }
 
 function stopProcessGroup(child) {
@@ -141,7 +297,10 @@ async function clearMediaGate(page) {
   await gate.waitFor({ state: "visible", timeout: 30000 });
   await page.getByRole("button", { name: "Play test tone" }).click();
   await page.getByRole("button", { name: "I heard it" }).click();
-  if ((await page.locator("#audio-step-output p").innerText()) !== "Output — Confirmed") {
+  if (
+    (await page.locator("#audio-step-output p").innerText()) !==
+    "Output — Confirmed"
+  ) {
     throw new Error("output confirmation did not render immediately");
   }
   const join = page.getByRole("button", { name: "Start interview" });
@@ -150,14 +309,19 @@ async function clearMediaGate(page) {
     await page.waitForTimeout(500);
   }
   if (await join.isDisabled()) {
-    throw new Error(`media gate never opened: ${await page.locator("#audio-check-status").textContent()}`);
+    throw new Error(
+      `media gate never opened: ${await page.locator("#audio-check-status").textContent()}`,
+    );
   }
   await join.click();
   await gate.waitFor({ state: "hidden" });
 }
 
 function isAgentParticipant(participant) {
-  return participant.permission?.agent === true || String(participant.kind) === "AGENT";
+  return (
+    participant.permission?.agent === true ||
+    String(participant.kind) === "AGENT"
+  );
 }
 
 function agentParticipantIdentities(participants) {
@@ -175,14 +339,18 @@ function sleep(ms) {
 /// lines land. Absent for the flows that run no server, and redacted here
 /// rather than at each caller because both of them put it in front of a human.
 function readServerLog() {
-  if (!process.env.SERVER_LOG || !fs.existsSync(process.env.SERVER_LOG)) return "";
+  if (!process.env.SERVER_LOG || !fs.existsSync(process.env.SERVER_LOG))
+    return "";
   return redact(fs.readFileSync(process.env.SERVER_LOG, "utf8"));
 }
 
 /// How many turns the transcript panel is showing. The page accumulates these
 /// client-side, so it keeps counting across a handover the browser never sees.
 function transcriptTurns(page) {
-  return page.locator("p").filter({ hasText: /^(Jim|You)$/ }).count();
+  return page
+    .locator("p")
+    .filter({ hasText: /^(Jim|You)$/ })
+    .count();
 }
 
 /// Holds a real room open without making the browser a second interviewer, and
@@ -220,7 +388,9 @@ async function soakInterview(page, roomName, agentIdentity, agentOutput) {
     // The failure this whole path exists to avoid, and it is worth reporting
     // where it happened rather than as a missing resume at the end.
     if (seen.degraded) {
-      throw new Error(`Gemini restarted cold during ${soakSeconds}s soak; the conversation was lost`);
+      throw new Error(
+        `Gemini restarted cold during ${soakSeconds}s soak; the conversation was lost`,
+      );
     }
 
     // Sampled when the handover is first seen, so the growth asserted below is
@@ -234,7 +404,9 @@ async function soakInterview(page, roomName, agentIdentity, agentOutput) {
   // reaching a new socket by way of the close still resumes, so a soak that
   // only asked "did it resume" would pass with the proactive path dead.
   if (!seen.goAway) {
-    throw new Error(`no transport restart was requested during ${soakSeconds}s soak`);
+    throw new Error(
+      `no transport restart was requested during ${soakSeconds}s soak`,
+    );
   }
   if (!seen.resumed) {
     throw new Error(`Gemini did not resume during ${soakSeconds}s soak`);
@@ -259,7 +431,11 @@ function sessionCookieHeader(cookie) {
   return { name, value: value.join("=") };
 }
 
-async function isolateRustAgent(roomName, rustAgentIdentity, timeoutMs = 120000) {
+async function isolateRustAgent(
+  roomName,
+  rustAgentIdentity,
+  timeoutMs = 120000,
+) {
   const started = Date.now();
   let lastAgentParticipants = [];
   while (Date.now() - started < timeoutMs) {
@@ -275,7 +451,10 @@ async function isolateRustAgent(roomName, rustAgentIdentity, timeoutMs = 120000)
     }
     let removed = false;
     for (const participant of participants) {
-      if (isAgentParticipant(participant) && participant.identity !== rustAgentIdentity) {
+      if (
+        isAgentParticipant(participant) &&
+        participant.identity !== rustAgentIdentity
+      ) {
         await removeParticipant(roomName, participant.identity);
         removed = true;
       }
@@ -285,12 +464,17 @@ async function isolateRustAgent(roomName, rustAgentIdentity, timeoutMs = 120000)
       continue;
     }
     lastAgentParticipants = agentParticipantIdentities(participants);
-    if (lastAgentParticipants.length === 1 && lastAgentParticipants[0] === rustAgentIdentity) {
+    if (
+      lastAgentParticipants.length === 1 &&
+      lastAgentParticipants[0] === rustAgentIdentity
+    ) {
       return lastAgentParticipants;
     }
     await sleep(500);
   }
-  throw new Error(`room agents not isolated\n${JSON.stringify(lastAgentParticipants)}`);
+  throw new Error(
+    `room agents not isolated\n${JSON.stringify(lastAgentParticipants)}`,
+  );
 }
 
 (async () => {
@@ -304,13 +488,17 @@ async function isolateRustAgent(roomName, rustAgentIdentity, timeoutMs = 120000)
         "--use-fake-device-for-media-stream",
         "--use-fake-ui-for-media-stream",
         ...(process.env.BROWSER_CHECK_BARGE_AUDIO_FILE
-          ? [`--use-file-for-fake-audio-capture=${process.env.BROWSER_CHECK_BARGE_AUDIO_FILE}`]
+          ? [
+              `--use-file-for-fake-audio-capture=${process.env.BROWSER_CHECK_BARGE_AUDIO_FILE}`,
+            ]
           : []),
       ],
     });
   } catch (error) {
     console.error(String(error && error.message ? error.message : error));
-    console.error("Set PLAYWRIGHT_PATH to an installed Playwright module path and install Chromium for that runner.");
+    console.error(
+      "Set PLAYWRIGHT_PATH to an installed Playwright module path and install Chromium for that runner.",
+    );
     process.exit(1);
   }
 
@@ -363,7 +551,10 @@ async function isolateRustAgent(roomName, rustAgentIdentity, timeoutMs = 120000)
       // reproduced one layer out. Everything else at warning level here is GL
       // and fake-media noise.
       const ours = text.startsWith("codetrial ");
-      if (message.type() === "error" || (message.type() === "warning" && ours)) {
+      if (
+        message.type() === "error" ||
+        (message.type() === "warning" && ours)
+      ) {
         consoleErrors.push(text);
       }
     });
@@ -371,20 +562,29 @@ async function isolateRustAgent(roomName, rustAgentIdentity, timeoutMs = 120000)
     // "status of 500" with no URL is not a diagnosis, so pair every failing
     // response with the thing that was being fetched.
     page.on("response", (response) => {
-      if (response.status() >= 400) consoleErrors.push(`HTTP ${response.status()} ${response.url()}`);
+      if (response.status() >= 400)
+        consoleErrors.push(`HTTP ${response.status()} ${response.url()}`);
     });
     page.on("requestfailed", (request) =>
-      consoleErrors.push(`request failed ${request.url()}: ${request.failure()?.errorText}`));
-    const sessionCookie = sessionCookieHeader(process.env.BROWSER_CHECK_SESSION_COOKIE);
+      consoleErrors.push(
+        `request failed ${request.url()}: ${request.failure()?.errorText}`,
+      ),
+    );
+    const sessionCookie = sessionCookieHeader(
+      process.env.BROWSER_CHECK_SESSION_COOKIE,
+    );
     if (sessionCookie) {
-      await page.context().addCookies([{
-        ...sessionCookie,
-        url: process.env.BASE_URL,
-        httpOnly: true,
-        sameSite: "Lax",
-      }]);
+      await page.context().addCookies([
+        {
+          ...sessionCookie,
+          url: process.env.BASE_URL,
+          httpOnly: true,
+          sameSite: "Lax",
+        },
+      ]);
     }
-    let compilerExplorerBaseUrl = process.env.BROWSER_CHECK_COMPILER_EXPLORER_BASE_URL;
+    let compilerExplorerBaseUrl =
+      process.env.BROWSER_CHECK_COMPILER_EXPLORER_BASE_URL;
     if (compilerExplorerBaseUrl === "mock") {
       compilerExplorerMock = await startCompilerExplorerMock();
       compilerExplorerBaseUrl = compilerExplorerMock.url;
@@ -417,11 +617,14 @@ async function isolateRustAgent(roomName, rustAgentIdentity, timeoutMs = 120000)
       // sidestepped.
       await page.route("**/api/compiler/**", async (route) => {
         const request = route.request();
-        const response = await fetch(`${compilerExplorerMock.url}${new URL(request.url()).pathname}`, {
-          method: request.method(),
-          headers: { "Content-Type": "application/json" },
-          body: request.postData() ?? undefined,
-        });
+        const response = await fetch(
+          `${compilerExplorerMock.url}${new URL(request.url()).pathname}`,
+          {
+            method: request.method(),
+            headers: { "Content-Type": "application/json" },
+            body: request.postData() ?? undefined,
+          },
+        );
         await route.fulfill({
           status: response.status,
           contentType: "application/json",
@@ -455,24 +658,29 @@ async function isolateRustAgent(roomName, rustAgentIdentity, timeoutMs = 120000)
       // The same `--config` the server was started with. `provider_dir` is
       // the config file's directory, so an agent left to find its own would
       // route against a different pool than the server it is answering for.
-      rustAgent = spawn("cargo", [
-        "run",
-        "--quiet",
-        "--",
-        "run-livekit",
-        room,
-        "--config",
-        process.env.BROWSER_CHECK_CONFIG_PATH,
-      ], {
-        cwd: process.env.ROOT,
-        detached: true,
-        env: process.env,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
+      rustAgent = spawn(
+        "cargo",
+        [
+          "run",
+          "--quiet",
+          "--",
+          "run-livekit",
+          room,
+          "--config",
+          process.env.BROWSER_CHECK_CONFIG_PATH,
+        ],
+        {
+          cwd: process.env.ROOT,
+          detached: true,
+          env: process.env,
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
       for (const stream of [rustAgent.stdout, rustAgent.stderr]) {
         stream.on("data", (chunk) => {
           const text = redact(chunk);
-          if (text.includes("problem=two-sum duration=20min")) sawRustMetadataConfig = true;
+          if (text.includes("problem=two-sum duration=20min"))
+            sawRustMetadataConfig = true;
           agentOutput.push(text);
           while (agentOutput.join("").length > 12000) agentOutput.shift();
         });
@@ -480,9 +688,11 @@ async function isolateRustAgent(roomName, rustAgentIdentity, timeoutMs = 120000)
       agentFailure = new Promise((_, reject) => {
         rustAgent.once("exit", (code, signal) => {
           if (!agentDone && (code !== 0 || signal)) {
-            reject(new Error(
-              `rust agent exited early: code=${code} signal=${signal}\n${agentOutput.join("")}`,
-            ));
+            reject(
+              new Error(
+                `rust agent exited early: code=${code} signal=${signal}\n${agentOutput.join("")}`,
+              ),
+            );
           }
         });
       });
@@ -493,13 +703,25 @@ async function isolateRustAgent(roomName, rustAgentIdentity, timeoutMs = 120000)
     }
     async function runAndExpectPassing(expected, timeout = 30000) {
       await page.getByRole("button", { name: /Run tests/ }).click();
-      await page.getByRole("button", { name: "Run tests" }).waitFor({ timeout });
+      await page
+        .getByRole("button", { name: "Run tests" })
+        .waitFor({ timeout });
       try {
-        await page.getByText(`Test results · ${expected}/${expected}`).waitFor({ timeout });
+        await page
+          .getByText(`Test results · ${expected}/${expected}`)
+          .waitFor({ timeout });
       } catch (error) {
-        const label = await page.locator("#results-label").innerText().catch(() => "");
-        const body = await page.locator("#results-body").innerText().catch(() => "");
-        throw new Error(`expected ${expected}/${expected} test results, got ${label}\n${body}`);
+        const label = await page
+          .locator("#results-label")
+          .innerText()
+          .catch(() => "");
+        const body = await page
+          .locator("#results-body")
+          .innerText()
+          .catch(() => "");
+        throw new Error(
+          `expected ${expected}/${expected} test results, got ${label}\n${body}`,
+        );
       }
     }
     // Flow-first, before the mode dispatch. This is the only check that can see
@@ -512,41 +734,80 @@ async function isolateRustAgent(roomName, rustAgentIdentity, timeoutMs = 120000)
       // The browser launches with --use-fake-ui-for-media-stream, which is why
       // no other flow in this file grants permissions.
       await page.setViewportSize({ width: 1440, height: 900 });
-      await page.goto(interviewUrl("two-sum"), { waitUntil: "domcontentloaded" });
+      await page.goto(interviewUrl("two-sum"), {
+        waitUntil: "domcontentloaded",
+      });
       await clearMediaGate(page);
       await page.locator("#jim-avatar").waitFor({ timeout: 30000 });
       // Leaving "loading" is the contract. Which terminal state it lands on is
       // the repo's business, and both are asserted below.
       await page
-        .waitForFunction(() => document.querySelector("#jim-avatar")?.dataset.avatarState !== "loading", null, { timeout: 60000 })
-        .catch(() => { throw new Error("the avatar never left its loading state"); });
+        .waitForFunction(
+          () =>
+            document.querySelector("#jim-avatar")?.dataset.avatarState !==
+            "loading",
+          null,
+          { timeout: 60000 },
+        )
+        .catch(() => {
+          throw new Error("the avatar never left its loading state");
+        });
 
-      const avatarState = await page.locator("#jim-avatar").getAttribute("data-avatar-state");
+      const avatarState = await page
+        .locator("#jim-avatar")
+        .getAttribute("data-avatar-state");
       const canvases = await page.locator("#jim-avatar canvas").count();
-      const fallbackVisible = await page.locator("#jim-avatar-fallback").isVisible();
+      const fallbackVisible = await page
+        .locator("#jim-avatar-fallback")
+        .isVisible();
       const note = (await page.locator("#jim-avatar-note").innerText()).trim();
 
       if (avatarState === "ready") {
-        if (canvases !== 1) throw new Error(`a rendered avatar needs exactly one canvas, found ${canvases}`);
-        if (fallbackVisible) throw new Error("the neutral panel is still covering a rendered avatar");
+        if (canvases !== 1)
+          throw new Error(
+            `a rendered avatar needs exactly one canvas, found ${canvases}`,
+          );
+        if (fallbackVisible)
+          throw new Error(
+            "the neutral panel is still covering a rendered avatar",
+          );
         // Counts real render calls. The previous version sampled toDataURL
         // once, waited, and then compared that one sample against a length
         // threshold, so it had no "after" and passed on a cleared buffer.
         // Reading pixels back would need preserveDrawingBuffer; a counter the
         // renderer increments is cheaper and unambiguous.
-        const first = await page.evaluate(() => window.__codetrialAvatarFrames?.() ?? null);
-        if (first === null) throw new Error("the page exposed no avatar frame counter");
+        const first = await page.evaluate(
+          () => window.__codetrialAvatarFrames?.() ?? null,
+        );
+        if (first === null)
+          throw new Error("the page exposed no avatar frame counter");
         // Waits for the condition instead of sleeping past it: the next frame
         // lands in about 16 ms, so a fixed 500 ms sleep spent most of itself
         // waiting for something already true.
         await page
-          .waitForFunction((from) => (window.__codetrialAvatarFrames?.() ?? 0) > from, first, { timeout: 5000 })
-          .catch(() => { throw new Error(`the avatar render loop is not running: stuck at ${first} frames`); });
+          .waitForFunction(
+            (from) => (window.__codetrialAvatarFrames?.() ?? 0) > from,
+            first,
+            { timeout: 5000 },
+          )
+          .catch(() => {
+            throw new Error(
+              `the avatar render loop is not running: stuck at ${first} frames`,
+            );
+          });
       } else if (avatarState === "unavailable") {
-        if (requireModel && !modelDelivered) throw new Error("the pinned avatar model was never delivered");
-        if (canvases !== 0) throw new Error("an unavailable avatar must not leave a canvas behind");
-        if (!fallbackVisible) throw new Error("the neutral panel must be visible when the avatar is unavailable");
-        if (!/avatar is unavailable/.test(note)) throw new Error(`the neutral panel must say why, got: ${note}`);
+        if (requireModel && !modelDelivered)
+          throw new Error("the pinned avatar model was never delivered");
+        if (canvases !== 0)
+          throw new Error(
+            "an unavailable avatar must not leave a canvas behind",
+          );
+        if (!fallbackVisible)
+          throw new Error(
+            "the neutral panel must be visible when the avatar is unavailable",
+          );
+        if (!/avatar is unavailable/.test(note))
+          throw new Error(`the neutral panel must say why, got: ${note}`);
         if (modelDelivered) {
           // The model is fetched from a third-party host now, so an offline or
           // firewalled runner reaching the neutral panel is correct behavior
@@ -557,7 +818,9 @@ async function isolateRustAgent(roomName, rustAgentIdentity, timeoutMs = 120000)
             `the pinned model was delivered but did not render:\n${consoleErrors.join("\n") || "(no console errors captured)"}`,
           );
         }
-        console.log("avatar: the pinned model was never delivered, so the neutral panel is the correct result");
+        console.log(
+          "avatar: the pinned model was never delivered, so the neutral panel is the correct result",
+        );
       } else {
         throw new Error(`unexpected avatar state: ${avatarState}`);
       }
@@ -566,7 +829,9 @@ async function isolateRustAgent(roomName, rustAgentIdentity, timeoutMs = 120000)
 
     if (mode === "home") {
       await page.goto(process.env.BASE_URL, { waitUntil: "domcontentloaded" });
-      await page.getByRole("heading", { name: "Practice a live technical interview" }).waitFor();
+      await page
+        .getByRole("heading", { name: "Practice a live technical interview" })
+        .waitFor();
       await page.getByRole("button", { name: "Start interview" }).waitFor();
 
       // Two things now stand between the page and a generated card, and this
@@ -579,14 +844,20 @@ async function isolateRustAgent(roomName, rustAgentIdentity, timeoutMs = 120000)
       // title is on it too, hidden unless the candidate asks.
       await page.getByText("Choose a specific problem instead").click();
       await page.getByRole("checkbox", { name: "Easy" }).check();
-      await page.getByText(scenarioTitle("valid-parentheses"), { exact: true }).waitFor();
+      await page
+        .getByText(scenarioTitle("valid-parentheses"), { exact: true })
+        .waitFor();
       return;
     }
 
     if (mode === "offline") {
-      await page.goto(interviewUrl("two-sum"), { waitUntil: "domcontentloaded" });
+      await page.goto(interviewUrl("two-sum"), {
+        waitUntil: "domcontentloaded",
+      });
       await clearMediaGate(page);
-      await page.getByRole("heading", { name: scenarioTitle("two-sum"), level: 1 }).waitFor();
+      await page
+        .getByRole("heading", { name: scenarioTitle("two-sum"), level: 1 })
+        .waitFor();
       await page.getByText("Offline", { exact: true }).waitFor();
       await checkEditorNewlines(page);
       // The `""` branch that used to be here is gone. It set the global from an
@@ -620,9 +891,13 @@ int* matchDisputedCharge(int* nums, int numsSize, int target, int* returnSize) {
 }
 `);
         await runAndExpectPassing(5, 120000);
-        await page.goto(interviewUrl("min-stack"), { waitUntil: "domcontentloaded" });
+        await page.goto(interviewUrl("min-stack"), {
+          waitUntil: "domcontentloaded",
+        });
         await clearMediaGate(page);
-        await page.getByRole("heading", { name: scenarioTitle("min-stack"), level: 1 }).waitFor();
+        await page
+          .getByRole("heading", { name: scenarioTitle("min-stack"), level: 1 })
+          .waitFor();
         await page.getByText("Offline", { exact: true }).waitFor();
         await page.getByRole("button", { name: "C++" }).click();
         await page.getByLabel("Code editor").fill(`#include <vector>
@@ -645,9 +920,16 @@ public:
 };
 `);
         await runAndExpectPassing(5, 120000);
-        await page.goto(interviewUrl("binary-search-tree-iterator"), { waitUntil: "domcontentloaded" });
+        await page.goto(interviewUrl("binary-search-tree-iterator"), {
+          waitUntil: "domcontentloaded",
+        });
         await clearMediaGate(page);
-        await page.getByRole("heading", { name: scenarioTitle("binary-search-tree-iterator"), level: 1 }).waitFor();
+        await page
+          .getByRole("heading", {
+            name: scenarioTitle("binary-search-tree-iterator"),
+            level: 1,
+          })
+          .waitFor();
         await page.getByText("Offline", { exact: true }).waitFor();
         await page.getByRole("button", { name: "Java", exact: true }).click();
         await page.getByLabel("Code editor").fill(`class OrderedCursor {
@@ -680,9 +962,15 @@ public:
 };
 `);
         await page.getByRole("button", { name: /Run tests/ }).click();
-        await page.getByRole("button", { name: "Run tests" }).waitFor({ timeout: 120000 });
-        await page.getByText("Couldn't run your code").waitFor({ timeout: 120000 });
-        await page.getByText(/Compiler Explorer (run failed|did not respond)/).waitFor({ timeout: 120000 });
+        await page
+          .getByRole("button", { name: "Run tests" })
+          .waitFor({ timeout: 120000 });
+        await page
+          .getByText("Couldn't run your code")
+          .waitFor({ timeout: 120000 });
+        await page
+          .getByText(/Compiler Explorer (run failed|did not respond)/)
+          .waitFor({ timeout: 120000 });
         return;
       }
       await page.getByRole("button", { name: "JavaScript" }).click();
@@ -694,7 +982,8 @@ function matchDisputedCharge() {
       await page.getByRole("button", { name: /Run tests/ }).click();
       await page.getByRole("button", { name: "Run tests" }).waitFor();
       await page.getByText("Test results · 0/5").waitFor();
-      await page.getByLabel("Code editor").fill(`function matchDisputedCharge(nums, target) {
+      await page.getByLabel("Code editor")
+        .fill(`function matchDisputedCharge(nums, target) {
   const seen = new Map();
   for (let i = 0; i < nums.length; i++) {
     const want = target - nums[i];
@@ -728,9 +1017,16 @@ public:
 };
 `);
       await page.getByRole("button", { name: /Run tests/ }).click();
-      await page.getByRole("button", { name: "Run tests" }).waitFor({ timeout: 120000 });
-      await page.getByText("Couldn't run your code").waitFor({ timeout: 120000 });
-      await page.locator("#results-body pre").filter({ hasText: /Compilation failed|expected|error/i }).waitFor({ timeout: 120000 });
+      await page
+        .getByRole("button", { name: "Run tests" })
+        .waitFor({ timeout: 120000 });
+      await page
+        .getByText("Couldn't run your code")
+        .waitFor({ timeout: 120000 });
+      await page
+        .locator("#results-body pre")
+        .filter({ hasText: /Compilation failed|expected|error/i })
+        .waitFor({ timeout: 120000 });
       await page.getByRole("button", { name: "C", exact: true }).click();
       await page.getByLabel("Code editor").fill(`#include <stdlib.h>
 int* matchDisputedCharge(int* nums, int numsSize, int target, int* returnSize) {
@@ -766,12 +1062,20 @@ int* matchDisputedCharge(int* nums, int numsSize, int target, int* returnSize) {
       await page.locator("p").filter({ hasText: /^Jim$/ }).first().waitFor();
       await page.locator("p").filter({ hasText: /^You$/ }).first().waitFor();
 
-      await page.goto(interviewUrl("merge-sorted-array"), { waitUntil: "domcontentloaded" });
+      await page.goto(interviewUrl("merge-sorted-array"), {
+        waitUntil: "domcontentloaded",
+      });
       await clearMediaGate(page);
-      await page.getByRole("heading", { name: scenarioTitle("merge-sorted-array"), level: 1 }).waitFor();
+      await page
+        .getByRole("heading", {
+          name: scenarioTitle("merge-sorted-array"),
+          level: 1,
+        })
+        .waitFor();
       await page.getByText("Offline", { exact: true }).waitFor();
       await page.getByRole("button", { name: "JavaScript" }).click();
-      await page.getByLabel("Code editor").fill(`function spliceReadings(nums1, m, nums2, n) {
+      await page.getByLabel("Code editor")
+        .fill(`function spliceReadings(nums1, m, nums2, n) {
   let write = m + n - 1;
   let left = m - 1;
   let right = n - 1;
@@ -786,12 +1090,20 @@ int* matchDisputedCharge(int* nums, int numsSize, int target, int* returnSize) {
 `);
       await runAndExpectPassing(5);
 
-      await page.goto(interviewUrl("remove-duplicates-from-sorted-array-ii"), { waitUntil: "domcontentloaded" });
+      await page.goto(interviewUrl("remove-duplicates-from-sorted-array-ii"), {
+        waitUntil: "domcontentloaded",
+      });
       await clearMediaGate(page);
-      await page.getByRole("heading", { name: scenarioTitle("remove-duplicates-from-sorted-array-ii"), level: 1 }).waitFor();
+      await page
+        .getByRole("heading", {
+          name: scenarioTitle("remove-duplicates-from-sorted-array-ii"),
+          level: 1,
+        })
+        .waitFor();
       await page.getByText("Offline", { exact: true }).waitFor();
       await page.getByRole("button", { name: "JavaScript" }).click();
-      await page.getByLabel("Code editor").fill(`function capRepeatsAtTwo(nums) {
+      await page.getByLabel("Code editor")
+        .fill(`function capRepeatsAtTwo(nums) {
   let write = 0;
   for (const value of nums) {
     if (write < 2 || nums[write - 2] !== value) {
@@ -804,7 +1116,8 @@ int* matchDisputedCharge(int* nums, int numsSize, int target, int* returnSize) {
       await page.getByRole("button", { name: /Run tests/ }).click();
       await page.getByRole("button", { name: "Run tests" }).waitFor();
       await page.getByText("Test results · 0/5").waitFor();
-      await page.getByLabel("Code editor").fill(`function capRepeatsAtTwo(nums) {
+      await page.getByLabel("Code editor")
+        .fill(`function capRepeatsAtTwo(nums) {
   let write = 0;
   for (const value of nums) {
     if (write < 2 || nums[write - 2] !== value) {
@@ -816,12 +1129,20 @@ int* matchDisputedCharge(int* nums, int numsSize, int target, int* returnSize) {
 `);
       await runAndExpectPassing(5);
 
-      await page.goto(interviewUrl("merge-two-sorted-lists"), { waitUntil: "domcontentloaded" });
+      await page.goto(interviewUrl("merge-two-sorted-lists"), {
+        waitUntil: "domcontentloaded",
+      });
       await clearMediaGate(page);
-      await page.getByRole("heading", { name: scenarioTitle("merge-two-sorted-lists"), level: 1 }).waitFor();
+      await page
+        .getByRole("heading", {
+          name: scenarioTitle("merge-two-sorted-lists"),
+          level: 1,
+        })
+        .waitFor();
       await page.getByText("Offline", { exact: true }).waitFor();
       await page.getByRole("button", { name: "JavaScript" }).click();
-      await page.getByLabel("Code editor").fill(`function interleaveEvents(list1, list2) {
+      await page.getByLabel("Code editor")
+        .fill(`function interleaveEvents(list1, list2) {
   const dummy = new ListNode();
   let tail = dummy;
   while (list1 && list2) {
@@ -840,12 +1161,20 @@ int* matchDisputedCharge(int* nums, int numsSize, int target, int* returnSize) {
 `);
       await runAndExpectPassing(5);
 
-      await page.goto(interviewUrl("copy-list-with-random-pointer"), { waitUntil: "domcontentloaded" });
+      await page.goto(interviewUrl("copy-list-with-random-pointer"), {
+        waitUntil: "domcontentloaded",
+      });
       await clearMediaGate(page);
-      await page.getByRole("heading", { name: scenarioTitle("copy-list-with-random-pointer"), level: 1 }).waitFor();
+      await page
+        .getByRole("heading", {
+          name: scenarioTitle("copy-list-with-random-pointer"),
+          level: 1,
+        })
+        .waitFor();
       await page.getByText("Offline", { exact: true }).waitFor();
       await page.getByRole("button", { name: "JavaScript" }).click();
-      await page.getByLabel("Code editor").fill(`function snapshotOutline(head) {
+      await page.getByLabel("Code editor")
+        .fill(`function snapshotOutline(head) {
   if (!head) return null;
   const copies = new Map();
   for (let node = head; node; node = node.next) copies.set(node, new _Node(node.val));
@@ -858,12 +1187,17 @@ int* matchDisputedCharge(int* nums, int numsSize, int target, int* returnSize) {
 `);
       await runAndExpectPassing(5);
 
-      await page.goto(interviewUrl("rotate-list"), { waitUntil: "domcontentloaded" });
+      await page.goto(interviewUrl("rotate-list"), {
+        waitUntil: "domcontentloaded",
+      });
       await clearMediaGate(page);
-      await page.getByRole("heading", { name: scenarioTitle("rotate-list"), level: 1 }).waitFor();
+      await page
+        .getByRole("heading", { name: scenarioTitle("rotate-list"), level: 1 })
+        .waitFor();
       await page.getByText("Offline", { exact: true }).waitFor();
       await page.getByRole("button", { name: "JavaScript" }).click();
-      await page.getByLabel("Code editor").fill(`function wrapPlaylistTail(head, k) {
+      await page.getByLabel("Code editor")
+        .fill(`function wrapPlaylistTail(head, k) {
   if (!head || !head.next) return head;
   let tail = head;
   let length = 1;
@@ -883,9 +1217,16 @@ int* matchDisputedCharge(int* nums, int numsSize, int target, int* returnSize) {
 `);
       await runAndExpectPassing(5);
 
-      await page.goto(interviewUrl("invert-binary-tree"), { waitUntil: "domcontentloaded" });
+      await page.goto(interviewUrl("invert-binary-tree"), {
+        waitUntil: "domcontentloaded",
+      });
       await clearMediaGate(page);
-      await page.getByRole("heading", { name: scenarioTitle("invert-binary-tree"), level: 1 }).waitFor();
+      await page
+        .getByRole("heading", {
+          name: scenarioTitle("invert-binary-tree"),
+          level: 1,
+        })
+        .waitFor();
       await page.getByText("Offline", { exact: true }).waitFor();
       await page.getByRole("button", { name: "JavaScript" }).click();
       await page.getByLabel("Code editor").fill(`function mirrorLayout(root) {
@@ -898,12 +1239,25 @@ int* matchDisputedCharge(int* nums, int numsSize, int target, int* returnSize) {
 `);
       await runAndExpectPassing(5);
 
-      await page.goto(interviewUrl("construct-binary-tree-from-preorder-and-inorder-traversal"), { waitUntil: "domcontentloaded" });
+      await page.goto(
+        interviewUrl(
+          "construct-binary-tree-from-preorder-and-inorder-traversal",
+        ),
+        { waitUntil: "domcontentloaded" },
+      );
       await clearMediaGate(page);
-      await page.getByRole("heading", { name: scenarioTitle("construct-binary-tree-from-preorder-and-inorder-traversal"), level: 1 }).waitFor();
+      await page
+        .getByRole("heading", {
+          name: scenarioTitle(
+            "construct-binary-tree-from-preorder-and-inorder-traversal",
+          ),
+          level: 1,
+        })
+        .waitFor();
       await page.getByText("Offline", { exact: true }).waitFor();
       await page.getByRole("button", { name: "JavaScript" }).click();
-      await page.getByLabel("Code editor").fill(`function rebuildFromDumps(preorder, inorder) {
+      await page.getByLabel("Code editor")
+        .fill(`function rebuildFromDumps(preorder, inorder) {
   const positions = new Map(inorder.map((value, index) => [value, index]));
   let preIndex = 0;
   function build(left, right) {
@@ -920,12 +1274,21 @@ int* matchDisputedCharge(int* nums, int numsSize, int target, int* returnSize) {
 `);
       await runAndExpectPassing(5);
 
-      await page.goto(interviewUrl("populating-next-right-pointers-in-each-node-ii"), { waitUntil: "domcontentloaded" });
+      await page.goto(
+        interviewUrl("populating-next-right-pointers-in-each-node-ii"),
+        { waitUntil: "domcontentloaded" },
+      );
       await clearMediaGate(page);
-      await page.getByRole("heading", { name: scenarioTitle("populating-next-right-pointers-in-each-node-ii"), level: 1 }).waitFor();
+      await page
+        .getByRole("heading", {
+          name: scenarioTitle("populating-next-right-pointers-in-each-node-ii"),
+          level: 1,
+        })
+        .waitFor();
       await page.getByText("Offline", { exact: true }).waitFor();
       await page.getByRole("button", { name: "JavaScript" }).click();
-      await page.getByLabel("Code editor").fill(`function linkRowNeighbors(root) {
+      await page.getByLabel("Code editor")
+        .fill(`function linkRowNeighbors(root) {
   let level = root;
   while (level) {
     const dummy = new _Node(0);
@@ -941,12 +1304,20 @@ int* matchDisputedCharge(int* nums, int numsSize, int target, int* returnSize) {
 `);
       await runAndExpectPassing(5);
 
-      await page.goto(interviewUrl("binary-search-tree-iterator"), { waitUntil: "domcontentloaded" });
+      await page.goto(interviewUrl("binary-search-tree-iterator"), {
+        waitUntil: "domcontentloaded",
+      });
       await clearMediaGate(page);
-      await page.getByRole("heading", { name: scenarioTitle("binary-search-tree-iterator"), level: 1 }).waitFor();
+      await page
+        .getByRole("heading", {
+          name: scenarioTitle("binary-search-tree-iterator"),
+          level: 1,
+        })
+        .waitFor();
       await page.getByText("Offline", { exact: true }).waitFor();
       await page.getByRole("button", { name: "JavaScript" }).click();
-      await page.getByLabel("Code editor").fill(`var OrderedCursor = function(root) {
+      await page.getByLabel("Code editor")
+        .fill(`var OrderedCursor = function(root) {
   this.stack = [];
   this.pushLeft(root);
 };
@@ -970,12 +1341,20 @@ OrderedCursor.prototype.hasNext = function() {
 `);
       await runAndExpectPassing(5);
 
-      await page.goto(interviewUrl("lowest-common-ancestor-of-a-binary-tree"), { waitUntil: "domcontentloaded" });
+      await page.goto(interviewUrl("lowest-common-ancestor-of-a-binary-tree"), {
+        waitUntil: "domcontentloaded",
+      });
       await clearMediaGate(page);
-      await page.getByRole("heading", { name: scenarioTitle("lowest-common-ancestor-of-a-binary-tree"), level: 1 }).waitFor();
+      await page
+        .getByRole("heading", {
+          name: scenarioTitle("lowest-common-ancestor-of-a-binary-tree"),
+          level: 1,
+        })
+        .waitFor();
       await page.getByText("Offline", { exact: true }).waitFor();
       await page.getByRole("button", { name: "JavaScript" }).click();
-      await page.getByLabel("Code editor").fill(`function nearestSharedApprover(root, p, q) {
+      await page.getByLabel("Code editor")
+        .fill(`function nearestSharedApprover(root, p, q) {
   if (!root || root === p || root === q) return root;
   const left = nearestSharedApprover(root.left, p, q);
   const right = nearestSharedApprover(root.right, p, q);
@@ -985,12 +1364,21 @@ OrderedCursor.prototype.hasNext = function() {
 `);
       await runAndExpectPassing(6);
 
-      await page.goto(interviewUrl("binary-tree-zigzag-level-order-traversal"), { waitUntil: "domcontentloaded" });
+      await page.goto(
+        interviewUrl("binary-tree-zigzag-level-order-traversal"),
+        { waitUntil: "domcontentloaded" },
+      );
       await clearMediaGate(page);
-      await page.getByRole("heading", { name: scenarioTitle("binary-tree-zigzag-level-order-traversal"), level: 1 }).waitFor();
+      await page
+        .getByRole("heading", {
+          name: scenarioTitle("binary-tree-zigzag-level-order-traversal"),
+          level: 1,
+        })
+        .waitFor();
       await page.getByText("Offline", { exact: true }).waitFor();
       await page.getByRole("button", { name: "JavaScript" }).click();
-      await page.getByLabel("Code editor").fill(`function serpentineSweep(root) {
+      await page.getByLabel("Code editor")
+        .fill(`function serpentineSweep(root) {
   if (!root) return [];
   const rows = [];
   let queue = [root];
@@ -1013,12 +1401,20 @@ OrderedCursor.prototype.hasNext = function() {
 `);
       await runAndExpectPassing(5);
 
-      await page.goto(interviewUrl("validate-binary-search-tree"), { waitUntil: "domcontentloaded" });
+      await page.goto(interviewUrl("validate-binary-search-tree"), {
+        waitUntil: "domcontentloaded",
+      });
       await clearMediaGate(page);
-      await page.getByRole("heading", { name: scenarioTitle("validate-binary-search-tree"), level: 1 }).waitFor();
+      await page
+        .getByRole("heading", {
+          name: scenarioTitle("validate-binary-search-tree"),
+          level: 1,
+        })
+        .waitFor();
       await page.getByText("Offline", { exact: true }).waitFor();
       await page.getByRole("button", { name: "JavaScript" }).click();
-      await page.getByLabel("Code editor").fill(`function indexOrderingHolds(root) {
+      await page.getByLabel("Code editor")
+        .fill(`function indexOrderingHolds(root) {
   function valid(node, low, high) {
     if (!node) return true;
     if (node.val <= low || node.val >= high) return false;
@@ -1029,12 +1425,17 @@ OrderedCursor.prototype.hasNext = function() {
 `);
       await runAndExpectPassing(7);
 
-      await page.goto(interviewUrl("clone-graph"), { waitUntil: "domcontentloaded" });
+      await page.goto(interviewUrl("clone-graph"), {
+        waitUntil: "domcontentloaded",
+      });
       await clearMediaGate(page);
-      await page.getByRole("heading", { name: scenarioTitle("clone-graph"), level: 1 }).waitFor();
+      await page
+        .getByRole("heading", { name: scenarioTitle("clone-graph"), level: 1 })
+        .waitFor();
       await page.getByText("Offline", { exact: true }).waitFor();
       await page.getByRole("button", { name: "JavaScript" }).click();
-      await page.getByLabel("Code editor").fill(`function replicateTopology(node) {
+      await page.getByLabel("Code editor")
+        .fill(`function replicateTopology(node) {
   if (!node) return null;
   const copies = new Map();
   function clone(current) {
@@ -1049,12 +1450,20 @@ OrderedCursor.prototype.hasNext = function() {
 `);
       await runAndExpectPassing(5);
 
-      await page.goto(interviewUrl("course-schedule-ii"), { waitUntil: "domcontentloaded" });
+      await page.goto(interviewUrl("course-schedule-ii"), {
+        waitUntil: "domcontentloaded",
+      });
       await clearMediaGate(page);
-      await page.getByRole("heading", { name: scenarioTitle("course-schedule-ii"), level: 1 }).waitFor();
+      await page
+        .getByRole("heading", {
+          name: scenarioTitle("course-schedule-ii"),
+          level: 1,
+        })
+        .waitFor();
       await page.getByText("Offline", { exact: true }).waitFor();
       await page.getByRole("button", { name: "JavaScript" }).click();
-      await page.getByLabel("Code editor").fill(`function planMigrationOrder(migrationCount, dependencies) {
+      await page.getByLabel("Code editor")
+        .fill(`function planMigrationOrder(migrationCount, dependencies) {
   const graph = Array.from({ length: migrationCount }, () => []);
   const indegree = Array(migrationCount).fill(0);
   for (const [migration, dependency] of dependencies) {
@@ -1078,9 +1487,16 @@ OrderedCursor.prototype.hasNext = function() {
 `);
       await runAndExpectPassing(5);
 
-      await page.goto(interviewUrl("implement-trie-prefix-tree"), { waitUntil: "domcontentloaded" });
+      await page.goto(interviewUrl("implement-trie-prefix-tree"), {
+        waitUntil: "domcontentloaded",
+      });
       await clearMediaGate(page);
-      await page.getByRole("heading", { name: scenarioTitle("implement-trie-prefix-tree"), level: 1 }).waitFor();
+      await page
+        .getByRole("heading", {
+          name: scenarioTitle("implement-trie-prefix-tree"),
+          level: 1,
+        })
+        .waitFor();
       await page.getByText("Offline", { exact: true }).waitFor();
       await page.getByRole("button", { name: "JavaScript" }).click();
       await page.getByLabel("Code editor").fill(`var CommandIndex = function() {
@@ -1117,12 +1533,21 @@ CommandIndex.prototype.find = function(text) {
 `);
       await runAndExpectPassing(5);
 
-      await page.goto(interviewUrl("design-add-and-search-words-data-structure"), { waitUntil: "domcontentloaded" });
+      await page.goto(
+        interviewUrl("design-add-and-search-words-data-structure"),
+        { waitUntil: "domcontentloaded" },
+      );
       await clearMediaGate(page);
-      await page.getByRole("heading", { name: scenarioTitle("design-add-and-search-words-data-structure"), level: 1 }).waitFor();
+      await page
+        .getByRole("heading", {
+          name: scenarioTitle("design-add-and-search-words-data-structure"),
+          level: 1,
+        })
+        .waitFor();
       await page.getByText("Offline", { exact: true }).waitFor();
       await page.getByRole("button", { name: "JavaScript" }).click();
-      await page.getByLabel("Code editor").fill(`var PatternLexicon = function() {
+      await page.getByLabel("Code editor")
+        .fill(`var PatternLexicon = function() {
   this.children = new Map();
   this.word = false;
 };
@@ -1154,12 +1579,20 @@ PatternLexicon.prototype.search = function(word) {
 `);
       await runAndExpectPassing(5);
 
-      await page.goto(interviewUrl("combination-sum"), { waitUntil: "domcontentloaded" });
+      await page.goto(interviewUrl("combination-sum"), {
+        waitUntil: "domcontentloaded",
+      });
       await clearMediaGate(page);
-      await page.getByRole("heading", { name: scenarioTitle("combination-sum"), level: 1 }).waitFor();
+      await page
+        .getByRole("heading", {
+          name: scenarioTitle("combination-sum"),
+          level: 1,
+        })
+        .waitFor();
       await page.getByText("Offline", { exact: true }).waitFor();
       await page.getByRole("button", { name: "JavaScript" }).click();
-      await page.getByLabel("Code editor").fill(`function listPalletLoadouts(candidates, target) {
+      await page.getByLabel("Code editor")
+        .fill(`function listPalletLoadouts(candidates, target) {
   candidates.sort((a, b) => a - b);
   const results = [];
   function dfs(start, remain, path) {
@@ -1179,12 +1612,17 @@ PatternLexicon.prototype.search = function(word) {
 `);
       await runAndExpectPassing(5);
 
-      await page.goto(interviewUrl("permutations"), { waitUntil: "domcontentloaded" });
+      await page.goto(interviewUrl("permutations"), {
+        waitUntil: "domcontentloaded",
+      });
       await clearMediaGate(page);
-      await page.getByRole("heading", { name: scenarioTitle("permutations"), level: 1 }).waitFor();
+      await page
+        .getByRole("heading", { name: scenarioTitle("permutations"), level: 1 })
+        .waitFor();
       await page.getByText("Offline", { exact: true }).waitFor();
       await page.getByRole("button", { name: "JavaScript" }).click();
-      await page.getByLabel("Code editor").fill(`function allStartupOrders(nums) {
+      await page.getByLabel("Code editor")
+        .fill(`function allStartupOrders(nums) {
   const results = [];
   function dfs(path, used) {
     if (path.length === nums.length) {
@@ -1206,12 +1644,20 @@ PatternLexicon.prototype.search = function(word) {
 `);
       await runAndExpectPassing(5);
 
-      await page.goto(interviewUrl("generate-parentheses"), { waitUntil: "domcontentloaded" });
+      await page.goto(interviewUrl("generate-parentheses"), {
+        waitUntil: "domcontentloaded",
+      });
       await clearMediaGate(page);
-      await page.getByRole("heading", { name: scenarioTitle("generate-parentheses"), level: 1 }).waitFor();
+      await page
+        .getByRole("heading", {
+          name: scenarioTitle("generate-parentheses"),
+          level: 1,
+        })
+        .waitFor();
       await page.getByText("Offline", { exact: true }).waitFor();
       await page.getByRole("button", { name: "JavaScript" }).click();
-      await page.getByLabel("Code editor").fill(`function wellNestedSequences(n) {
+      await page.getByLabel("Code editor")
+        .fill(`function wellNestedSequences(n) {
   const results = [];
   function dfs(open, close, path) {
     if (path.length === n * 2) {
@@ -1227,9 +1673,13 @@ PatternLexicon.prototype.search = function(word) {
 `);
       await runAndExpectPassing(5);
 
-      await page.goto(interviewUrl("n-queens-ii"), { waitUntil: "domcontentloaded" });
+      await page.goto(interviewUrl("n-queens-ii"), {
+        waitUntil: "domcontentloaded",
+      });
       await clearMediaGate(page);
-      await page.getByRole("heading", { name: scenarioTitle("n-queens-ii"), level: 1 }).waitFor();
+      await page
+        .getByRole("heading", { name: scenarioTitle("n-queens-ii"), level: 1 })
+        .waitFor();
       await page.getByText("Offline", { exact: true }).waitFor();
       await page.getByRole("button", { name: "JavaScript" }).click();
       await page.getByLabel("Code editor").fill(`function countSafeLayouts(n) {
@@ -1259,12 +1709,17 @@ PatternLexicon.prototype.search = function(word) {
 `);
       await runAndExpectPassing(5);
 
-      await page.goto(interviewUrl("word-search"), { waitUntil: "domcontentloaded" });
+      await page.goto(interviewUrl("word-search"), {
+        waitUntil: "domcontentloaded",
+      });
       await clearMediaGate(page);
-      await page.getByRole("heading", { name: scenarioTitle("word-search"), level: 1 }).waitFor();
+      await page
+        .getByRole("heading", { name: scenarioTitle("word-search"), level: 1 })
+        .waitFor();
       await page.getByText("Offline", { exact: true }).waitFor();
       await page.getByRole("button", { name: "JavaScript" }).click();
-      await page.getByLabel("Code editor").fill(`function canTraceWord(board, word) {
+      await page.getByLabel("Code editor")
+        .fill(`function canTraceWord(board, word) {
   function dfs(row, col, index) {
     if (index === word.length) return true;
     if (row < 0 || col < 0 || row === board.length || col === board[0].length) return false;
@@ -1288,12 +1743,21 @@ PatternLexicon.prototype.search = function(word) {
 `);
       await runAndExpectPassing(5);
 
-      await page.goto(interviewUrl("convert-sorted-array-to-binary-search-tree"), { waitUntil: "domcontentloaded" });
+      await page.goto(
+        interviewUrl("convert-sorted-array-to-binary-search-tree"),
+        { waitUntil: "domcontentloaded" },
+      );
       await clearMediaGate(page);
-      await page.getByRole("heading", { name: scenarioTitle("convert-sorted-array-to-binary-search-tree"), level: 1 }).waitFor();
+      await page
+        .getByRole("heading", {
+          name: scenarioTitle("convert-sorted-array-to-binary-search-tree"),
+          level: 1,
+        })
+        .waitFor();
       await page.getByText("Offline", { exact: true }).waitFor();
       await page.getByRole("button", { name: "JavaScript" }).click();
-      await page.getByLabel("Code editor").fill(`function buildBalancedIndex(nums) {
+      await page.getByLabel("Code editor")
+        .fill(`function buildBalancedIndex(nums) {
   function build(left, right) {
     if (left > right) return null;
     const mid = Math.floor((left + right) / 2);
@@ -1305,13 +1769,28 @@ PatternLexicon.prototype.search = function(word) {
       await runAndExpectPassing(5);
 
       await page.getByRole("button", { name: "End interview" }).click();
-      await page.getByRole("heading", { name: "No evaluation" }).waitFor({ timeout: 30000 });
-      const report = await page.evaluate(() => JSON.parse(localStorage.getItem("codetrial_history") || "[]")[0]?.report || null);
-      if (!report?.incomplete || "codingScore" in report || "decision" in report) throw new Error("offline activity was presented as personalized evaluation");
+      await page
+        .getByRole("heading", { name: "No evaluation" })
+        .waitFor({ timeout: 30000 });
+      const report = await page.evaluate(
+        () =>
+          JSON.parse(localStorage.getItem("codetrial_history") || "[]")[0]
+            ?.report || null,
+      );
+      if (
+        !report?.incomplete ||
+        "codingScore" in report ||
+        "decision" in report
+      )
+        throw new Error(
+          "offline activity was presented as personalized evaluation",
+        );
       return;
     }
 
-    await page.context().grantPermissions(["microphone", "camera"], { origin: process.env.BASE_URL });
+    await page.context().grantPermissions(["microphone", "camera"], {
+      origin: process.env.BASE_URL,
+    });
     if (credentialed) {
       const fixedRoom = process.env.BROWSER_CHECK_FIXED_ROOM === "1";
       if (fixedRoom) {
@@ -1322,12 +1801,17 @@ PatternLexicon.prototype.search = function(word) {
         await page.addInitScript(() => {
           const originalFetch = window.fetch.bind(window);
           window.fetch = async (input, init) => {
-            const url = typeof input === "string" ? input : (input && input.url) || "";
+            const url =
+              typeof input === "string" ? input : (input && input.url) || "";
             const response = await originalFetch(input, init);
             if (url.endsWith("/api/token") && response.ok) {
-              response.clone().json().then((body) => {
-                window.__BROWSER_CHECK_TOKEN_RESPONSE = body;
-              }).catch(() => {});
+              response
+                .clone()
+                .json()
+                .then((body) => {
+                  window.__BROWSER_CHECK_TOKEN_RESPONSE = body;
+                })
+                .catch(() => {});
             }
             return response;
           };
@@ -1339,10 +1823,15 @@ PatternLexicon.prototype.search = function(word) {
     await clearMediaGate(page);
     if (credentialed && !rustAgentIdentity) {
       roomName = await page
-        .waitForFunction(() => window.__BROWSER_CHECK_TOKEN_RESPONSE?.roomName, null, { timeout: 30000 })
+        .waitForFunction(
+          () => window.__BROWSER_CHECK_TOKEN_RESPONSE?.roomName,
+          null,
+          { timeout: 30000 },
+        )
         .then((handle) => handle.jsonValue())
         .catch(() => null);
-      if (!roomName) throw new Error("server /api/token did not return a room name");
+      if (!roomName)
+        throw new Error("server /api/token did not return a room name");
       rustAgentIdentity = `interviewer-${roomName}`;
       // In dispatch mode the server starts the interviewer, and this script
       // must not: a second one in the room would be evicted by the first.
@@ -1351,13 +1840,18 @@ PatternLexicon.prototype.search = function(word) {
     await Promise.race([
       (async () => {
         if (mode === "rust") {
-          rustAgentParticipants = await isolateRustAgent(roomName, rustAgentIdentity);
+          rustAgentParticipants = await isolateRustAgent(
+            roomName,
+            rustAgentIdentity,
+          );
           const started = Date.now();
           while (!sawRustMetadataConfig && Date.now() - started < 120000) {
             await page.waitForTimeout(500);
           }
           if (!sawRustMetadataConfig) {
-            throw new Error(`rust agent did not use candidate metadata\n${agentOutput.join("")}`);
+            throw new Error(
+              `rust agent did not use candidate metadata\n${agentOutput.join("")}`,
+            );
           }
         }
         // With real credentials the room join must actually succeed. Offline
@@ -1368,19 +1862,34 @@ PatternLexicon.prototype.search = function(word) {
         // open underneath. Nothing in the gate could see that, so it is checked
         // here, where credentials exist.
         if (credentialed) {
-          const offline = consoleErrors.filter((line) => /codetrial connect_failed/.test(line));
+          const offline = consoleErrors.filter((line) =>
+            /codetrial connect_failed/.test(line),
+          );
           if (offline.length) {
-            throw new Error(`the interview fell back to offline practice with real credentials:\n${offline.join("\n")}`);
+            throw new Error(
+              `the interview fell back to offline practice with real credentials:\n${offline.join("\n")}`,
+            );
           }
-          const pill = await page.locator("#agent-state").innerText().catch(() => "");
-          if (/Offline/.test(pill)) throw new Error("the interview joined no room; the status pill reads Offline");
+          const pill = await page
+            .locator("#agent-state")
+            .innerText()
+            .catch(() => "");
+          if (/Offline/.test(pill))
+            throw new Error(
+              "the interview joined no room; the status pill reads Offline",
+            );
         }
-        const problemTitle = await page.getByRole("heading", { name: scenarioTitle("two-sum"), level: 1 }).innerText();
+        const problemTitle = await page
+          .getByRole("heading", { name: scenarioTitle("two-sum"), level: 1 })
+          .innerText();
         // Scoped to the pill. The captions element also renders the literal
         // word "Listening" as its placeholder, so an unscoped text match hits
         // two elements; it only ever looked unambiguous because the pill was
         // stuck on "Waiting" while the connect bug was live.
-        await page.locator("#agent-state").filter({ hasText: /Listening|Thinking|Speaking/ }).waitFor({ timeout: 120000 });
+        await page
+          .locator("#agent-state")
+          .filter({ hasText: /Listening|Thinking|Speaking/ })
+          .waitFor({ timeout: 120000 });
         if (mode === "dispatch") {
           // Who actually staffed the room. The pill turning green only proves
           // that some agent arrived; this proves it was the one this server
@@ -1388,7 +1897,9 @@ PatternLexicon.prototype.search = function(word) {
           // stray worker registered on the LiveKit project covering for it.
           const staffing = await listRoomParticipants(roomName);
           rustAgentParticipants = agentParticipantIdentities(staffing);
-          const identities = staffing.map((participant) => participant.identity);
+          const identities = staffing.map(
+            (participant) => participant.identity,
+          );
           if (!identities.includes(rustAgentIdentity)) {
             throw new Error(
               `the server did not staff the room it minted; participants: ${JSON.stringify(identities)}`,
@@ -1396,7 +1907,9 @@ PatternLexicon.prototype.search = function(word) {
           }
         }
         await page.getByRole("button", { name: "Transcript" }).click();
-        await page.getByText("No conversation yet").waitFor({ state: "detached", timeout: 120000 });
+        await page
+          .getByText("No conversation yet")
+          .waitFor({ state: "detached", timeout: 120000 });
         if (flow === "soak") {
           await soakInterview(page, roomName, rustAgentIdentity, agentOutput);
         }
@@ -1405,69 +1918,126 @@ PatternLexicon.prototype.search = function(word) {
         let agentAfterCandidate = false;
         if (flow === "report") {
           await page.getByRole("button", { name: /Run tests/ }).click();
-          await page.getByText(/Test results · \d+\/\d+|Couldn't run your code/).waitFor({ timeout: 180000 });
-          testResultText = await page.locator("text=/Test results · \\d+\\/\\d+|Couldn't run your code/").first().innerText();
+          await page
+            .getByText(/Test results · \d+\/\d+|Couldn't run your code/)
+            .waitFor({ timeout: 180000 });
+          testResultText = await page
+            .locator("text=/Test results · \\d+\\/\\d+|Couldn't run your code/")
+            .first()
+            .innerText();
           if (mode === "rust") {
-            rustAgentParticipants = await isolateRustAgent(roomName, rustAgentIdentity, 10000);
+            rustAgentParticipants = await isolateRustAgent(
+              roomName,
+              rustAgentIdentity,
+              10000,
+            );
           }
           await page.getByRole("button", { name: "End interview" }).click();
-          await page.getByRole("heading", { name: "Your performance packet" }).waitFor({ timeout: 240000 });
+          await page
+            .getByRole("heading", { name: "Your performance packet" })
+            .waitFor({ timeout: 240000 });
         } else if (flow === "barge") {
-          await page.locator("#agent-state").filter({ hasText: "Speaking" }).waitFor({ timeout: 120000 });
-          const candidateLabels = page.locator("p").filter({ hasText: /^You$/ });
+          await page
+            .locator("#agent-state")
+            .filter({ hasText: "Speaking" })
+            .waitFor({ timeout: 120000 });
+          const candidateLabels = page
+            .locator("p")
+            .filter({ hasText: /^You$/ });
           await candidateLabels.first().waitFor({ timeout: 180000 });
           candidateSegmentCount = await candidateLabels.count();
           const started = Date.now();
           while (!agentAfterCandidate && Date.now() - started < 180000) {
             agentAfterCandidate = await page.evaluate(() => {
-              const paragraphs = [...document.querySelectorAll("p")].map((node) => node.textContent?.trim() ?? "");
+              const paragraphs = [...document.querySelectorAll("p")].map(
+                (node) => node.textContent?.trim() ?? "",
+              );
               const firstYou = paragraphs.findIndex((text) => text === "You");
               if (firstYou === -1) return false;
               return paragraphs
                 .slice(firstYou + 1)
-                .some((text) => text === "Jim" || /\b(go ahead|listening|stopped|proceed|take the floor|sure)\b/i.test(text));
+                .some(
+                  (text) =>
+                    text === "Jim" ||
+                    /\b(go ahead|listening|stopped|proceed|take the floor|sure)\b/i.test(
+                      text,
+                    ),
+                );
             });
             if (!agentAfterCandidate) await page.waitForTimeout(500);
           }
           if (!agentAfterCandidate) {
-            throw new Error(`agent did not respond after candidate barge-in\n${agentOutput.join("")}`);
+            throw new Error(
+              `agent did not respond after candidate barge-in\n${agentOutput.join("")}`,
+            );
           }
         }
         if (process.env.BROWSER_CHECK_CAPTURE) {
           if (mode === "rust" && flow !== "report") {
-            rustAgentParticipants = await isolateRustAgent(roomName, rustAgentIdentity, 10000);
+            rustAgentParticipants = await isolateRustAgent(
+              roomName,
+              rustAgentIdentity,
+              10000,
+            );
           }
-          const speakerLabels = (await page.locator("p").filter({ hasText: /^(Jim|You)$/ }).allInnerTexts()).map((label) => label.trim().toLowerCase());
-          const report = flow === "report"
-            ? await page.evaluate(() => {
-                const history = JSON.parse(localStorage.getItem("codetrial_history") ?? "[]");
-                return history[0]?.report ?? null;
-              })
-            : null;
-          const agentState = flow === "report"
-            ? null
-            : (await page.locator("#agent-state").innerText()).replace(/\u2026/g, "");
-          fs.writeFileSync(process.env.BROWSER_CHECK_CAPTURE, JSON.stringify({
-            mode,
-            flow,
-            problemTitle,
-            agentState,
-            testResultText,
-            transcriptSegmentCount: speakerLabels.length,
-            firstTranscriptSpeaker: speakerLabels[0] ?? null,
-            candidateSegmentCount,
-            agentAfterCandidate,
-            rustAgentParticipants,
-            report,
-          }, null, 2));
+          const speakerLabels = (
+            await page
+              .locator("p")
+              .filter({ hasText: /^(Jim|You)$/ })
+              .allInnerTexts()
+          ).map((label) => label.trim().toLowerCase());
+          const report =
+            flow === "report"
+              ? await page.evaluate(() => {
+                  const history = JSON.parse(
+                    localStorage.getItem("codetrial_history") ?? "[]",
+                  );
+                  return history[0]?.report ?? null;
+                })
+              : null;
+          const agentState =
+            flow === "report"
+              ? null
+              : (await page.locator("#agent-state").innerText()).replace(
+                  /\u2026/g,
+                  "",
+                );
+          fs.writeFileSync(
+            process.env.BROWSER_CHECK_CAPTURE,
+            JSON.stringify(
+              {
+                mode,
+                flow,
+                problemTitle,
+                agentState,
+                testResultText,
+                transcriptSegmentCount: speakerLabels.length,
+                firstTranscriptSpeaker: speakerLabels[0] ?? null,
+                candidateSegmentCount,
+                agentAfterCandidate,
+                rustAgentParticipants,
+                report,
+              },
+              null,
+              2,
+            ),
+          );
         }
       })(),
       agentFailure ?? never,
     ]).catch(async (error) => {
-      console.error(redact(await page.locator("body").innerText().catch(() => "")));
+      console.error(
+        redact(
+          await page
+            .locator("body")
+            .innerText()
+            .catch(() => ""),
+        ),
+      );
       if (roomName) {
-        const participants = await listRoomParticipants(roomName)
-          .catch((apiError) => [`list failed: ${apiError.message}`]);
+        const participants = await listRoomParticipants(roomName).catch(
+          (apiError) => [`list failed: ${apiError.message}`],
+        );
         console.error(redact(JSON.stringify(participants, null, 2)));
       }
       if (agentOutput.length > 0) {
@@ -1481,7 +2051,10 @@ PatternLexicon.prototype.search = function(word) {
   } finally {
     agentDone = true;
     if (rustAgent) stopProcessGroup(rustAgent);
-    if (compilerExplorerMock) await new Promise((resolve) => compilerExplorerMock.server.close(resolve));
+    if (compilerExplorerMock)
+      await new Promise((resolve) =>
+        compilerExplorerMock.server.close(resolve),
+      );
     await browser.close();
   }
 })().catch((error) => {
@@ -1504,7 +2077,10 @@ function startCompilerExplorerMock() {
       response.writeHead(204, headers).end();
       return;
     }
-    if (request.method !== "POST" || !request.url.startsWith("/api/compiler/")) {
+    if (
+      request.method !== "POST" ||
+      !request.url.startsWith("/api/compiler/")
+    ) {
       response.writeHead(404).end();
       return;
     }
@@ -1516,22 +2092,24 @@ function startCompilerExplorerMock() {
     request.on("end", () => {
       const payload = JSON.parse(body || "{}");
       const source = payload.source || "";
-      const executes = payload.options?.compilerOptions?.executorRequest === true
-        && payload.options?.filters?.execute === true;
+      const executes =
+        payload.options?.compilerOptions?.executorRequest === true &&
+        payload.options?.filters?.execute === true;
       let stdout;
       if (
-        executes
-        && payload.options?.userArguments === "-O2 -std=c17"
-        && request.url.includes("/api/compiler/cclang1910/")
-        && source.includes("int* matchDisputedCharge")
-        && source.includes("int main(void)")
+        executes &&
+        payload.options?.userArguments === "-O2 -std=c17" &&
+        request.url.includes("/api/compiler/cclang1910/") &&
+        source.includes("int* matchDisputedCharge") &&
+        source.includes("int main(void)")
       ) {
-        stdout = "{\"results\":[{\"actual\":[0,1],\"timeMs\":1},{\"actual\":[1,2],\"timeMs\":1},{\"actual\":[0,1],\"timeMs\":1},{\"actual\":[0,2],\"timeMs\":1},{\"actual\":[1,2],\"timeMs\":1}]}";
+        stdout =
+          '{"results":[{"actual":[0,1],"timeMs":1},{"actual":[1,2],"timeMs":1},{"actual":[0,1],"timeMs":1},{"actual":[0,2],"timeMs":1},{"actual":[1,2],"timeMs":1}]}';
       } else if (
-        executes
-        && payload.options?.userArguments === "-O2 -std=c++20"
-        && request.url.includes("/api/compiler/g162/")
-        && [
+        executes &&
+        payload.options?.userArguments === "-O2 -std=c++20" &&
+        request.url.includes("/api/compiler/g162/") &&
+        [
           "class BidLedger",
           "jsonFragments(actual)",
           "BidLedger instance{}",
@@ -1541,30 +2119,39 @@ function startCompilerExplorerMock() {
           "instance.top()",
         ].every((pattern) => source.includes(pattern))
       ) {
-        stdout = "{\"results\":[{\"actual\":[null,null,null,null,-3,null,0,-2],\"timeMs\":1},{\"actual\":[null,null,null,null,1,null,1,null,2],\"timeMs\":1},{\"actual\":[null,null,null,3,3,null,5,5],\"timeMs\":1},{\"actual\":[null,null,null,null,-1,-1],\"timeMs\":1},{\"actual\":[null],\"timeMs\":1}]}";
+        stdout =
+          '{"results":[{"actual":[null,null,null,null,-3,null,0,-2],"timeMs":1},{"actual":[null,null,null,null,1,null,1,null,2],"timeMs":1},{"actual":[null,null,null,3,3,null,5,5],"timeMs":1},{"actual":[null,null,null,null,-1,-1],"timeMs":1},{"actual":[null],"timeMs":1}]}';
       } else if (
-        executes
-        && payload.options?.userArguments === ""
-        && request.url.includes("/api/compiler/java2501/")
-        && [
+        executes &&
+        payload.options?.userArguments === "" &&
+        request.url.includes("/api/compiler/java2501/") &&
+        [
           "class OrderedCursor",
           "new OrderedCursor(treeNode(new Integer[]{7, 3, 15, null, null, 9, 20}))",
           "actual.add(jsonAny(instance.next()))",
           "actual.add(jsonAny(instance.hasNext()))",
         ].every((pattern) => source.includes(pattern))
       ) {
-        stdout = "{\"results\":[{\"actual\":[null,3,7,true,9,true,15,true,20,false],\"timeMs\":1},{\"actual\":[null,true,1,false],\"timeMs\":1},{\"actual\":[null,1,2,3,false],\"timeMs\":1},{\"actual\":[null],\"timeMs\":1},{\"actual\":[null,1,2,false],\"timeMs\":1}]}";
+        stdout =
+          '{"results":[{"actual":[null,3,7,true,9,true,15,true,20,false],"timeMs":1},{"actual":[null,true,1,false],"timeMs":1},{"actual":[null,1,2,3,false],"timeMs":1},{"actual":[null],"timeMs":1},{"actual":[null,1,2,false],"timeMs":1}]}';
       } else {
         response.writeHead(400, headers);
-        response.end(JSON.stringify({ code: 1, stderr: "unexpected mock Compiler Explorer request" }));
+        response.end(
+          JSON.stringify({
+            code: 1,
+            stderr: "unexpected mock Compiler Explorer request",
+          }),
+        );
         return;
       }
       response.writeHead(200, headers);
-      response.end(JSON.stringify({
-        code: 0,
-        didExecute: true,
-        stdout,
-      }));
+      response.end(
+        JSON.stringify({
+          code: 0,
+          didExecute: true,
+          stdout,
+        }),
+      );
     });
   });
   return new Promise((resolve) => {

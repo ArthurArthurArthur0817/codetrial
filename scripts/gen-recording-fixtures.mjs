@@ -62,7 +62,9 @@ function jwt(secret, claims) {
   const signingInput = `${base64url(JSON.stringify({ alg: "HS256", typ: "JWT" }))}.${base64url(
     JSON.stringify(claims),
   )}`;
-  const signature = createHmac("sha256", secret).update(signingInput).digest("base64url");
+  const signature = createHmac("sha256", secret)
+    .update(signingInput)
+    .digest("base64url");
   return `${signingInput}.${signature}`;
 }
 
@@ -71,7 +73,11 @@ function jwt(secret, claims) {
 // whose hash happens to contain a 62nd or 63rd character.
 const bodyDigest = (body) => createHash("sha256").update(body).digest("base64");
 
-function webhookAuthorization(secret, body, { issuedAt = ISSUED_AT, key = API_KEY } = {}) {
+function webhookAuthorization(
+  secret,
+  body,
+  { issuedAt = ISSUED_AT, key = API_KEY } = {},
+) {
   return jwt(secret, {
     iss: key,
     nbf: issuedAt,
@@ -187,7 +193,9 @@ const cases = [
   {
     name: "another project's key",
     body: "webhook-egress-ended.json",
-    authorization: webhookAuthorization(API_SECRET, ENDED_BODY, { key: "APIotherproject" }),
+    authorization: webhookAuthorization(API_SECRET, ENDED_BODY, {
+      key: "APIotherproject",
+    }),
     verdict: "unknown_key",
   },
   {

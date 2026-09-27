@@ -22,14 +22,26 @@ export function createFaceCheck({
   onVerdict,
   checkMs = CHECK_MS,
 }) {
-  let state = { running: false, generation: 0, detector: null, ready: true, error: null };
+  let state = {
+    running: false,
+    generation: 0,
+    detector: null,
+    ready: true,
+    error: null,
+  };
 
   // Replaces the record rather than clearing five fields, so a field added
   // later cannot be left behind by a reset that predates it.
   const reset = () => {
     void state.detector?.close?.();
     video.srcObject = null;
-    state = { running: false, generation: state.generation + 1, detector: null, ready: true, error: null };
+    state = {
+      running: false,
+      generation: state.generation + 1,
+      detector: null,
+      ready: true,
+      error: null,
+    };
   };
 
   const start = async () => {

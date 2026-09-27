@@ -938,7 +938,10 @@ fn cited_source_ids_are_bounded_the_way_the_browser_bounds_them() {
         "web/lib.js must keep filtering citations to digits"
     );
     assert!(
-        browser.contains(".slice(0, 4).map((value) => value.slice(0, 12))"),
+        browser
+            .split_whitespace()
+            .collect::<String>()
+            .contains(".slice(0,4).map((value)=>value.slice(0,12))"),
         "web/lib.js must keep the same four-citation and twelve-character bounds"
     );
 }

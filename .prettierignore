@@ -1,0 +1,6 @@
+# Vendored assets must retain their pinned checksums.
+web/vendor/
+
+# Generated from problem-bank/ by scripts/gen-problems.py.
+web/problems/
+web/judges/

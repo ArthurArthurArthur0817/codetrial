@@ -3,14 +3,18 @@ import { LEVELS } from "./problem-picker.js";
 
 export const progressPhases = frameworkPhases;
 
-const phaseFramework = new Map(Object.values(FRAMEWORKS)
-  .flatMap((framework) => framework.steps.map((step) => [step.label, framework.name])));
+const phaseFramework = new Map(
+  Object.values(FRAMEWORKS).flatMap((framework) =>
+    framework.steps.map((step) => [step.label, framework.name]),
+  ),
+);
 
 /// Which weakness wordings the progress panel lists once: they may differ in
 /// case, spacing and a closing full stop, and in nothing that could change
 /// what the sentence says. A display key only; no report is accepted or
 /// refused on it.
-const weaknessKey = (tag) => tag.replace(/\s+/g, " ").trim().replace(/\.+$/, "").toLowerCase();
+const weaknessKey = (tag) =>
+  tag.replace(/\s+/g, " ").trim().replace(/\.+$/, "").toLowerCase();
 
 const allowedDifficulties = new Set(LEVELS);
 const allowedLanguages = new Set(["python", "javascript", "c", "cpp", "java"]);
@@ -22,12 +26,17 @@ const allowedLanguages = new Set(["python", "javascript", "c", "cpp", "java"]);
 /// through `pickerEntry`, and both unwrap here.
 function unwrapEntry(raw) {
   const wrapper = raw && typeof raw === "object" ? raw : {};
-  const entry = wrapper.payload && typeof wrapper.payload === "object" ? wrapper.payload : wrapper;
+  const entry =
+    wrapper.payload && typeof wrapper.payload === "object"
+      ? wrapper.payload
+      : wrapper;
   // The wrapper is the stored row and the payload is what the browser saved
   // into it. Only the row is guaranteed to carry the problem id, so it is the
   // fallback: without it the picker saw every account report as unattributed
   // and recommended problems the candidate had already passed.
-  return entry.problemId === undefined ? { ...entry, problemId: wrapper.problemId } : entry;
+  return entry.problemId === undefined
+    ? { ...entry, problemId: wrapper.problemId }
+    : entry;
 }
 
 /// What the lobby's picker reads: the entry as it was saved, with only the
@@ -43,7 +52,9 @@ export function pickerEntry(raw) {
 /// its date; an account row carries `createdAt` in seconds beside the payload.
 function entryTime(raw) {
   const wrapper = raw && typeof raw === "object" ? raw : {};
-  const dateValue = unwrapEntry(raw).date ?? (Number.isFinite(wrapper.createdAt) ? wrapper.createdAt * 1000 : null);
+  const dateValue =
+    unwrapEntry(raw).date ??
+    (Number.isFinite(wrapper.createdAt) ? wrapper.createdAt * 1000 : null);
   const at = dateValue == null ? NaN : new Date(dateValue).getTime();
   return Number.isFinite(at) ? at : null;
 }
@@ -52,14 +63,26 @@ export function normalizeProgressEntry(raw) {
   const wrapper = raw && typeof raw === "object" ? raw : {};
   const entry = unwrapEntry(raw);
   const report = sanitizeReport(entry.report);
-  const durationMin = Number.isInteger(entry.durationMin) && entry.durationMin >= 10 && entry.durationMin <= 90
-    ? entry.durationMin : null;
+  const durationMin =
+    Number.isInteger(entry.durationMin) &&
+    entry.durationMin >= 10 &&
+    entry.durationMin <= 90
+      ? entry.durationMin
+      : null;
   return {
     id: String(entry.id ?? wrapper.id ?? ""),
     at: entryTime(raw),
-    problemId: typeof entry.problemId === "string" ? entry.problemId : String(wrapper.problemId ?? ""),
-    problemTitle: typeof entry.problemTitle === "string" ? entry.problemTitle : "Past interview",
-    difficulty: allowedDifficulties.has(entry.difficulty) ? entry.difficulty : null,
+    problemId:
+      typeof entry.problemId === "string"
+        ? entry.problemId
+        : String(wrapper.problemId ?? ""),
+    problemTitle:
+      typeof entry.problemTitle === "string"
+        ? entry.problemTitle
+        : "Past interview",
+    difficulty: allowedDifficulties.has(entry.difficulty)
+      ? entry.difficulty
+      : null,
     language: allowedLanguages.has(entry.language) ? entry.language : null,
     durationMin,
     report,
@@ -85,25 +108,37 @@ export function buildProgressModel(rawEntries, filters = {}) {
 }
 
 export function progressModelFrom(normalized, filters = {}) {
-  const matches = (entry, key) => filters[key] == null || filters[key] === "all"
-    || String(entry[key]) === String(filters[key]);
-  const attempts = normalized.filter((entry) =>
-    matches(entry, "difficulty") && matches(entry, "language")
-    && matches(entry, "durationMin"));
+  const matches = (entry, key) =>
+    filters[key] == null ||
+    filters[key] === "all" ||
+    String(entry[key]) === String(filters[key]);
+  const attempts = normalized.filter(
+    (entry) =>
+      matches(entry, "difficulty") &&
+      matches(entry, "language") &&
+      matches(entry, "durationMin"),
+  );
   const series = Object.fromEntries(progressPhases.map((phase) => [phase, []]));
   const weaknessByPhase = new Map();
   let activeVersion = null;
   let activeSegments = null;
   for (const [attemptIndex, attempt] of attempts.entries()) {
-    const assessment = attempt.report.incomplete ? null : attempt.report.frameworkAssessment;
+    const assessment = attempt.report.incomplete
+      ? null
+      : attempt.report.frameworkAssessment;
     const version = assessment?.rubricVersion ?? null;
     if (version !== activeVersion) {
       activeVersion = version;
-      activeSegments = version === null ? null : Object.fromEntries(progressPhases.map((phase) => {
-        const segment = { rubricVersion: version, points: [] };
-        series[phase].push(segment);
-        return [phase, segment];
-      }));
+      activeSegments =
+        version === null
+          ? null
+          : Object.fromEntries(
+              progressPhases.map((phase) => {
+                const segment = { rubricVersion: version, points: [] };
+                series[phase].push(segment);
+                return [phase, segment];
+              }),
+            );
     }
     if (!assessment || !activeSegments) continue;
     for (const row of assessment.phases) {
@@ -117,14 +152,20 @@ export function progressModelFrom(normalized, filters = {}) {
       }
       const flagged = row.weaknessTags.length > 0;
       if (row.score === null && !flagged) continue;
-      const group = weaknessByPhase.get(row.phase) || { phase: row.phase, assessed: 0, reports: [] };
+      const group = weaknessByPhase.get(row.phase) || {
+        phase: row.phase,
+        assessed: 0,
+        reports: [],
+      };
       group.assessed += 1;
       if (flagged) group.reports.push(row.weaknessTags);
       weaknessByPhase.set(row.phase, group);
     }
   }
   for (const phase of progressPhases) {
-    series[phase] = series[phase].filter((segment) => segment.points.length > 0);
+    series[phase] = series[phase].filter(
+      (segment) => segment.points.length > 0,
+    );
   }
   // Grouped by phase, not by wording: the model words every report afresh, so
   // the same gap never matched itself across attempts. The phase is a closed
@@ -135,23 +176,41 @@ export function progressModelFrom(normalized, filters = {}) {
   const weaknesses = [...weaknessByPhase.values()]
     .filter((group) => group.reports.length > 0)
     .map(({ phase, assessed, reports }) => ({
-      phase, framework: phaseFramework.get(phase), count: reports.length, assessed, tags: newestWordings(reports),
+      phase,
+      framework: phaseFramework.get(phase),
+      count: reports.length,
+      assessed,
+      tags: newestWordings(reports),
     }))
-    .sort((left, right) => right.count - left.count
-      || progressPhases.indexOf(left.phase) - progressPhases.indexOf(right.phase));
+    .sort(
+      (left, right) =>
+        right.count - left.count ||
+        progressPhases.indexOf(left.phase) -
+          progressPhases.indexOf(right.phase),
+    );
   const topics = new Map();
   for (const attempt of attempts) {
     for (const topic of new Set(attempt.report.topics || [])) {
       const row = topics.get(topic) || { topic, attempts: 0, passes: 0 };
       row.attempts += 1;
-      row.passes += Number(!attempt.report.incomplete && attempt.report.decision === "HIRE");
+      row.passes += Number(
+        !attempt.report.incomplete && attempt.report.decision === "HIRE",
+      );
       row.lastAttempt = attempt.at;
       topics.set(topic, row);
     }
   }
-  const topicProgress = [...topics.values()]
-    .sort((left, right) => left.topic.localeCompare(right.topic));
-  return { total: normalized.length, attempts, series, weaknesses, topics: topicProgress, options: progressOptions(normalized) };
+  const topicProgress = [...topics.values()].sort((left, right) =>
+    left.topic.localeCompare(right.topic),
+  );
+  return {
+    total: normalized.length,
+    attempts,
+    series,
+    weaknesses,
+    topics: topicProgress,
+    options: progressOptions(normalized),
+  };
 }
 
 /// The distinct wordings of a phase's weaknesses, newest report first, each
@@ -170,8 +229,12 @@ function newestWordings(reports) {
 }
 
 function progressOptions(entries) {
-  const values = (key, compare = undefined) => [...new Set(entries.map((entry) => entry[key]).filter((value) => value != null))]
-    .sort(compare);
+  const values = (key, compare = undefined) =>
+    [
+      ...new Set(
+        entries.map((entry) => entry[key]).filter((value) => value != null),
+      ),
+    ].sort(compare);
   return {
     difficulty: values("difficulty"),
     language: values("language"),

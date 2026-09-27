@@ -48,7 +48,8 @@ import { installDocument, importWithout } from "./dom.js";
 const dom = installDocument(read("web/replay.html"));
 const { render, momentTime } = await import("/replay.js");
 const { reportMarkup } = await import("/render.js");
-const { sanitizeReport, frameworkPhases, ACTIVE_CONTRACT } = await import("/lib.js");
+const { sanitizeReport, frameworkPhases, ACTIVE_CONTRACT } =
+  await import("/lib.js");
 
 /// Every value the server supplies, as a token nothing else could produce. A
 /// rendered string is then either first-party copy, a sentinel, or a clock.
@@ -66,10 +67,17 @@ const S = {
 const avatar = (at, state, responseWindow) => ({
   kind: "avatar",
   at,
-  payload: { state, ...(responseWindow === undefined ? {} : { responseWindow }) },
+  payload: {
+    state,
+    ...(responseWindow === undefined ? {} : { responseWindow }),
+  },
 });
 const life = (at, state) => ({ kind: "lifecycle", at, payload: { state } });
-const editor = (at) => ({ kind: "editor", at, payload: { code: S.code, language: S.language } });
+const editor = (at) => ({
+  kind: "editor",
+  at,
+  payload: { code: S.code, language: S.language },
+});
 const tests = (at) => ({ kind: "tests", at, payload: { passed: 3, total: 5 } });
 const said = (at, responseWindow) => ({
   kind: "transcript",
@@ -120,7 +128,11 @@ const REPLAYS = {
     said(BASE + 9000),
     avatar(BASE + 10_000, "speaking"),
   ],
-  "a window that never closed": [avatar(BASE, "speaking"), avatar(BASE + 1000, "listening", 0), said(BASE + 2000, 0)],
+  "a window that never closed": [
+    avatar(BASE, "speaking"),
+    avatar(BASE + 1000, "listening", 0),
+    said(BASE + 2000, 0),
+  ],
   "a window whose clock ran backwards": question(BASE + 9000, BASE + 4000),
   "a window the interview was paused during": [
     avatar(BASE, "speaking"),
@@ -130,8 +142,15 @@ const REPLAYS = {
     avatar(BASE + 301_000, "speaking"),
   ],
   "a long window": question(BASE + 1000, BASE + 3_600_000),
-  "a window before the first snapshot": [...question(BASE + 1000, BASE + 2000), editor(BASE + 3000)],
-  "a replay with no windows at all": [editor(BASE), tests(BASE + 1000), said(BASE + 2000)],
+  "a window before the first snapshot": [
+    ...question(BASE + 1000, BASE + 2000),
+    editor(BASE + 3000),
+  ],
+  "a replay with no windows at all": [
+    editor(BASE),
+    tests(BASE + 1000),
+    said(BASE + 2000),
+  ],
   // `interviewMode` compares against the string, so a number here falls to
   // "Scored" and the fixture rendered the opposite of its own name.
   "the practice mode a legacy report still carries": [
@@ -170,13 +189,21 @@ const REPLAYS = {
 /// reads as one fails here.
 const ALLOWED = [
   // The response window panel.
-  "response window", "duration not recorded", "no candidate transcript recorded",
+  "response window",
+  "duration not recorded",
+  "no candidate transcript recorded",
   "transcript not matched to a window",
-  "interview paused during this window", "s",
+  "interview paused during this window",
+  "s",
   // The moment list and the panels beside it.
-  "editor", "tests", "Code", "passing", "No test run before this point.",
+  "editor",
+  "tests",
+  "Code",
+  "passing",
+  "No test run before this point.",
   // The interview mode a legacy replay carries.
-  "Scored", "Practice",
+  "Scored",
+  "Practice",
   // Every value the server supplied, which this page passes through and does
   // not author.
   ...Object.values(S),
@@ -186,7 +213,9 @@ const ALLOWED = [
 /// and the punctuation are taken out of it.
 /// Longest first, or the unit "s" eats the "s" out of "tests" and the word it
 /// was part of stops matching. Sorted once: it is a constant of the run.
-const ALLOWED_LONGEST_FIRST = [...ALLOWED].sort((left, right) => right.length - left.length);
+const ALLOWED_LONGEST_FIRST = [...ALLOWED].sort(
+  (left, right) => right.length - left.length,
+);
 
 /// The clocks one replay holds, formatted by the page's own formatter. Memoized
 /// per replay rather than per string: `toLocaleTimeString` is the expensive part
@@ -194,7 +223,10 @@ const ALLOWED_LONGEST_FIRST = [...ALLOWED].sort((left, right) => right.length - 
 const clocksOf = new Map();
 function clocks(events) {
   if (!clocksOf.has(events)) {
-    clocksOf.set(events, [...new Set(events.map((event) => event.at))].map(momentTime));
+    clocksOf.set(
+      events,
+      [...new Set(events.map((event) => event.at))].map(momentTime),
+    );
   }
   return clocksOf.get(events);
 }
@@ -248,7 +280,9 @@ test("the replay page says only the words somebody chose", () => {
       }
     };
     readPanels("as rendered");
-    for (const button of dom.node("replay-timeline").querySelectorAll("[data-moment], [data-window]")) {
+    for (const button of dom
+      .node("replay-timeline")
+      .querySelectorAll("[data-moment], [data-window]")) {
       button.click();
     }
     readPanels("after every button is pressed");
@@ -269,7 +303,10 @@ test("the replay page renders a window for every question and none for anything 
 
   assert.equal(windows(REPLAYS["a closed window with an answer"]).length, 1);
   assert.equal(windows(REPLAYS["a replay with no windows at all"]).length, 0);
-  assert.match(windows(REPLAYS["a closed window with no answer"])[0], /no candidate transcript recorded/);
+  assert.match(
+    windows(REPLAYS["a closed window with no answer"])[0],
+    /no candidate transcript recorded/,
+  );
   // The two sentences an empty window comes in, told apart by the recording
   // rather than by the interview. Both fixtures hold a window with no turn on
   // it; only one of them is a recording that could have said so.
@@ -277,9 +314,18 @@ test("the replay page renders a window for every question and none for anything 
   assert.equal(legacy.length, 2);
   assert.match(legacy[1], /transcript not matched to a window/);
   assert.doesNotMatch(legacy[1], /no candidate transcript recorded/);
-  assert.match(windows(REPLAYS["a window that never closed"])[0], /duration not recorded/);
-  assert.match(windows(REPLAYS["a window whose clock ran backwards"])[0], /duration not recorded/);
-  assert.match(windows(REPLAYS["a window the interview was paused during"])[0], /interview paused during this window/);
+  assert.match(
+    windows(REPLAYS["a window that never closed"])[0],
+    /duration not recorded/,
+  );
+  assert.match(
+    windows(REPLAYS["a window whose clock ran backwards"])[0],
+    /duration not recorded/,
+  );
+  assert.match(
+    windows(REPLAYS["a window the interview was paused during"])[0],
+    /interview paused during this window/,
+  );
   assert.match(windows(REPLAYS["a long window"])[0], /3599\.0 s/);
 });
 
@@ -297,7 +343,8 @@ test("the stylesheet puts no words on the page either", () => {
   // too, and both `#replay-timeline` and `#replay-transcript` are lists.
   // Whitespace before the colon is allowed by CSS and was allowed past an
   // earlier version of this: `content : "..."` matched nothing.
-  const draws = /(?:^|[;{\s])(content|list-style-type|list-style)\s*:\s*([^;}]+)/gim;
+  const draws =
+    /(?:^|[;{\s])(content|list-style-type|list-style)\s*:\s*([^;}]+)/gim;
   assert.deepEqual(
     new Set([...styles.matchAll(draws)].map((match) => match[2].trim())),
     new Set(['"\u2713"', "none"]),
@@ -306,9 +353,17 @@ test("the stylesheet puts no words on the page either", () => {
   // `attr()` draws an attribute, so a dataset value becomes text a browser
   // shows. The render check reads the dataset for the same reason; this refuses
   // the mechanism outright, because the two together are what make it speech.
-  assert.doesNotMatch(styles, /attr\s*\(/i, "an attribute drawn is an attribute spoken");
+  assert.doesNotMatch(
+    styles,
+    /attr\s*\(/i,
+    "an attribute drawn is an attribute spoken",
+  );
   // And nothing smuggled through a data URI, which carries its text unquoted.
-  assert.doesNotMatch(styles, /url\(\s*['"]?data:/i, "an inline image can hold a sentence");
+  assert.doesNotMatch(
+    styles,
+    /url\(\s*['"]?data:/i,
+    "an inline image can hold a sentence",
+  );
 });
 
 test("the report card this page renders names no finding either", () => {
@@ -330,7 +385,18 @@ test("the report card this page renders names no finding either", () => {
   // The raw shape the agent sends, which is what `sanitizeReport` reads. An
   // earlier version passed the sanitized field names instead, so the base card
   // rendered its placeholders and every branch below sanitized down to it.
-  const sentinels = ["Sxsum", "Sxstr", "Sximp", "Sxtitle", "Sxlang", "Sxcode", "Sxnote", "Sxwhy", "Sxplan", "Sxev"];
+  const sentinels = [
+    "Sxsum",
+    "Sxstr",
+    "Sximp",
+    "Sxtitle",
+    "Sxlang",
+    "Sxcode",
+    "Sxnote",
+    "Sxwhy",
+    "Sxplan",
+    "Sxev",
+  ];
   const base = {
     codingScore: 70,
     communicationScore: 70,
@@ -375,7 +441,10 @@ test("the report card this page renders names no finding either", () => {
         scenarioContract: "Sxnote",
         approach: "Sxplan",
         pitfalls: "Sxwhy",
-        hints: [{ text: "Sxstr", given: true }, { text: "Sximp", given: false }],
+        hints: [
+          { text: "Sxstr", given: true },
+          { text: "Sximp", given: false },
+        ],
         followUps: ["Sxev"],
       },
     },
@@ -394,14 +463,24 @@ test("the report card this page renders names no finding either", () => {
     },
     {
       integrityEvents: [
-        { type: "FACE_MISSING", severity: "warning", at: 1, detail: "Sxnote", sourceEventIds: ["7"] },
+        {
+          type: "FACE_MISSING",
+          severity: "warning",
+          at: 1,
+          detail: "Sxnote",
+          sourceEventIds: ["7"],
+        },
       ],
       integrityChainSeq: 2,
       integrityChainVerified: true,
     },
     // The other arm of the chain sentence, which only renders when something
     // was dropped for space.
-    { integrityEvents: [{ type: "FACE_MISSING", severity: "warning", at: 1 }], integrityChainSeq: 2, integrityDropped: 3 },
+    {
+      integrityEvents: [{ type: "FACE_MISSING", severity: "warning", at: 1 }],
+      integrityChainSeq: 2,
+      integrityDropped: 3,
+    },
     { incomplete: true, summary: "Sxsum" },
     // The header, the contract line and the calibration note, none of which any
     // earlier version of this list reached. The valid contract has to be the
@@ -416,7 +495,11 @@ test("the report card this page renders names no finding either", () => {
       // phase added there does not silently shorten this fixture.
       frameworkAssessment: {
         rubricVersion: 1,
-        phases: frameworkPhases.map((phase) => ({ phase, score: 60, weaknessTags: [] })),
+        phases: frameworkPhases.map((phase) => ({
+          phase,
+          score: 60,
+          weaknessTags: [],
+        })),
       },
     },
     { code: "" },
@@ -463,7 +546,10 @@ test("the report card this page renders names no finding either", () => {
   const headings = [...reportRenderer.matchAll(/<h3[^>]*>([^<{]+)<\/h3>/g)].map(
     (match) => match[1],
   );
-  assert.ok(headings.length >= 4, `only ${headings.length} headings found in web/render.js`);
+  assert.ok(
+    headings.length >= 4,
+    `only ${headings.length} headings found in web/render.js`,
+  );
   for (const section of headings) {
     assert.ok(
       rendered.some((markup) => markup.includes(section)),
@@ -511,7 +597,9 @@ test("the report card this page renders names no finding either", () => {
   // wrong the last two times.
   assert.ok(
     rendered.some(
-      (markup) => markup.includes("Contract bundle") && !markup.includes("cannot be scored"),
+      (markup) =>
+        markup.includes("Contract bundle") &&
+        !markup.includes("cannot be scored"),
     ),
     "no branch rendered a supported contract, so the active contract has moved",
   );
@@ -522,31 +610,176 @@ test("the report card this page renders names no finding either", () => {
   assert.deepEqual(
     said,
     new Set([
-      "(.md)", "(Sxlang)", "(editor", "(none", "-", "/", "0", "01:05", "1", "10",
-      "100", "17", "2", "2.", "2;", "3", "37", "7", "70", "8", "95%",
-      "Approach", "Chain", "CodeTrial.", "Coding", "Committee", "Common",
-      "Communication", "Contract", "Done", "Download", "Evidence",
-      "FACE_MISSING", "Follow-ups", "Framework", "Given:", "HIRE", "Held",
-      "Hint", "INCOMPLETE", "Improve", "Integrity", "Interview", "Interviewer",
-      "Judged", "Legacy/unversioned", "NO", "No", "Practice", "REACTO/STAR",
-      "Reached", "Scenario", "Spaced", "Strengths", "Success:", "Test", "This",
-      "What", "Your", "\u00b7", "a", "above.", "against", "algorithm", "an",
-      "and", "are", "attempt", "back", "back,", "back:", "bar", "be",
-      "behavioral", "bring", "bundle", "by", "calibrated", "candidate_speech",
-      "cannot", "captured)", "chain", "coaching", "code", "coding",
-      "communication", "complete", "complexity:", "confidence", "contract",
-      "contract:", "dropped", "during", "empty)", "evaluation", "event",
-      "every", "evidence", "evidence.", "final", "for", "formative",
-      "happened", "held", "high", "hint", "hints", "hiring", "how", "impact",
-      "interview", "interviewer", "is", "it", "kept,", "ladder", "listed",
-      "lobby", "malformed", "mid-level", "min", "more", "much", "next", "not",
-      "observed", "of", "offers", "only", "or", "packet", "performance",
-      "phase", "pitfalls:", "predates", "problem", "recall.", "report",
-      "reporting:", "review", "rounds", "rubric", "schema", "scored", "scores",
-      "session", "signals,", "so", "source", "space", "space.", "started",
-      "summary", "tests", "the", "this", "through", "to", "unknown.",
-      "unsupported", "used", "uses", "v1", "verified", "version", "warning",
-      "was", "were", "will", "your",
+      "(.md)",
+      "(Sxlang)",
+      "(editor",
+      "(none",
+      "-",
+      "/",
+      "0",
+      "01:05",
+      "1",
+      "10",
+      "100",
+      "17",
+      "2",
+      "2.",
+      "2;",
+      "3",
+      "37",
+      "7",
+      "70",
+      "8",
+      "95%",
+      "Approach",
+      "Chain",
+      "CodeTrial.",
+      "Coding",
+      "Committee",
+      "Common",
+      "Communication",
+      "Contract",
+      "Done",
+      "Download",
+      "Evidence",
+      "FACE_MISSING",
+      "Follow-ups",
+      "Framework",
+      "Given:",
+      "HIRE",
+      "Held",
+      "Hint",
+      "INCOMPLETE",
+      "Improve",
+      "Integrity",
+      "Interview",
+      "Interviewer",
+      "Judged",
+      "Legacy/unversioned",
+      "NO",
+      "No",
+      "Practice",
+      "REACTO/STAR",
+      "Reached",
+      "Scenario",
+      "Spaced",
+      "Strengths",
+      "Success:",
+      "Test",
+      "This",
+      "What",
+      "Your",
+      "\u00b7",
+      "a",
+      "above.",
+      "against",
+      "algorithm",
+      "an",
+      "and",
+      "are",
+      "attempt",
+      "back",
+      "back,",
+      "back:",
+      "bar",
+      "be",
+      "behavioral",
+      "bring",
+      "bundle",
+      "by",
+      "calibrated",
+      "candidate_speech",
+      "cannot",
+      "captured)",
+      "chain",
+      "coaching",
+      "code",
+      "coding",
+      "communication",
+      "complete",
+      "complexity:",
+      "confidence",
+      "contract",
+      "contract:",
+      "dropped",
+      "during",
+      "empty)",
+      "evaluation",
+      "event",
+      "every",
+      "evidence",
+      "evidence.",
+      "final",
+      "for",
+      "formative",
+      "happened",
+      "held",
+      "high",
+      "hint",
+      "hints",
+      "hiring",
+      "how",
+      "impact",
+      "interview",
+      "interviewer",
+      "is",
+      "it",
+      "kept,",
+      "ladder",
+      "listed",
+      "lobby",
+      "malformed",
+      "mid-level",
+      "min",
+      "more",
+      "much",
+      "next",
+      "not",
+      "observed",
+      "of",
+      "offers",
+      "only",
+      "or",
+      "packet",
+      "performance",
+      "phase",
+      "pitfalls:",
+      "predates",
+      "problem",
+      "recall.",
+      "report",
+      "reporting:",
+      "review",
+      "rounds",
+      "rubric",
+      "schema",
+      "scored",
+      "scores",
+      "session",
+      "signals,",
+      "so",
+      "source",
+      "space",
+      "space.",
+      "started",
+      "summary",
+      "tests",
+      "the",
+      "this",
+      "through",
+      "to",
+      "unknown.",
+      "unsupported",
+      "used",
+      "uses",
+      "v1",
+      "verified",
+      "version",
+      "warning",
+      "was",
+      "were",
+      "will",
+      "your",
     ]),
     "a word on the report card is a word somebody chose",
   );
@@ -575,14 +808,24 @@ test("a missing id is caught, except for the ids nothing drives", async () => {
   assert.ok(declared.length >= 10, `only ${declared.length} ids declared`);
   const missed = [];
   for (const id of declared) {
-    const outcome = await importWithout(markup, "/replay.js", id, ({ render: renderAgain }) =>
-      renderAgain(REPLAYS["a closed window with an answer"]),
+    const outcome = await importWithout(
+      markup,
+      "/replay.js",
+      id,
+      ({ render: renderAgain }) =>
+        renderAgain(REPLAYS["a closed window with an answer"]),
     );
     if (!outcome.caught) missed.push(id);
   }
   assert.deepEqual(
     new Set(missed),
-    new Set(["replay-list", "replay-empty", "replay-title", "replay-media", "replay-report"]),
+    new Set([
+      "replay-list",
+      "replay-empty",
+      "replay-title",
+      "replay-media",
+      "replay-report",
+    ]),
   );
 
   // The loop above installs a fetch that never settles, once per id. A test that
@@ -596,7 +839,11 @@ test("a missing id is caught, except for the ids nothing drives", async () => {
     ),
     new Promise((resolve) => setTimeout(() => resolve("hung"), 200)),
   ]);
-  assert.equal(answered, "answered", "importWithout left a fetch that never settles");
+  assert.equal(
+    answered,
+    "answered",
+    "importWithout left a fetch that never settles",
+  );
 });
 
 test("exactly one moment button is current", () => {
@@ -619,7 +866,10 @@ test("exactly one moment button is current", () => {
       `pressing ${JSON.stringify(button.dataset)} left ${current().length} buttons current`,
     );
   }
-  assert.equal(dom.node("replay-timeline").querySelectorAll("[data-window]")[0].tag, "div");
+  assert.equal(
+    dom.node("replay-timeline").querySelectorAll("[data-window]")[0].tag,
+    "div",
+  );
 });
 
 test("a response window does not replace the final editor with missing history", () => {

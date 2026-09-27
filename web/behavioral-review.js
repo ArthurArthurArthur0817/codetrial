@@ -15,8 +15,7 @@ export function candidateTranscriptText(segments) {
 /// field the candidate controls, so the app cannot manufacture a fact while
 /// making prose sound smoother.
 export function starRewrite(fields) {
-  return STAR_FIELDS
-    .map((name) => [name, String(fields?.[name] || "").trim()])
+  return STAR_FIELDS.map((name) => [name, String(fields?.[name] || "").trim()])
     .filter(([, value]) => value)
     .map(([name, value]) => `${name}: ${value}`)
     .join("\n");
@@ -24,10 +23,12 @@ export function starRewrite(fields) {
 
 export function behavioralReviewMarkup(original) {
   if (!String(original || "").trim()) return "";
-  const fields = STAR_FIELDS.map((name) => `
+  const fields = STAR_FIELDS.map(
+    (name) => `
     <label class="star-field">${name}
       <textarea data-star-field="${name}" rows="2" placeholder="Paste or edit only what you actually said."></textarea>
-    </label>`).join("");
+    </label>`,
+  ).join("");
   return `<section id="behavioral-review" aria-labelledby="behavioral-review-title">
     <h3 id="behavioral-review-title">Behavioral answer review</h3>
     <p class="muted small">Local self-review only. These edits do not change your score, source transcript, or replay evidence.</p>
@@ -54,12 +55,18 @@ export function mountBehavioralReview(root, segments) {
   const section = root.querySelector("#behavioral-review");
   if (!section) return false;
   const rewrite = section.querySelector("#star-rewrite");
-  const fields = () => Object.fromEntries(STAR_FIELDS.map((name) => [
-    name,
-    section.querySelector(`[data-star-field="${name}"]`)?.value || "",
-  ]));
-  const reset = () => { rewrite.value = starRewrite(fields()); };
-  for (const input of section.querySelectorAll("[data-star-field]")) input.addEventListener("input", reset);
+  const fields = () =>
+    Object.fromEntries(
+      STAR_FIELDS.map((name) => [
+        name,
+        section.querySelector(`[data-star-field="${name}"]`)?.value || "",
+      ]),
+    );
+  const reset = () => {
+    rewrite.value = starRewrite(fields());
+  };
+  for (const input of section.querySelectorAll("[data-star-field]"))
+    input.addEventListener("input", reset);
   section.querySelector("#star-reset")?.addEventListener("click", reset);
   section.querySelector("#star-dismiss")?.addEventListener("click", () => {
     section.querySelector("#star-suggestion")?.remove();

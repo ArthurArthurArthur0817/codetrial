@@ -17,15 +17,35 @@ import { parseCandidateCase, runBrowserTests } from "../../web/runners.js";
 const runners = read("web/runners.js");
 
 test("a malformed candidate case is refused", () => {
-  const spec = { kind: "function", paramNames: ["count"], paramTypes: ["integer"] };
-  assert.throws(() => parseCandidateCase(spec, "{ nope"), /JSON argument array/);
-  assert.throws(() => parseCandidateCase(spec, "[1.5]"), /Parameter 1 \(count\) must match integer/);
+  const spec = {
+    kind: "function",
+    paramNames: ["count"],
+    paramTypes: ["integer"],
+  };
+  assert.throws(
+    () => parseCandidateCase(spec, "{ nope"),
+    /JSON argument array/,
+  );
+  assert.throws(
+    () => parseCandidateCase(spec, "[1.5]"),
+    /Parameter 1 \(count\) must match integer/,
+  );
 });
 
 test("a candidate case is typed by paramTypes", () => {
-  const spec = { kind: "function", paramNames: ["grid", "name"], paramTypes: ["character[][]", "string"] };
-  assert.deepEqual(parseCandidateCase(spec, '[[["a", "b"]], "edge"]'), [[['a', 'b']], "edge"]);
-  assert.throws(() => parseCandidateCase(spec, '[[["ab"]], "edge"]'), /Parameter 1 \(grid\)/);
+  const spec = {
+    kind: "function",
+    paramNames: ["grid", "name"],
+    paramTypes: ["character[][]", "string"],
+  };
+  assert.deepEqual(parseCandidateCase(spec, '[[["a", "b"]], "edge"]'), [
+    [["a", "b"]],
+    "edge",
+  ]);
+  assert.throws(
+    () => parseCandidateCase(spec, '[[["ab"]], "edge"]'),
+    /Parameter 1 \(grid\)/,
+  );
 });
 
 // Every arm here is the last thing between a candidate case and a harness that
@@ -35,46 +55,67 @@ test("a candidate case is typed by paramTypes", () => {
 // accepting rows matter as much as the refusing ones.
 test("node candidate cases are typed by argTypes", () => {
   const spec = {
-    kind: "function", paramNames: ["head", "tree", "random", "graph"],
+    kind: "function",
+    paramNames: ["head", "tree", "random", "graph"],
     paramTypes: ["ListNode", "TreeNode", "Node", "Node"],
     argTypes: ["linkedList", "binaryTree", "randomList", "graphNode"],
   };
   assert.deepEqual(
-    parseCandidateCase(spec, '[[1,2],[1,null,2],[[7,null],[9,0]],[[2],[1]]]'),
-    [[1, 2], [1, null, 2], [[7, null], [9, 0]], [[2], [1]]],
+    parseCandidateCase(spec, "[[1,2],[1,null,2],[[7,null],[9,0]],[[2],[1]]]"),
+    [
+      [1, 2],
+      [1, null, 2],
+      [
+        [7, null],
+        [9, 0],
+      ],
+      [[2], [1]],
+    ],
   );
   assert.throws(
-    () => parseCandidateCase(spec, '[[1,"two"],[1,null,2],[[7,null],[9,0]],[[2],[1]]]'),
+    () =>
+      parseCandidateCase(
+        spec,
+        '[[1,"two"],[1,null,2],[[7,null],[9,0]],[[2],[1]]]',
+      ),
     /Parameter 1 \(head\)/,
   );
   assert.throws(
-    () => parseCandidateCase(spec, '[[1,2],[1,{}],[[7,null],[9,0]],[[2],[1]]]'),
+    () => parseCandidateCase(spec, "[[1,2],[1,{}],[[7,null],[9,0]],[[2],[1]]]"),
     /Parameter 2 \(tree\)/,
   );
   assert.throws(
-    () => parseCandidateCase(spec, '[[1,2],[1,null,2],[[7],[9,0]],[[2],[1]]]'),
+    () => parseCandidateCase(spec, "[[1,2],[1,null,2],[[7],[9,0]],[[2],[1]]]"),
     /Parameter 3 \(random\)/,
   );
   assert.throws(
-    () => parseCandidateCase(spec, '[[1,2],[1,null,2],[[7,null],[9,0]],[["two"],[1]]]'),
+    () =>
+      parseCandidateCase(
+        spec,
+        '[[1,2],[1,null,2],[[7,null],[9,0]],[["two"],[1]]]',
+      ),
     /Parameter 4 \(graph\)/,
   );
   assert.throws(
-    () => parseCandidateCase(spec, '[[1,2],[1,null,2],[[7,2],[9,0]],[[2],[1]]]'),
+    () =>
+      parseCandidateCase(spec, "[[1,2],[1,null,2],[[7,2],[9,0]],[[2],[1]]]"),
     /Parameter 3 \(random\)/,
   );
   assert.throws(
-    () => parseCandidateCase(spec, '[[1,2],[1,null,2],[[7,null],[9,0]],[[3],[1]]]'),
+    () =>
+      parseCandidateCase(spec, "[[1,2],[1,null,2],[[7,null],[9,0]],[[3],[1]]]"),
     /Parameter 4 \(graph\)/,
   );
   // A zero neighbour reaches the C harness as nodes[-1], and a negative random
   // index reaches the C++ one as nodes[negative]; neither bounds-checks.
   assert.throws(
-    () => parseCandidateCase(spec, '[[1,2],[1,null,2],[[7,null],[9,0]],[[0],[1]]]'),
+    () =>
+      parseCandidateCase(spec, "[[1,2],[1,null,2],[[7,null],[9,0]],[[0],[1]]]"),
     /Parameter 4 \(graph\)/,
   );
   assert.throws(
-    () => parseCandidateCase(spec, '[[1,2],[1,null,2],[[7,-1],[9,0]],[[2],[1]]]'),
+    () =>
+      parseCandidateCase(spec, "[[1,2],[1,null,2],[[7,-1],[9,0]],[[2],[1]]]"),
     /Parameter 3 \(random\)/,
   );
 });
@@ -84,16 +125,26 @@ test("node candidate cases are typed by argTypes", () => {
 // candidate case for that scenario rather than failing loudly.
 test("next-pointer trees and linked list arrays are typed too", () => {
   const spec = {
-    kind: "function", paramNames: ["rows", "shards"],
+    kind: "function",
+    paramNames: ["rows", "shards"],
     paramTypes: ["Node", "ListNode[]"],
     argTypes: ["nextTree", "linkedListArray"],
   };
-  assert.deepEqual(
-    parseCandidateCase(spec, "[[1,2,3,null,4],[[1,4],[1,3]]]"),
-    [[1, 2, 3, null, 4], [[1, 4], [1, 3]]],
+  assert.deepEqual(parseCandidateCase(spec, "[[1,2,3,null,4],[[1,4],[1,3]]]"), [
+    [1, 2, 3, null, 4],
+    [
+      [1, 4],
+      [1, 3],
+    ],
+  ]);
+  assert.throws(
+    () => parseCandidateCase(spec, '[[1,"two"],[[1,4]]]'),
+    /Parameter 1 \(rows\) must match nextTree/,
   );
-  assert.throws(() => parseCandidateCase(spec, '[[1,"two"],[[1,4]]]'), /Parameter 1 \(rows\) must match nextTree/);
-  assert.throws(() => parseCandidateCase(spec, '[[1,2],[[1,"four"]]]'), /Parameter 2 \(shards\) must match linkedListArray/);
+  assert.throws(
+    () => parseCandidateCase(spec, '[[1,2],[[1,"four"]]]'),
+    /Parameter 2 \(shards\) must match linkedListArray/,
+  );
 });
 
 // The one arm that answers for a judge carrying no `argTypes` override. Every
@@ -102,38 +153,63 @@ test("next-pointer trees and linked list arrays are typed too", () => {
 test("a node parameter with no argTypes override still admits an array", () => {
   const spec = { kind: "function", paramNames: ["node"], paramTypes: ["Node"] };
   assert.deepEqual(parseCandidateCase(spec, "[[1,2,3]]"), [[1, 2, 3]]);
-  assert.throws(() => parseCandidateCase(spec, '[7]'), /Parameter 1 \(node\) must match Node/);
+  assert.throws(
+    () => parseCandidateCase(spec, "[7]"),
+    /Parameter 1 \(node\) must match Node/,
+  );
 });
 
 // Both parameters below are "Node" in the language signature, so a message
 // naming `paramTypes` would describe neither constraint.
 test("the refusal names the node shape that was checked", () => {
   const spec = {
-    kind: "function", paramNames: ["random", "graph"],
-    paramTypes: ["Node", "Node"], argTypes: ["randomList", "graphNode"],
+    kind: "function",
+    paramNames: ["random", "graph"],
+    paramTypes: ["Node", "Node"],
+    argTypes: ["randomList", "graphNode"],
   };
   assert.throws(
-    () => parseCandidateCase(spec, '[[[7,2]],[[1]]]'),
+    () => parseCandidateCase(spec, "[[[7,2]],[[1]]]"),
     /Parameter 1 \(random\) must match randomList/,
   );
   assert.throws(
-    () => parseCandidateCase(spec, '[[[7,null]],[[9]]]'),
+    () => parseCandidateCase(spec, "[[[7,null]],[[9]]]"),
     /Parameter 2 \(graph\) must match graphNode/,
   );
 });
 
 test("a cycle position names a list slot or -1", () => {
   const spec = {
-    kind: "function", paramNames: ["head", "pos"],
-    paramTypes: ["ListNode", "integer"], argTypes: ["linkedList", "cyclePos"],
+    kind: "function",
+    paramNames: ["head", "pos"],
+    paramTypes: ["ListNode", "integer"],
+    argTypes: ["linkedList", "cyclePos"],
     cyclePosParam: 1,
   };
-  assert.deepEqual(parseCandidateCase(spec, "[[3,2,0,-4],1]"), [[3, 2, 0, -4], 1]);
-  assert.deepEqual(parseCandidateCase(spec, "[[3,2,0,-4],-1]"), [[3, 2, 0, -4], -1]);
-  assert.deepEqual(parseCandidateCase(spec, "[[3,2,0,-4],3]"), [[3, 2, 0, -4], 3]);
-  assert.throws(() => parseCandidateCase(spec, "[[3,2,0,-4],4]"), /Parameter 2 must name a list position or -1/);
-  assert.throws(() => parseCandidateCase(spec, "[[3,2,0,-4],-2]"), /Parameter 2 must name a list position or -1/);
-  assert.throws(() => parseCandidateCase(spec, "[[],0]"), /Parameter 2 must name a list position or -1/);
+  assert.deepEqual(parseCandidateCase(spec, "[[3,2,0,-4],1]"), [
+    [3, 2, 0, -4],
+    1,
+  ]);
+  assert.deepEqual(parseCandidateCase(spec, "[[3,2,0,-4],-1]"), [
+    [3, 2, 0, -4],
+    -1,
+  ]);
+  assert.deepEqual(parseCandidateCase(spec, "[[3,2,0,-4],3]"), [
+    [3, 2, 0, -4],
+    3,
+  ]);
+  assert.throws(
+    () => parseCandidateCase(spec, "[[3,2,0,-4],4]"),
+    /Parameter 2 must name a list position or -1/,
+  );
+  assert.throws(
+    () => parseCandidateCase(spec, "[[3,2,0,-4],-2]"),
+    /Parameter 2 must name a list position or -1/,
+  );
+  assert.throws(
+    () => parseCandidateCase(spec, "[[],0]"),
+    /Parameter 2 must name a list position or -1/,
+  );
 });
 
 // The runner looks the value up in the tree it was given. Letting an absent
@@ -141,7 +217,8 @@ test("a cycle position names a list slot or -1", () => {
 // in C, so the five languages disagree about a case the parser accepted.
 test("a tree node reference names a value the tree holds", () => {
   const spec = {
-    kind: "function", paramNames: ["root", "p", "q"],
+    kind: "function",
+    paramNames: ["root", "p", "q"],
     paramTypes: ["TreeNode", "integer", "integer"],
     argTypes: ["binaryTree", "treeNodeValue", "treeNodeValue"],
   };
@@ -149,26 +226,46 @@ test("a tree node reference names a value the tree holds", () => {
     parseCandidateCase(spec, "[[3,5,1,6,2,0,8,null,null,7,4],5,4]"),
     [[3, 5, 1, 6, 2, 0, 8, null, null, 7, 4], 5, 4],
   );
-  assert.throws(() => parseCandidateCase(spec, "[[3,5,1],5,99]"), /Parameter 3 must name a value in the tree/);
-  assert.throws(() => parseCandidateCase(spec, "[[3,5,1],99,1]"), /Parameter 2 must name a value in the tree/);
+  assert.throws(
+    () => parseCandidateCase(spec, "[[3,5,1],5,99]"),
+    /Parameter 3 must name a value in the tree/,
+  );
+  assert.throws(
+    () => parseCandidateCase(spec, "[[3,5,1],99,1]"),
+    /Parameter 2 must name a value in the tree/,
+  );
 });
 
 test("a class candidate case matches the judge operation signatures", () => {
   const spec = {
-    kind: "class", className: "EventQueue", cases: [{
-      input: [["EventQueue", "push", "pop", "size"], [[2], [7], [], []]],
-    }],
+    kind: "class",
+    className: "EventQueue",
+    cases: [
+      {
+        input: [
+          ["EventQueue", "push", "pop", "size"],
+          [[2], [7], [], []],
+        ],
+      },
+    ],
   };
   assert.deepEqual(
-    parseCandidateCase(spec, '[["EventQueue", "push", "size"], [[2], [7], []]]'),
-    [["EventQueue", "push", "size"], [[2], [7], []]],
+    parseCandidateCase(
+      spec,
+      '[["EventQueue", "push", "size"], [[2], [7], []]]',
+    ),
+    [
+      ["EventQueue", "push", "size"],
+      [[2], [7], []],
+    ],
   );
   assert.throws(
     () => parseCandidateCase(spec, '[["EventQueue", "push"], [[2], []]]'),
     /Operation push does not accept 0 arguments/,
   );
   assert.throws(
-    () => parseCandidateCase(spec, '[["EventQueue", "push"], [[2], ["seven"]]]'),
+    () =>
+      parseCandidateCase(spec, '[["EventQueue", "push"], [[2], ["seven"]]]'),
     /Arguments for operation push do not match its parameter types/,
   );
   assert.throws(
@@ -176,7 +273,8 @@ test("a class candidate case matches the judge operation signatures", () => {
     /Arguments for operation EventQueue do not match its parameter types/,
   );
   assert.throws(
-    () => parseCandidateCase(spec, '[["EventQueue", "EventQueue"], [[2], [2]]]'),
+    () =>
+      parseCandidateCase(spec, '[["EventQueue", "EventQueue"], [[2], [2]]]'),
     /Only the first operation may be EventQueue/,
   );
 });
@@ -184,21 +282,56 @@ test("a class candidate case matches the judge operation signatures", () => {
 test("runBrowserTests reports the output of a candidate case", async () => {
   const restoreFetch = failFetchWith(async (url) => {
     if (String(url).startsWith("/judges/")) {
-      return new Response(JSON.stringify({
-        kind: "function", entry: "sum", paramNames: ["value"], paramTypes: ["integer"],
-        returnType: "integer", checker: "exact", cases: [{ label: "judge", input: [1], expected: 1 }],
-      }));
+      return new Response(
+        JSON.stringify({
+          kind: "function",
+          entry: "sum",
+          paramNames: ["value"],
+          paramTypes: ["integer"],
+          returnType: "integer",
+          checker: "exact",
+          cases: [{ label: "judge", input: [1], expected: 1 }],
+        }),
+      );
     }
-    return new Response(JSON.stringify({ stdout: [{ text: '{"results":[{"actual":1,"timeMs":1},{"actual":7,"timeMs":2}]}' }] }));
+    return new Response(
+      JSON.stringify({
+        stdout: [
+          {
+            text: '{"results":[{"actual":1,"timeMs":1},{"actual":7,"timeMs":2}]}',
+          },
+        ],
+      }),
+    );
   });
   try {
-    const summary = await runBrowserTests("candidate-case-runner", "", "cpp", null, [{ input: [7] }]);
+    const summary = await runBrowserTests(
+      "candidate-case-runner",
+      "",
+      "cpp",
+      null,
+      [{ input: [7] }],
+    );
     assert.equal(summary.passed, 1);
     assert.equal(summary.total, 1);
-    assert.equal(summary.code, "", "the summary carries the code this run executed");
-    assert.equal(summary.runnerUnavailable, undefined, "a run that reached the runner never says it is missing");
+    assert.equal(
+      summary.code,
+      "",
+      "the summary carries the code this run executed",
+    );
+    assert.equal(
+      summary.runnerUnavailable,
+      undefined,
+      "a run that reached the runner never says it is missing",
+    );
     assert.deepEqual(summary.cases.at(-1), {
-      label: "Your case 1", pass: null, got: "7", expected: undefined, input: "[7]", timeMs: 2, candidate: true,
+      label: "Your case 1",
+      pass: null,
+      got: "7",
+      expected: undefined,
+      input: "[7]",
+      timeMs: 2,
+      candidate: true,
     });
   } finally {
     restoreFetch();
@@ -208,15 +341,36 @@ test("runBrowserTests reports the output of a candidate case", async () => {
 test("an observed candidate error keeps its expectation absent", async () => {
   const restoreFetch = failFetchWith(async (url) => {
     if (String(url).startsWith("/judges/")) {
-      return new Response(JSON.stringify({
-        kind: "function", entry: "sum", paramNames: ["value"], paramTypes: ["integer"],
-        returnType: "integer", checker: "exact", cases: [{ label: "judge", input: [1], expected: 1 }],
-      }));
+      return new Response(
+        JSON.stringify({
+          kind: "function",
+          entry: "sum",
+          paramNames: ["value"],
+          paramTypes: ["integer"],
+          returnType: "integer",
+          checker: "exact",
+          cases: [{ label: "judge", input: [1], expected: 1 }],
+        }),
+      );
     }
-    return new Response(JSON.stringify({ stdout: [{ text: '{"results":[{"actual":1,"timeMs":1},{"error":"boom","timeMs":2}]}' }] }));
+    return new Response(
+      JSON.stringify({
+        stdout: [
+          {
+            text: '{"results":[{"actual":1,"timeMs":1},{"error":"boom","timeMs":2}]}',
+          },
+        ],
+      }),
+    );
   });
   try {
-    const summary = await runBrowserTests("candidate-case-error", "", "cpp", null, [{ input: [7] }]);
+    const summary = await runBrowserTests(
+      "candidate-case-error",
+      "",
+      "cpp",
+      null,
+      [{ input: [7] }],
+    );
     assert.equal(summary.cases.at(-1).input, "[7]");
     assert.equal(summary.cases.at(-1).expected, undefined);
     assert.equal(summary.cases.at(-1).error, "boom");
@@ -226,7 +380,9 @@ test("an observed candidate error keeps its expectation absent", async () => {
 });
 
 test("each worker is built from its own source", () => {
-  const blobs = [...runners.matchAll(/new Blob\(\[[^\]]*?(\w+)\]/g)].map((match) => match[1]);
+  const blobs = [...runners.matchAll(/new Blob\(\[[^\]]*?(\w+)\]/g)].map(
+    (match) => match[1],
+  );
   assert.equal(blobs.length, 2, "a third worker needs its own assertion here");
 
   assert.match(
@@ -241,7 +397,11 @@ test("each worker is built from its own source", () => {
     /new Blob\(\[source\]/,
     "the Python worker must build its worker from the Pyodide loader it just fetched, not from the JavaScript runner",
   );
-  assert.match(python, /loadPyodide\(/, "the Python worker source has to load Pyodide");
+  assert.match(
+    python,
+    /loadPyodide\(/,
+    "the Python worker source has to load Pyodide",
+  );
 });
 
 test("the runner evaluates no string, so the page needs no unsafe-eval", () => {
@@ -251,8 +411,16 @@ test("the runner evaluates no string, so the page needs no unsafe-eval", () => {
   // document's policy, so an eval here would have to be permitted for every
   // script on the interview page, which is where the candidate's own text is
   // already rendered.
-  assert.doesNotMatch(runners, /\beval\s*\(/, "web/runners.js evaluates a string");
-  assert.doesNotMatch(runners, /new Function\s*\(/, "web/runners.js builds a function from text");
+  assert.doesNotMatch(
+    runners,
+    /\beval\s*\(/,
+    "web/runners.js evaluates a string",
+  );
+  assert.doesNotMatch(
+    runners,
+    /new Function\s*\(/,
+    "web/runners.js builds a function from text",
+  );
   assert.match(
     functionBody(runners, "runWorker"),
     /__codetrialEntry/,
@@ -269,44 +437,125 @@ test("the hoisted runner source interpolates nothing", () => {
   const source = runners.slice(start, runners.indexOf("\n  `;\n", start));
 
   assert.match(source, /self\.onmessage/, "it has to still be a worker");
-  assert.doesNotMatch(source, /\$\{/, "an interpolation here would read from a scope it no longer has");
+  assert.doesNotMatch(
+    source,
+    /\$\{/,
+    "an interpolation here would read from a scope it no longer has",
+  );
 });
 
 test("execution infrastructure failures allow tracing but candidate failures do not", async (t) => {
   const spec = {
-    kind: "function", entry: "sum", paramNames: ["value"], paramTypes: ["integer"],
-    returnType: "integer", checker: "exact", cases: [{ label: "judge", input: [1], expected: 1 }],
+    kind: "function",
+    entry: "sum",
+    paramNames: ["value"],
+    paramTypes: ["integer"],
+    returnType: "integer",
+    checker: "exact",
+    cases: [{ label: "judge", input: [1], expected: 1 }],
   };
   const scenarios = [
-    { name: "HTTP outage", response: () => new Response("", { status: 503 }), unavailable: true },
-    { name: "rate limited", response: () => new Response("", { status: 429 }), unavailable: true },
+    {
+      name: "HTTP outage",
+      response: () => new Response("", { status: 503 }),
+      unavailable: true,
+    },
+    {
+      name: "rate limited",
+      response: () => new Response("", { status: 429 }),
+      unavailable: true,
+    },
     // Refused requests and unbuildable harnesses are this run's own, and an
     // edit can fix them: a hand trace must not stand in for Test on them.
-    { name: "request rejected", response: () => new Response("", { status: 413 }), unavailable: false },
-    { name: "harness cannot be built", spec: { paramTypes: ["Unrepresentable"] }, unavailable: false },
-    { name: "network failure", response: () => { throw new TypeError("Failed to fetch"); }, unavailable: true },
-    { name: "request timeout", response: () => { throw new DOMException("Timed out", "AbortError"); }, unavailable: true },
-    { name: "invalid response", response: () => new Response("<html>down</html>"), unavailable: true },
-    { name: "compilation error", response: () => Response.json({ didExecute: false, stderr: [{ text: "syntax error" }] }), unavailable: false },
-    { name: "execution timeout", response: () => Response.json({ timedOut: true }), unavailable: false },
-    { name: "runtime error", response: () => Response.json({ code: 1, stderr: [{ text: "runtime error" }] }), unavailable: false },
-    { name: "Python loader failure", language: "python", response: () => new Response("", { status: 503 }), unavailable: true },
-    { name: "Python boot failure", language: "python", boot: { setupError: "Wasm failed to initialize" }, unavailable: true },
-    { name: "Python syntax error", language: "python", boot: { ready: true }, unavailable: false },
+    {
+      name: "request rejected",
+      response: () => new Response("", { status: 413 }),
+      unavailable: false,
+    },
+    {
+      name: "harness cannot be built",
+      spec: { paramTypes: ["Unrepresentable"] },
+      unavailable: false,
+    },
+    {
+      name: "network failure",
+      response: () => {
+        throw new TypeError("Failed to fetch");
+      },
+      unavailable: true,
+    },
+    {
+      name: "request timeout",
+      response: () => {
+        throw new DOMException("Timed out", "AbortError");
+      },
+      unavailable: true,
+    },
+    {
+      name: "invalid response",
+      response: () => new Response("<html>down</html>"),
+      unavailable: true,
+    },
+    {
+      name: "compilation error",
+      response: () =>
+        Response.json({
+          didExecute: false,
+          stderr: [{ text: "syntax error" }],
+        }),
+      unavailable: false,
+    },
+    {
+      name: "execution timeout",
+      response: () => Response.json({ timedOut: true }),
+      unavailable: false,
+    },
+    {
+      name: "runtime error",
+      response: () =>
+        Response.json({ code: 1, stderr: [{ text: "runtime error" }] }),
+      unavailable: false,
+    },
+    {
+      name: "Python loader failure",
+      language: "python",
+      response: () => new Response("", { status: 503 }),
+      unavailable: true,
+    },
+    {
+      name: "Python boot failure",
+      language: "python",
+      boot: { setupError: "Wasm failed to initialize" },
+      unavailable: true,
+    },
+    {
+      name: "Python syntax error",
+      language: "python",
+      boot: { ready: true },
+      unavailable: false,
+    },
   ];
   for (const scenario of scenarios) {
     await t.test(scenario.name, async (t) => {
-      const restoreFetch = failFetchWith(async (url) => String(url).startsWith("/judges/")
-        ? Response.json({ ...spec, ...scenario.spec })
-        : scenario.response?.() ?? new Response(""));
+      const restoreFetch = failFetchWith(async (url) =>
+        String(url).startsWith("/judges/")
+          ? Response.json({ ...spec, ...scenario.spec })
+          : (scenario.response?.() ?? new Response("")),
+      );
       if (scenario.boot) {
         t.mock.method(globalThis.URL, "createObjectURL", () => "blob:test");
         t.mock.method(globalThis.URL, "revokeObjectURL", () => {});
         const previous = globalThis.Worker;
         globalThis.Worker = class {
-          constructor() { queueMicrotask(() => this.onmessage({ data: scenario.boot })); }
+          constructor() {
+            queueMicrotask(() => this.onmessage({ data: scenario.boot }));
+          }
           postMessage() {
-            queueMicrotask(() => this.onmessage({ data: { setupError: "SyntaxError: invalid syntax" } }));
+            queueMicrotask(() =>
+              this.onmessage({
+                data: { setupError: "SyntaxError: invalid syntax" },
+              }),
+            );
           }
           terminate() {}
         };
@@ -316,10 +565,17 @@ test("execution infrastructure failures allow tracing but candidate failures do 
         });
       }
       try {
-        const summary = await runBrowserTests("infrastructure-" + scenario.name, "candidate code", scenario.language ?? "cpp");
+        const summary = await runBrowserTests(
+          "infrastructure-" + scenario.name,
+          "candidate code",
+          scenario.language ?? "cpp",
+        );
         assert.ok(summary.setupError);
         assert.equal(Boolean(summary.runnerUnavailable), scenario.unavailable);
-        assert.equal(testPayload(summary).runnerUnavailable, scenario.unavailable);
+        assert.equal(
+          testPayload(summary).runnerUnavailable,
+          scenario.unavailable,
+        );
         assert.equal(summary.passed, 0);
         assert.deepEqual(summary.cases, []);
       } finally {

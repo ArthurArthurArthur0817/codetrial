@@ -1,0 +1,8 @@
+# Commits that only reformatted, so git blame looks through them to the
+# change that last meant something. GitHub reads this file on its own; a
+# local blame does with: git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# Reformat the browser tests with Prettier
+890612aa11a21b4a4f4e77908ad2e8e9eaf505ad
+# Reformat HTML and JavaScript with Prettier
+059663e6defd30796bd75c4d3397c118548cdb8d

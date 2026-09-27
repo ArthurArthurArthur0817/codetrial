@@ -35,7 +35,9 @@ puts a blank line before a comment inside a method chain and `cargo fmt` takes
 it straight back out, so `commentflow --check` alone can never be satisfied on
 Rust. `make indent` runs the same script with `--write`, so the fix for a
 failure is always that one command. Never pass `shfmt` a style flag; it reads
-`.editorconfig`.
+`.editorconfig`. Prettier, for HTML and JavaScript, sits beside the chain
+rather than in it: it shares no file with the others, so the check runs it in
+place with `--cache`, alongside the copy. Without `npm ci` it skips with a note.
 
 ## Drift is the usual failure
 
@@ -79,15 +81,15 @@ retry.
 ## The git hooks
 
 `make hooks` installs the fast half of the gate at commit time:
-`scripts/git-pre-commit.sh` runs `rustfmt`, ESLint, `ruff` and `shellcheck`
-over a checkout of the index, so an unstaged edit neither fails a commit nor
-sneaks through one, plus `commentflow --check` and `shfmt -d` on staged shell.
-It does not build, test or check generated-artifact drift; that is what the
-gate is for. `scripts/git-commit-msg.sh` holds the message to the rules in
-codetrial-conventions, and `scripts/git-pre-push.sh` replays them over commits
-a rebase or an amend rewrote after the fact. CI runs the same list over a pull
-request's own commits, so the rules bind someone who never installed the hooks
-as well.
+`scripts/git-pre-commit.sh` runs `rustfmt`, ESLint, Prettier, `ruff` and
+`shellcheck` over a checkout of the index, so an unstaged edit neither fails a
+commit nor sneaks through one, plus `commentflow --check` and `shfmt -d` on
+staged shell. It does not build, test or check generated-artifact drift; that
+is what the gate is for. `scripts/git-commit-msg.sh` holds the message to the
+rules in codetrial-conventions, and `scripts/git-pre-push.sh` replays them over
+commits a rebase or an amend rewrote after the fact. CI runs the same list over
+a pull request's own commits, so the rules bind someone who never installed the
+hooks as well.
 
 The hooks have their own suite. `scripts/test-git-hooks.sh` builds a scratch
 repository, installs the hooks into it and drives every case: the messages that
