@@ -57,8 +57,8 @@ fn prompt_golden_digest_matches_versions() {
     // its hash is a string nothing checks. The pair is still asserted, because
     // the failure worth catching is a version bumped with the golden left
     // alone, which a digest comparison on its own reads as fine.
-    let recorded_versions = (8, 13);
-    let recorded_digest = "b250d8d7824b45c49954903949980a38c9f7a08d713b4d252ec4b8c8780cb051";
+    let recorded_versions = (9, 13);
+    let recorded_digest = "c0a758f511f707966cc7b76cf5a8b728db2f22226625678968dabc63f45b13b6";
 
     assert_eq!(
         (LIVE_PROMPT_VERSION, REPORT_PROMPT_VERSION),
@@ -182,7 +182,7 @@ fn interview_prompt_pins_reacto_star_and_safety_boundaries() {
     // The platform closes the STAR steps of a round that never opened itself,
     // so neither prompt spends a tool round trip on them before the candidate
     // hears anything.
-    assert!(!time_warning().contains("record_framework_evidence"));
+    assert!(!time_warning(false).contains("record_framework_evidence"));
     assert!(!wrap_up("candidate_ended", false).contains("record_framework_evidence"));
 
     // The timing skip is the rule and the refusal the one exception to it. A
@@ -221,10 +221,10 @@ fn interview_prompt_pins_reacto_star_and_safety_boundaries() {
         language_choice("Java", LanguageChoiceContext::SwitchWithCode),
         silence_nudge("(the editor is currently empty)", None),
         proactive_review("1| answer = []", None),
-        time_warning(),
+        time_warning(false),
         wrap_up("time_up", false),
-        test_results_reaction("2/3 passed", false, None),
-        test_results_reaction("3/3 passed", true, None),
+        test_results_reaction("2/3 passed", false, TestRecord::Record, None),
+        test_results_reaction("3/3 passed", true, TestRecord::Record, None),
     ]
     .join("\n");
     assert!(
@@ -951,16 +951,16 @@ fn interview_contract_versions_are_one_closed_bundle() {
         "the bundle table has no row for {INTERVIEW_CONTRACT_BUNDLE_VERSION}"
     );
 
-    assert_eq!(INTERVIEW_CONTRACT_BUNDLE_VERSION, 16);
-    assert_eq!(LIVE_PROMPT_VERSION, 8);
+    assert_eq!(INTERVIEW_CONTRACT_BUNDLE_VERSION, 17);
+    assert_eq!(LIVE_PROMPT_VERSION, 9);
     assert_eq!(REPORT_PROMPT_VERSION, 13);
     assert_eq!(RUBRIC_VERSION, 1);
     assert_eq!(REPORT_SCHEMA_VERSION, 2);
     assert_eq!(
         interview_contract_json(),
         json!({
-            "bundleVersion": 16,
-            "livePromptVersion": 8,
+            "bundleVersion": 17,
+            "livePromptVersion": 9,
             "reportPromptVersion": 13,
             "rubricVersion": 1,
             "reportSchemaVersion": 2,

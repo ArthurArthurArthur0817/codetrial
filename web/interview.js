@@ -98,7 +98,7 @@ import {
 } from "./recording-state.js";
 import { assignedId as randomId, saveReportHistory } from "./history.js";
 import { createFacePresenceDetector, facePresenceVerdict } from "./face-presence.js";
-import { harnessGap, languagesFor } from "./compiler-explorer.js";
+import { COMPILED_LANGUAGES, compiledTestsEnabled, harnessGap, languagesFor } from "./compiler-explorer.js";
 import { parseCandidateCase, runBrowserTests } from "./runners.js";
 import { mountBehavioralReview } from "./behavioral-review.js";
 import { consumeGroundingPacket } from "./document-grounding.js";
@@ -186,7 +186,8 @@ const judgePromise = loadJudge(problem.page).catch(() => null);
 // read threw, the catch took it for an empty list, and every reload lost the
 // candidate's saved cases.
 const candidateCaseStorageKey = `codetrial.candidateCases.${problem.page}`;
-let languages = languagesFor(null);
+/// Filled by `applyLanguages`, which `init` calls before anything reads it.
+let languages = [];
 /// What the lobby asked for, until `/api/token` says what it got. The range
 /// here mirrors the server's own and is the fallback for a URL that arrives
 /// without passing through the lobby; the answer below is what the interview
@@ -387,6 +388,7 @@ async function init() {
   state.transcript = createTranscriptView(document, nodes.transcriptPanel);
   renderRuntimeConfig();
   renderProblem();
+  applyLanguages(null);
   setLanguage("python");
   bindEvents();
   // After bindEvents, so the callback cannot beat the row it edits: everything
@@ -431,9 +433,7 @@ async function init() {
 function renderRuntimeConfig() {
   // No origin literal here: /runtime-config.js supplies it, and the server is
   // the only place that may name it, because the same value builds the CSP.
-  const enabled = globalThis.CODETRIAL_COMPILER_EXPLORER_ENABLED !== false
-    && globalThis.CODETRIAL_COMPILER_EXPLORER_BASE_URL !== "";
-  nodes.compileDisclosure.textContent = enabled
+  nodes.compileDisclosure.textContent = compiledTestsEnabled()
     ? "C, C++ and Java runs are sent to Compiler Explorer."
     : "C, C++ and Java test runs are disabled by this server.";
 }
@@ -1623,7 +1623,12 @@ async function runTests() {
   state.latestSummary = summary;
   state.testStatus = finalRunnerStatus(summary, state.testStatus);
   renderResults(summary);
-  publish(topics.tests, testPayload(summary));
+  // Test is credited from this message alone, so one that fails to send (a
+  // buffer past the data channel's limit, a dropped link) has to say so: the
+  // candidate sees results the interviewer never received.
+  publish(topics.tests, testPayload(summary))?.catch(() => {
+    nodes.resultsLabel.textContent = "Test results (not sent to the interviewer; run again)";
+  });
   recordReplay("tests", {
     passed: summary.passed,
     failed: Math.max(0, summary.total - summary.passed),
@@ -1753,7 +1758,7 @@ function updateRunAvailability() {
 
 function firstRunnerStatus(language) {
   if (language === "python") return "booting";
-  if (["c", "cpp", "java"].includes(language)) return "compiling";
+  if (COMPILED_LANGUAGES.includes(language)) return "compiling";
   return "running";
 }
 

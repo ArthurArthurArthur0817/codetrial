@@ -9,6 +9,8 @@
         "language": "python",
         "setupError": null,
         "diagnostic": null,
+        "runnerUnavailable": false,
+        "code": "def match_pair(amounts, total):\n    seen = {}\n    return []\n",
         "failures": [],
         "candidateCases": [],
         "at": 1770000000000
@@ -22,6 +24,8 @@
         "language": "python",
         "setupError": null,
         "diagnostic": null,
+        "runnerUnavailable": false,
+        "code": "def match_pair(amounts, total):\n    seen = {}\n    return []\n",
         "failures": [
           {
             "label": "example 2",
@@ -48,6 +52,8 @@
         "language": "python",
         "setupError": null,
         "diagnostic": null,
+        "runnerUnavailable": false,
+        "code": "def match_pair(amounts, total):\n    seen = {}\n    return []\n",
         "failures": [
           {
             "label": "example 1",
@@ -86,6 +92,8 @@
         "language": "python",
         "setupError": null,
         "diagnostic": null,
+        "runnerUnavailable": false,
+        "code": "def match_pair(amounts, total):\n    seen = {}\n    return []\n",
         "failures": [],
         "candidateCases": [
           {
@@ -133,8 +141,25 @@
         "passed": 0,
         "total": 0,
         "language": "cpp",
-        "setupError": "Compiler Explorer returned 503",
+        "setupError": "Compilation failed: expected expression",
         "diagnostic": null,
+        "runnerUnavailable": false,
+        "code": "def match_pair(amounts, total):\n    seen = {}\n    return []\n",
+        "failures": [],
+        "candidateCases": [],
+        "at": 1770000000000
+      }
+    },
+    {
+      "name": "runner unavailable",
+      "payload": {
+        "passed": 0,
+        "total": 0,
+        "language": "python",
+        "setupError": "The test cases could not be loaded. Check your connection and run again.",
+        "diagnostic": null,
+        "runnerUnavailable": true,
+        "code": "def match_pair(amounts, total):\n    seen = {}\n    return []\n",
         "failures": [],
         "candidateCases": [],
         "at": 1770000000000
@@ -150,6 +175,8 @@
         "diagnostic": {
           "category": "timeout"
         },
+        "runnerUnavailable": false,
+        "code": null,
         "failures": [],
         "candidateCases": [],
         "at": 1770000000000
@@ -165,6 +192,8 @@
         "diagnostic": {
           "category": "other"
         },
+        "runnerUnavailable": false,
+        "code": null,
         "failures": [],
         "candidateCases": [],
         "at": 1770000000000
@@ -180,6 +209,8 @@
         "diagnostic": {
           "category": "runtime_signal"
         },
+        "runnerUnavailable": false,
+        "code": null,
         "failures": [],
         "candidateCases": [],
         "at": 1770000000000

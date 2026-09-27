@@ -119,6 +119,23 @@ fn with_written_code(state: RuntimeState) -> RuntimeState {
     }
 }
 
+/// The source an observation of `phase` is recorded from: Test is the run's.
+fn observed_source(phase: &str) -> &'static str {
+    if phase == "test" {
+        "test_event"
+    } else {
+        "candidate_speech"
+    }
+}
+
+/// A run that executed one case against the code in the editor now. The unit
+/// tests keep the same helper in tests/unit/livekit.rs, which this crate cannot
+/// reach; change the two together.
+fn receive_test_run(state: &mut RuntimeState) {
+    let run = json!({"passed": 1, "total": 1, "code": state.code, "language": state.language});
+    apply_data_event(state, TOPIC_TEST_RESULTS, &run, 99.0);
+}
+
 /// A state whose clock has reached the point the browser announces the warning
 /// at, which the agent now checks before believing the packet.
 fn near_time_up(state: RuntimeState) -> RuntimeState {
@@ -190,7 +207,7 @@ fn prompt_samples() -> Value {
         ],
         ..RuntimeState::default()
     };
-    json!({
+    let mut prompts = json!({
         "resume": resume(false),
         "resumeBehavioral": resume(true),
         "roundStarted": round_started(),
@@ -235,7 +252,7 @@ fn prompt_samples() -> Value {
         "coldRestartEmpty": cold_restart(&RuntimeState::default()),
         "review": proactive_review(&working_changed, Some(&excerpt)),
         "reviewWithoutExcerpt": proactive_review(&working, None),
-        "time": time_warning(),
+        "time": time_warning(false),
         "wrapCandidate": wrap_up("candidate_ended", false),
         "wrapTimer": wrap_up("time_up", false),
         "wrapBehavioral": wrap_up("time_up", true),
@@ -258,10 +275,11 @@ fn prompt_samples() -> Value {
         }),
         "interimSystem": interim_system_instruction(),
         "reportSystem": report_system_instruction(),
-        "testsPass": test_results_reaction("3/3 passed", true, None),
+        "testsPass": test_results_reaction("3/3 passed", true, TestRecord::Record, None),
         "testsFail": test_results_reaction(
             "2/3 passed",
             false,
+            TestRecord::Record,
             changed_excerpt("python", "", "def two_sum(nums, target):\n    return []").as_deref(),
         ),
         "testsSetupError": test_setup_error_reaction("The runner could not start.", None),
@@ -363,7 +381,41 @@ fn prompt_samples() -> Value {
             practice_level: None,
             evidence: "",
         }),
-    })
+    });
+
+    // Outside the literal because more keys there pass the json! macro's
+    // recursion limit. The map is sorted, so where a key is added changes
+    // nothing in the golden.
+    prompts["timeRunnerMissing"] = json!(time_warning(true));
+    prompts["testsPassRunAgain"] = json!(test_results_reaction(
+        "3/3 passed",
+        true,
+        TestRecord::RunAgain,
+        None
+    ));
+    prompts["testsRecordEarlier"] = json!(test_results_reaction(
+        "3/3 passed",
+        true,
+        TestRecord::RecordEarlier,
+        None
+    ));
+    prompts["testsFailNotRecordable"] = json!(test_results_reaction(
+        "2/3 passed",
+        false,
+        TestRecord::Settled,
+        None
+    ));
+    prompts["testsFailRunAgain"] = json!(test_results_reaction(
+        "2/3 passed",
+        false,
+        TestRecord::RunAgain,
+        None
+    ));
+    prompts["testsRunnerUnavailable"] = json!(test_runner_unavailable_reaction(
+        "Compiler Explorer returned HTTP 503.",
+        None
+    ));
+    prompts
 }
 
 fn valid_strict_report() -> Value {
@@ -451,8 +503,9 @@ fn past_the_coding_round(state: &mut RuntimeState) {
 /// round transition's completion gate opens the behavioral round.
 fn past_the_coding_gate(state: &mut RuntimeState) {
     past_the_coding_round(state);
+    receive_test_run(state);
     for phase in ["test", "optimizations"] {
-        record_framework_evidence(state, &json!({"phase": phase, "source": "candidate_speech", "kind": "observed", "confidence": 90, "summary": format!("candidate completed {phase}")})).unwrap();
+        record_framework_evidence(state, &json!({"phase": phase, "source": observed_source(phase), "kind": "observed", "confidence": 90, "summary": format!("candidate completed {phase}")})).unwrap();
     }
 }
 
@@ -483,7 +536,7 @@ fn evaluation_reaction(case: &Value, state: &mut RuntimeState) -> String {
                 TOPIC_TEST_RESULTS,
                 &json!({
                     "language": "python", "passed": if all_passed { 3 } else { 1 },
-                    "total": 3, "cases": [], "setupError": null
+                    "total": 3, "cases": [], "setupError": null, "code": state.code
                 }),
                 99.0,
             );
