@@ -3,7 +3,11 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 
-import { DEFAULT_RUNTIME_CONFIG, launchChromium, startStaticServer } from "./source.js";
+import {
+  DEFAULT_RUNTIME_CONFIG,
+  launchChromium,
+  startStaticServer,
+} from "./source.js";
 
 let browser = null;
 let server = null;
@@ -12,7 +16,9 @@ let base = "";
 before(async () => {
   browser = await launchChromium();
   if (!browser) return;
-  ({ server, base } = await startStaticServer({ runtimeConfig: DEFAULT_RUNTIME_CONFIG }));
+  ({ server, base } = await startStaticServer({
+    runtimeConfig: DEFAULT_RUNTIME_CONFIG,
+  }));
 });
 
 after(async () => {
@@ -31,7 +37,9 @@ async function editorPage(t) {
   const page = await browser.newPage();
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  await page.goto(`${base}/interview.html?problem=chargeback-pair-match`, { waitUntil: "domcontentloaded" });
+  await page.goto(`${base}/interview.html?problem=chargeback-pair-match`, {
+    waitUntil: "domcontentloaded",
+  });
   await page.waitForSelector("#editor:not([disabled])");
   // The media preflight overlay sits over the editor until a candidate (or a
   // stubbed device) clears it, and it blocks Playwright's own click on
@@ -44,7 +52,9 @@ async function editorPage(t) {
   // assertion below about exactly the characters this test types.
   await page.keyboard.press("ControlOrMeta+A");
   await page.keyboard.press("Delete");
-  await page.waitForFunction(() => document.querySelector("#editor").value === "");
+  await page.waitForFunction(
+    () => document.querySelector("#editor").value === "",
+  );
   return { page, errors };
 }
 
@@ -54,7 +64,11 @@ async function editorPage(t) {
 const caretState = (page) =>
   page.evaluate(() => {
     const editor = document.querySelector("#editor");
-    return { value: editor.value, start: editor.selectionStart, end: editor.selectionEnd };
+    return {
+      value: editor.value,
+      start: editor.selectionStart,
+      end: editor.selectionEnd,
+    };
   });
 
 test("typing an opening bracket auto-closes it, in a real browser", async (t) => {
@@ -64,7 +78,11 @@ test("typing an opening bracket auto-closes it, in a real browser", async (t) =>
   try {
     await page.keyboard.type("(");
     assert.deepEqual(await caretState(page), { value: "()", start: 1, end: 1 });
-    assert.deepEqual(errors, [], `typing "(" threw in the browser: ${errors[0]}`);
+    assert.deepEqual(
+      errors,
+      [],
+      `typing "(" threw in the browser: ${errors[0]}`,
+    );
   } finally {
     await page.close();
   }
@@ -78,8 +96,16 @@ test("closing a pair by hand types over the closer instead of doubling it, in a 
     await page.keyboard.type("(");
     await page.keyboard.type("value");
     await page.keyboard.type(")");
-    assert.deepEqual(await caretState(page), { value: "(value)", start: 7, end: 7 });
-    assert.deepEqual(errors, [], `closing the pair threw in the browser: ${errors[0]}`);
+    assert.deepEqual(await caretState(page), {
+      value: "(value)",
+      start: 7,
+      end: 7,
+    });
+    assert.deepEqual(
+      errors,
+      [],
+      `closing the pair threw in the browser: ${errors[0]}`,
+    );
   } finally {
     await page.close();
   }
@@ -96,7 +122,11 @@ test("Backspace right after an auto-closed pair removes both characters, in a re
     await page.keyboard.type("(");
     await page.keyboard.press("Backspace");
     assert.equal(await page.locator("#editor").inputValue(), "");
-    assert.deepEqual(errors, [], `Backspace on an empty pair threw in the browser: ${errors[0]}`);
+    assert.deepEqual(
+      errors,
+      [],
+      `Backspace on an empty pair threw in the browser: ${errors[0]}`,
+    );
   } finally {
     await page.close();
   }

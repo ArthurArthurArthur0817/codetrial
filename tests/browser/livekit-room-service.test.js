@@ -45,8 +45,17 @@ async function twirpServer(reply) {
     request.setEncoding("utf8");
     request.on("data", (chunk) => (body += chunk));
     request.on("end", () => {
-      requests.push({ method: request.method, url: request.url, headers: request.headers, body });
-      const { status = 200, text = "{}", type = "application/json" } = reply(request.url) ?? {};
+      requests.push({
+        method: request.method,
+        url: request.url,
+        headers: request.headers,
+        body,
+      });
+      const {
+        status = 200,
+        text = "{}",
+        type = "application/json",
+      } = reply(request.url) ?? {};
       response.writeHead(status, { "Content-Type": type }).end(text);
     });
   });
@@ -86,23 +95,39 @@ test("a missing LIVEKIT_URL is named, not dereferenced", () => {
   // `null`, not `undefined`: the parameter defaults to `process.env.LIVEKIT_URL`,
   // so `undefined` tests whatever the shell running the suite happens to
   // export and passes for the wrong reason on a developer's machine.
-  assert.throws(() => roomService.livekitHttpBase(null), /LIVEKIT_URL is not set/);
-  assert.throws(() => roomService.livekitHttpBase("  "), /LIVEKIT_URL is not set/);
+  assert.throws(
+    () => roomService.livekitHttpBase(null),
+    /LIVEKIT_URL is not set/,
+  );
+  assert.throws(
+    () => roomService.livekitHttpBase("  "),
+    /LIVEKIT_URL is not set/,
+  );
 
   // And the default path itself, with the variable owned by the case rather
   // than inherited.
   return withEnv("", () => {
-    assert.throws(() => roomService.livekitHttpBase(), /LIVEKIT_URL is not set/);
+    assert.throws(
+      () => roomService.livekitHttpBase(),
+      /LIVEKIT_URL is not set/,
+    );
   });
 });
 
 test("a 200 that is not JSON says which call and what came back", async () => {
   // A proxy answering instead of LiveKit. "Unexpected end of JSON input" on
   // its own names neither.
-  const server = await twirpServer(() => ({ text: "<html>hello</html>", type: "text/html" }));
+  const server = await twirpServer(() => ({
+    text: "<html>hello</html>",
+    type: "text/html",
+  }));
   try {
     const error = await withEnv(server.url, () =>
-      roomService.listRoomParticipants("interview-abc").then(() => null, (thrown) => thrown));
+      roomService.listRoomParticipants("interview-abc").then(
+        () => null,
+        (thrown) => thrown,
+      ),
+    );
     assert.match(error.message, /ListParticipants returned invalid JSON/);
     assert.match(error.message, /<html>hello<\/html>/);
   } finally {
@@ -132,25 +157,38 @@ test("the admin token carries the grant src/token.rs signs", () => {
     // agree with a wrong algorithm too.
     assert.equal(
       signature,
-      crypto.createHmac("sha256", SECRET).update(`${header}.${payload}`).digest("base64url"),
+      crypto
+        .createHmac("sha256", SECRET)
+        .update(`${header}.${payload}`)
+        .digest("base64url"),
     );
   });
 });
 
 test("listing a room posts a signed Twirp request and returns its participants", async () => {
   const server = await twirpServer(() => ({
-    text: JSON.stringify({ participants: [{ identity: "interviewer-x", permission: { agent: true } }] }),
+    text: JSON.stringify({
+      participants: [
+        { identity: "interviewer-x", permission: { agent: true } },
+      ],
+    }),
   }));
   try {
     const participants = await withEnv(server.url, () =>
-      roomService.listRoomParticipants("interview-abc"));
-    assert.deepEqual(participants, [{ identity: "interviewer-x", permission: { agent: true } }]);
+      roomService.listRoomParticipants("interview-abc"),
+    );
+    assert.deepEqual(participants, [
+      { identity: "interviewer-x", permission: { agent: true } },
+    ]);
     assert.equal(server.requests.length, 1);
     const [request] = server.requests;
     assert.equal(request.method, "POST");
     assert.equal(request.url, "/twirp/livekit.RoomService/ListParticipants");
     assert.deepEqual(JSON.parse(request.body), { room: "interview-abc" });
-    assert.match(request.headers.authorization, /^Bearer [\w-]+\.[\w-]+\.[\w-]+$/);
+    assert.match(
+      request.headers.authorization,
+      /^Bearer [\w-]+\.[\w-]+\.[\w-]+$/,
+    );
     assert.equal(request.headers["content-type"], "application/json");
   } finally {
     await server.close();
@@ -162,7 +200,9 @@ test("an empty room comes back as no participants, not as undefined", async () =
   const server = await twirpServer(() => ({ text: "{}" }));
   try {
     assert.deepEqual(
-      await withEnv(server.url, () => roomService.listRoomParticipants("interview-abc")),
+      await withEnv(server.url, () =>
+        roomService.listRoomParticipants("interview-abc"),
+      ),
       [],
     );
   } finally {
@@ -173,11 +213,18 @@ test("an empty room comes back as no participants, not as undefined", async () =
 test("a Twirp refusal carries its status and its code", async () => {
   const server = await twirpServer(() => ({
     status: 404,
-    text: JSON.stringify({ code: "not_found", msg: "requested room does not exist" }),
+    text: JSON.stringify({
+      code: "not_found",
+      msg: "requested room does not exist",
+    }),
   }));
   try {
     const error = await withEnv(server.url, () =>
-      roomService.listRoomParticipants("interview-abc").then(() => null, (thrown) => thrown));
+      roomService.listRoomParticipants("interview-abc").then(
+        () => null,
+        (thrown) => thrown,
+      ),
+    );
     assert.ok(error, "listing a missing room must reject");
     assert.equal(error.status, 404);
     assert.equal(error.code, "not_found");
@@ -191,10 +238,18 @@ test("a 404 that is not a Twirp answer is not treated as a missing room", async 
   // A wrong base URL or proxy prefix answers 404 with an HTML error page. Read
   // as "not there yet" it makes the caller retry for its whole timeout and
   // then report something else.
-  const server = await twirpServer(() => ({ status: 404, text: "<html>no route</html>", type: "text/html" }));
+  const server = await twirpServer(() => ({
+    status: 404,
+    text: "<html>no route</html>",
+    type: "text/html",
+  }));
   try {
     const error = await withEnv(server.url, () =>
-      roomService.listRoomParticipants("interview-abc").then(() => null, (thrown) => thrown));
+      roomService.listRoomParticipants("interview-abc").then(
+        () => null,
+        (thrown) => thrown,
+      ),
+    );
     assert.equal(error.status, 404);
     assert.equal(error.code, undefined);
     assert.equal(roomService.isGone(error), false);
@@ -206,22 +261,40 @@ test("a 404 that is not a Twirp answer is not treated as a missing room", async 
 test("removing a participant that already left is not a failure", async () => {
   const server = await twirpServer(() => ({
     status: 404,
-    text: JSON.stringify({ code: "not_found", msg: "participant does not exist" }),
+    text: JSON.stringify({
+      code: "not_found",
+      msg: "participant does not exist",
+    }),
   }));
   try {
-    await withEnv(server.url, () => roomService.removeParticipant("interview-abc", "stray"));
-    assert.equal(server.requests[0].url, "/twirp/livekit.RoomService/RemoveParticipant");
-    assert.deepEqual(JSON.parse(server.requests[0].body), { room: "interview-abc", identity: "stray" });
+    await withEnv(server.url, () =>
+      roomService.removeParticipant("interview-abc", "stray"),
+    );
+    assert.equal(
+      server.requests[0].url,
+      "/twirp/livekit.RoomService/RemoveParticipant",
+    );
+    assert.deepEqual(JSON.parse(server.requests[0].body), {
+      room: "interview-abc",
+      identity: "stray",
+    });
   } finally {
     await server.close();
   }
 });
 
 test("removing a participant still fails on anything else", async () => {
-  const server = await twirpServer(() => ({ status: 500, text: JSON.stringify({ code: "internal" }) }));
+  const server = await twirpServer(() => ({
+    status: 500,
+    text: JSON.stringify({ code: "internal" }),
+  }));
   try {
     const error = await withEnv(server.url, () =>
-      roomService.removeParticipant("interview-abc", "stray").then(() => null, (thrown) => thrown));
+      roomService.removeParticipant("interview-abc", "stray").then(
+        () => null,
+        (thrown) => thrown,
+      ),
+    );
     assert.ok(error, "a 500 must reach the caller");
     assert.equal(error.status, 500);
     assert.match(error.message, /RemoveParticipant failed: 500/);

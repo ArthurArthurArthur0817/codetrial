@@ -29,7 +29,10 @@ test("STAR rewrite contains only candidate fields plus fixed labels", () => {
     Result: "Latency recovered.",
   };
   const rewrite = starRewrite(fields);
-  assert.equal(rewrite, "Situation: The checkout timed out.\nTask: I owned diagnosis.\nAction: I inspected traces.\nResult: Latency recovered.");
+  assert.equal(
+    rewrite,
+    "Situation: The checkout timed out.\nTask: I owned diagnosis.\nAction: I inspected traces.\nResult: Latency recovered.",
+  );
   for (const value of Object.values(fields)) assert.ok(rewrite.includes(value));
   assert.equal(starRewrite({}), "");
 });
@@ -56,7 +59,10 @@ test("behavioral review escapes hostile transcript and stays absent without cand
 // reset id in the mount fails the drive and passed all three, since `/#star-reset/`
 // matches `#star-reset-draft`; deleting the wiring outright fails both.
 test("the review is a local rewrite of the candidate's own words and nothing else", () => {
-  const source = readFileSync(new URL("../../web/behavioral-review.js", import.meta.url), "utf8");
+  const source = readFileSync(
+    new URL("../../web/behavioral-review.js", import.meta.url),
+    "utf8",
+  );
   // No provider: a suggestion that reached a model would be the app putting
   // words in the candidate's mouth, which is the thing this feature is not.
   assert.doesNotMatch(source, /\bfetch\s*\(|Gemini|\/api\//);
@@ -70,11 +76,17 @@ test("the tagging form is laid out, not left as running text", () => {
   // rule for it the pair laid out inline, so each box sat between its own name
   // and the next one and the fourth wrapped alone onto a second line. Asserted
   // here because nothing else in the suite looks at how this renders.
-  const css = readFileSync(new URL("../../web/styles.css", import.meta.url), "utf8");
+  const css = readFileSync(
+    new URL("../../web/styles.css", import.meta.url),
+    "utf8",
+  );
   assert.match(css, /\.star-fields \{[^}]*display: grid;/s);
   assert.match(css, /\.star-field \{[^}]*flex-direction: column;/s);
   assert.match(css, /#star-suggestion label \{[^}]*display: block;/s);
-  assert.match(css, /\.star-field textarea,\s*#star-suggestion textarea \{[^}]*width: 100%;/s);
+  assert.match(
+    css,
+    /\.star-field textarea,\s*#star-suggestion textarea \{[^}]*width: 100%;/s,
+  );
 });
 
 /// A fragment-level stand-in for the part of a document `mountBehavioralReview`
@@ -91,8 +103,15 @@ test("the tagging form is laid out, not left as running text", () => {
 function reportRoot() {
   const nodes = [];
   const build = (markup) => {
-    for (const [, tag, attributes] of markup.matchAll(/<([a-zA-Z][\w-]*)((?:\s+[\w-]+="[^"]*")*)/g)) {
-      const attrs = Object.fromEntries([...attributes.matchAll(/([\w-]+)="([^"]*)"/g)].map((it) => [it[1], it[2]]));
+    for (const [, tag, attributes] of markup.matchAll(
+      /<([a-zA-Z][\w-]*)((?:\s+[\w-]+="[^"]*")*)/g,
+    )) {
+      const attrs = Object.fromEntries(
+        [...attributes.matchAll(/([\w-]+)="([^"]*)"/g)].map((it) => [
+          it[1],
+          it[2],
+        ]),
+      );
       nodes.push({
         tag,
         attrs,
@@ -114,15 +133,23 @@ function reportRoot() {
     }
   };
   const findAll = (selector) => {
-    const match = selector.match(/^#([\w-]+)$|^\[([\w-]+)(?:="([^"]*)")?\]$|^\.([\w-]+)$/);
-    if (!match) throw new Error(`the fragment stub does not implement the selector: ${selector}`);
+    const match = selector.match(
+      /^#([\w-]+)$|^\[([\w-]+)(?:="([^"]*)")?\]$|^\.([\w-]+)$/,
+    );
+    if (!match)
+      throw new Error(
+        `the fragment stub does not implement the selector: ${selector}`,
+      );
     const [, id, attribute, attributeValue, className] = match;
     return nodes.filter((node) => {
       if (node.removed) return false;
       if (id !== undefined) return node.attrs.id === id;
       if (attribute !== undefined) {
         if (!(attribute in node.attrs)) return false;
-        return attributeValue === undefined || node.attrs[attribute] === attributeValue;
+        return (
+          attributeValue === undefined ||
+          node.attrs[attribute] === attributeValue
+        );
       }
       return (node.attrs.class || "").split(/\s+/).includes(className);
     });
@@ -149,17 +176,34 @@ function reportRoot() {
 test("the review draft is rebuilt from the fields on every edit and on reset", () => {
   const { root, find, findAll, inserted } = reportRoot();
 
-  assert.equal(mountBehavioralReview(root, [
-    { speaker: "candidate", text: "We lost the checkout queue.", final: true },
-  ]), true);
-  assert.deepEqual(inserted.map((it) => it.position), ["beforebegin"],
-    "the section goes in before the report actions, once");
+  assert.equal(
+    mountBehavioralReview(root, [
+      {
+        speaker: "candidate",
+        text: "We lost the checkout queue.",
+        final: true,
+      },
+    ]),
+    true,
+  );
+  assert.deepEqual(
+    inserted.map((it) => it.position),
+    ["beforebegin"],
+    "the section goes in before the report actions, once",
+  );
 
   const rewrite = find("#star-rewrite");
-  assert.equal(rewrite.value, "", "nothing is drafted before the candidate tags anything");
+  assert.equal(
+    rewrite.value,
+    "",
+    "nothing is drafted before the candidate tags anything",
+  );
 
   const fields = findAll("[data-star-field]");
-  assert.deepEqual(fields.map((node) => node.attrs["data-star-field"]), STAR_FIELDS);
+  assert.deepEqual(
+    fields.map((node) => node.attrs["data-star-field"]),
+    STAR_FIELDS,
+  );
 
   // Typing in one field redraws the whole draft, so a handler that fires but
   // reads the wrong node, or writes a constant, is visible here.
@@ -169,22 +213,34 @@ test("the review draft is rebuilt from the fields on every edit and on reset", (
 
   fields[2].value = "I drained it by hand.";
   fields[2].fire("input");
-  assert.equal(rewrite.value, "Situation: The checkout queue stalled.\nAction: I drained it by hand.");
+  assert.equal(
+    rewrite.value,
+    "Situation: The checkout queue stalled.\nAction: I drained it by hand.",
+  );
 
   // Reset is the same rebuild, so an edit the candidate made to the draft goes
   // back to what their fields say and no further.
   rewrite.value = "invented prose nobody said";
   find("#star-reset").fire("click");
-  assert.equal(rewrite.value, "Situation: The checkout queue stalled.\nAction: I drained it by hand.");
+  assert.equal(
+    rewrite.value,
+    "Situation: The checkout queue stalled.\nAction: I drained it by hand.",
+  );
 });
 
 test("dismissing the suggestion removes it and leaves the transcript standing", () => {
   const { root, find } = reportRoot();
-  mountBehavioralReview(root, [{ speaker: "candidate", text: "We lost the queue.", final: true }]);
+  mountBehavioralReview(root, [
+    { speaker: "candidate", text: "We lost the queue.", final: true },
+  ]);
 
   assert.notEqual(find("#star-suggestion"), null);
   find("#star-dismiss").fire("click");
-  assert.equal(find("#star-suggestion"), null, "the generated draft is what goes away");
+  assert.equal(
+    find("#star-suggestion"),
+    null,
+    "the generated draft is what goes away",
+  );
   // The candidate's own words are evidence and are not the app's to withdraw.
   assert.notEqual(find("#star-original"), null);
   assert.notEqual(find("#behavioral-review"), null);
@@ -194,10 +250,17 @@ test("dismissing the suggestion removes it and leaves the transcript standing", 
 // rather than left to discover an empty section on the page.
 test("a session with no candidate speech mounts nothing", () => {
   const { root, find, inserted } = reportRoot();
-  assert.equal(mountBehavioralReview(root, [
-    { speaker: "interviewer", text: "Tell me about a conflict.", final: true },
-    { speaker: "candidate", text: "still typing", final: false },
-  ]), false);
+  assert.equal(
+    mountBehavioralReview(root, [
+      {
+        speaker: "interviewer",
+        text: "Tell me about a conflict.",
+        final: true,
+      },
+      { speaker: "candidate", text: "still typing", final: false },
+    ]),
+    false,
+  );
   assert.deepEqual(inserted, []);
   assert.equal(find("#behavioral-review"), null);
 });

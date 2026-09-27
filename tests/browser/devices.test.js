@@ -47,16 +47,24 @@ function poolWith(getUserMedia, options = {}) {
     schedule: options.schedule,
     unschedule: options.unschedule,
   });
-  pool.configure("audio", { accept: (track) => Boolean(track), onTrack: () => {} });
-  pool.configure("video", { accept: (track) => Boolean(track), onTrack: () => {} });
+  pool.configure("audio", {
+    accept: (track) => Boolean(track),
+    onTrack: () => {},
+  });
+  pool.configure("video", {
+    accept: (track) => Boolean(track),
+    onTrack: () => {},
+  });
   return { pool, changes };
 }
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 test("a granted track of each kind lands in one stream", async () => {
-  const { pool } = poolWith(async (constraints) =>
-    new FakeStream([new FakeTrack(constraints.audio ? "audio" : "video")]));
+  const { pool } = poolWith(
+    async (constraints) =>
+      new FakeStream([new FakeTrack(constraints.audio ? "audio" : "video")]),
+  );
 
   pool.start();
   await settle();
@@ -126,8 +134,10 @@ test("disabling the camera leaves microphone retry enabled", async () => {
 });
 
 test("disabling a held camera releases it from the interview stream", async () => {
-  const { pool } = poolWith(async (constraints) =>
-    new FakeStream([new FakeTrack(constraints.audio ? "audio" : "video")]));
+  const { pool } = poolWith(
+    async (constraints) =>
+      new FakeStream([new FakeTrack(constraints.audio ? "audio" : "video")]),
+  );
 
   pool.start();
   await settle();
@@ -179,13 +189,17 @@ test("tracks the pool did not claim are stopped", async () => {
   const { pool } = poolWith(async (constraints) =>
     constraints.video
       ? new FakeStream([new FakeTrack("video"), spare])
-      : new FakeStream([new FakeTrack("audio")]));
+      : new FakeStream([new FakeTrack("audio")]),
+  );
 
   pool.start();
   await settle();
 
   assert.ok(spare.stopped, "the second video track was left running");
-  assert.equal(pool.stream.getTracks().filter((t) => t.kind === "video").length, 1);
+  assert.equal(
+    pool.stream.getTracks().filter((t) => t.kind === "video").length,
+    1,
+  );
 });
 
 // A grant that resolves after the preflight has no owner: the stream the
@@ -196,9 +210,10 @@ test("a track granted after the preflight is stopped, not adopted", async () => 
   const late = new FakeTrack("audio");
   let release;
   const { pool } = poolWith(
-    () => new Promise((resolve) => {
-      release = () => resolve(new FakeStream([late]));
-    }),
+    () =>
+      new Promise((resolve) => {
+        release = () => resolve(new FakeStream([late]));
+      }),
     { isFinished: () => finished, retryMs: 10_000 },
   );
 
@@ -231,7 +246,9 @@ test("dropping an ended track lets the retry ask for a replacement", async () =>
   let asked = 0;
   const { pool } = poolWith(async (constraints) => {
     asked += 1;
-    return new FakeStream([new FakeTrack(constraints.audio ? "audio" : "video")]);
+    return new FakeStream([
+      new FakeTrack(constraints.audio ? "audio" : "video"),
+    ]);
   });
 
   pool.start();
@@ -253,7 +270,9 @@ test("an ended track is replaced instead of counted as a device the pool holds",
   let asked = 0;
   const { pool } = poolWith(async (constraints) => {
     asked += 1;
-    return new FakeStream([new FakeTrack(constraints.audio ? "audio" : "video")]);
+    return new FakeStream([
+      new FakeTrack(constraints.audio ? "audio" : "video"),
+    ]);
   });
 
   pool.start();
@@ -281,8 +300,10 @@ test("an ended track is replaced instead of counted as a device the pool holds",
 // start over the new one.
 test("the caller is told when the pool drops a device that ended", async () => {
   const lost = [];
-  const { pool } = poolWith(async (constraints) =>
-    new FakeStream([new FakeTrack(constraints.audio ? "audio" : "video")]));
+  const { pool } = poolWith(
+    async (constraints) =>
+      new FakeStream([new FakeTrack(constraints.audio ? "audio" : "video")]),
+  );
   // Merged onto the hooks `poolWith` already set, because a caller that names
   // one of the three must not blank the other two.
   pool.configure("video", { onLost: () => lost.push("video") });
@@ -295,7 +316,11 @@ test("the caller is told when the pool drops a device that ended", async () => {
   pool.start();
   await settle();
 
-  assert.deepEqual(lost, ["video"], "the camera was replaced behind the caller's back");
+  assert.deepEqual(
+    lost,
+    ["video"],
+    "the camera was replaced behind the caller's back",
+  );
   assert.equal(pool.trackOf("video").readyState, "live");
 });
 
@@ -310,17 +335,26 @@ test("the caller is told when the pool drops a device that ended", async () => {
 // keep, and swapping the two lines reads just as naturally as leaving them.
 test("a dropped track is gone from the stream before the caller is told", async () => {
   const { pool } = poolWith(
-    async (constraints) => new FakeStream([new FakeTrack(constraints.audio ? "audio" : "video")]),
+    async (constraints) =>
+      new FakeStream([new FakeTrack(constraints.audio ? "audio" : "video")]),
     { retryMs: 10_000 },
   );
   pool.start();
   await settle();
 
   let seen = "not called";
-  pool.configure("audio", { onLost: () => { seen = pool.trackOf("audio"); } });
+  pool.configure("audio", {
+    onLost: () => {
+      seen = pool.trackOf("audio");
+    },
+  });
   pool.dropTrack(pool.trackOf("audio"));
 
-  assert.equal(seen, null, "onLost must not see the track it is being told about");
+  assert.equal(
+    seen,
+    null,
+    "onLost must not see the track it is being told about",
+  );
   assert.equal(pool.trackOf("audio"), null);
   pool.cancelRetry();
 });
@@ -329,7 +363,8 @@ test("a dropped track is gone from the stream before the caller is told", async 
 test("the pool's own drop of an ended track also removes before notifying", async () => {
   let finished = false;
   const { pool } = poolWith(
-    async (constraints) => new FakeStream([new FakeTrack(constraints.audio ? "audio" : "video")]),
+    async (constraints) =>
+      new FakeStream([new FakeTrack(constraints.audio ? "audio" : "video")]),
     { isFinished: () => finished, retryMs: 10 },
   );
   pool.start();
@@ -337,11 +372,19 @@ test("the pool's own drop of an ended track also removes before notifying", asyn
 
   pool.trackOf("audio").readyState = "ended";
   let seen = "not called";
-  pool.configure("audio", { onLost: () => { seen = pool.trackOf("audio"); } });
+  pool.configure("audio", {
+    onLost: () => {
+      seen = pool.trackOf("audio");
+    },
+  });
   pool.retry();
   await new Promise((resolve) => setTimeout(resolve, 30));
 
-  assert.equal(seen, null, "onLost must not see the ended track still in the stream");
+  assert.equal(
+    seen,
+    null,
+    "onLost must not see the ended track still in the stream",
+  );
   finished = true;
   pool.cancelRetry();
 });

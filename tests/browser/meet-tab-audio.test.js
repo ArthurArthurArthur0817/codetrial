@@ -11,7 +11,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { firstPartyScripts as webScripts, interviewSource, root } from "./source.js";
+import {
+  firstPartyScripts as webScripts,
+  interviewSource,
+  root,
+} from "./source.js";
 import { outputAfterRouting, outputOptions } from "../../web/meet-audio.js";
 
 const web = join(root, "web");
@@ -34,22 +38,36 @@ const steps = [
 
 test("meet-mode instructions", () => {
   for (const step of steps) {
-    assert.ok(page.includes(step), `interview.html must carry the step: ${step}`);
+    assert.ok(
+      page.includes(step),
+      `interview.html must carry the step: ${step}`,
+    );
   }
   // The two choices Meet gets wrong by default. Without both, the interviewer
   // watches a silent tab and nobody finds out until the interview starts.
-  assert.match(page, /Share <strong>A tab<\/strong>, not a window or your whole screen/);
+  assert.match(
+    page,
+    /Share <strong>A tab<\/strong>, not a window or your whole screen/,
+  );
   assert.match(page, /turn on\s+<strong>Share tab audio<\/strong>/);
   // The microphone cannot serve both, so the page must say where the
   // interviewer actually hears the candidate rather than implying Meet does.
-  assert.match(page, /Your microphone stays with CodeTrial and cannot also serve Meet/);
-  assert.match(page, /the interviewer\s+hears you by joining the interview room/);
+  assert.match(
+    page,
+    /Your microphone stays with CodeTrial and cannot also serve Meet/,
+  );
+  assert.match(
+    page,
+    /the interviewer\s+hears you by joining the interview room/,
+  );
   assert.match(page, /Google Meet controls who receives this interview/);
   assert.match(page, /outside CodeTrial's control/);
 });
 
 test("meet-mode dom ids", () => {
-  const ids = new Set([...page.matchAll(/id="([^"]+)"/g)].map((match) => match[1]));
+  const ids = new Set(
+    [...page.matchAll(/id="([^"]+)"/g)].map((match) => match[1]),
+  );
   // Only the ids no script queries. Everything reached by querySelector is
   // already covered generically by dom-contract.test.js, "every id a script
   // queries exists in the markup", so repeating them here proves nothing twice.
@@ -61,7 +79,11 @@ test("meet-mode dom ids", () => {
   // <ol> anywhere on the page would otherwise invert the slice.
   const start = page.indexOf('id="meet-mode-steps"');
   const list = page.slice(start, page.indexOf("</ol>", start));
-  assert.equal([...list.matchAll(/<li>/g)].length, 5, "the mode documents exactly five steps");
+  assert.equal(
+    [...list.matchAll(/<li>/g)].length,
+    5,
+    "the mode documents exactly five steps",
+  );
 });
 
 // A bare "no getUserMedia" is false: the media preflight is mandatory and has
@@ -71,12 +93,17 @@ test("meet-mode dom ids", () => {
 // dodges. One site, because the preflight asks per device through a single
 // request path: a second site means a new capture, not a second device.
 test("meet-mode getusermedia allowlist", () => {
-  const capture = /getUserMedia\s*\(|\[\s*["']getUserMedia["']\s*\]|getUserMedia\s*\.\s*(?:call|apply|bind)/g;
+  const capture =
+    /getUserMedia\s*\(|\[\s*["']getUserMedia["']\s*\]|getUserMedia\s*\.\s*(?:call|apply|bind)/g;
   const sites = firstPartyScripts.flatMap((name) =>
-    [...read(name).matchAll(capture)].map(() => name));
+    [...read(name).matchAll(capture)].map(() => name),
+  );
 
-  assert.deepEqual(sites, ["devices.js"],
-    "a new getUserMedia call site appeared; Meet mode must not capture audio for Meet");
+  assert.deepEqual(
+    sites,
+    ["devices.js"],
+    "a new getUserMedia call site appeared; Meet mode must not capture audio for Meet",
+  );
 });
 
 // These execute the decisions instead of reading them. The text assertions
@@ -116,10 +143,16 @@ test("sink routing keeps the preference and the real sink in agreement", () => {
   // Reapplying a stored preference passes the same id as both, so there is no
   // earlier device to fall back to. Returning it would write the refused id
   // back and retry it on every reload.
-  assert.equal(outputAfterRouting("same", "same", false), "",
-    "a refused reapply must clear the preference, not re-store it");
-  assert.equal(outputAfterRouting("same", "same", true), "same",
-    "and a reapply that works keeps it");
+  assert.equal(
+    outputAfterRouting("same", "same", false),
+    "",
+    "a refused reapply must clear the preference, not re-store it",
+  );
+  assert.equal(
+    outputAfterRouting("same", "same", true),
+    "same",
+    "and a reapply that works keeps it",
+  );
 });
 
 // What the executable tests above cannot see: that interview.js actually wires
@@ -127,17 +160,32 @@ test("sink routing keeps the preference and the real sink in agreement", () => {
 test("sink routing", () => {
   // setSinkId targets Jim's element and nothing else, so the candidate cannot
   // accidentally reroute their own microphone monitoring.
-  const sinkCalls = [...script.matchAll(/(\w+)\s*\n?\s*\.setSinkId\(/g)].map((match) => match[1]);
-  assert.deepEqual(sinkCalls, ["jimAudio"], "setSinkId may only target Jim's audio element");
-  assert.match(script, /element\.id = "jim-audio"/, "the remote audio element needs a stable id");
-  assert.match(script, /outputOptions\(devices, readStored\(AUDIO_OUTPUT_KEY\)\)/, "the selector is built from the shared decision");
+  const sinkCalls = [...script.matchAll(/(\w+)\s*\n?\s*\.setSinkId\(/g)].map(
+    (match) => match[1],
+  );
+  assert.deepEqual(
+    sinkCalls,
+    ["jimAudio"],
+    "setSinkId may only target Jim's audio element",
+  );
+  assert.match(
+    script,
+    /element\.id = "jim-audio"/,
+    "the remote audio element needs a stable id",
+  );
+  assert.match(
+    script,
+    /outputOptions\(devices, readStored\(AUDIO_OUTPUT_KEY\)\)/,
+    "the selector is built from the shared decision",
+  );
   // Persist before routing. A choice made during the preflight, before Jim's
   // track exists, is dropped if it only survives a successful setSinkId.
   // `applyAudioOutput` is the queue in front of this; the routing itself is
   // what has to get the order right.
   const apply = script.slice(script.indexOf("async function routeAudioOutput"));
   assert.ok(
-    apply.indexOf("writeStored(AUDIO_OUTPUT_KEY") < apply.indexOf(".setSinkId("),
+    apply.indexOf("writeStored(AUDIO_OUTPUT_KEY") <
+      apply.indexOf(".setSinkId("),
     "routing must persist before it routes",
   );
   // Serialized and stamped. Two picks in flight can settle in either order, and
@@ -152,10 +200,22 @@ test("sink routing", () => {
     /if \(request !== routingRequest\) return;/,
     "and a superseded request does not get the last word on the preference",
   );
-  assert.match(apply, /outputAfterRouting\(previous, deviceId, routed\)/, "rollback comes from the tested decision");
+  assert.match(
+    apply,
+    /outputAfterRouting\(previous, deviceId, routed\)/,
+    "rollback comes from the tested decision",
+  );
   // One element for the session, and it is released on unsubscribe.
-  assert.match(script, /jimAudio \?\? document\.createElement\("audio"\)/, "reuse one audio element");
-  assert.match(script, /TrackUnsubscribed, dropRemoteAudio/, "unsubscribed audio must be detached");
+  assert.match(
+    script,
+    /jimAudio \?\? document\.createElement\("audio"\)/,
+    "reuse one audio element",
+  );
+  assert.match(
+    script,
+    /TrackUnsubscribed, dropRemoteAudio/,
+    "unsubscribed audio must be detached",
+  );
   // Unsupported browsers get told, not silently downgraded, and the whole row
   // hides so the label does not dangle over a control that is gone.
   assert.match(script, /"setSinkId" in HTMLMediaElement\.prototype/);
@@ -165,9 +225,14 @@ test("sink routing", () => {
 
 test("no synthetic microphone", () => {
   const offenders = firstPartyScripts.filter((name) =>
-    /createMediaStreamDestination|getDisplayMedia/.test(read(name)));
+    /createMediaStreamDestination|getDisplayMedia/.test(read(name)),
+  );
 
-  assert.deepEqual(offenders, [], "CodeTrial must not build an audio bridge or capture the screen for Meet");
+  assert.deepEqual(
+    offenders,
+    [],
+    "CodeTrial must not build an audio bridge or capture the screen for Meet",
+  );
 });
 
 // Meet cannot open a camera CodeTrial is holding, so the release has to be
@@ -176,26 +241,52 @@ test("no synthetic microphone", () => {
 // the right thing through its existing null guard, instead of each one needing
 // to know about a mode flag.
 test("meet presentation releases the camera without accusing the candidate", () => {
-  assert.match(page, /id="meet-presentation"/, "the mode is chosen in the preflight, before the room starts");
-  assert.match(script, /camera\.stop\(\)/, "the device is released, not merely unwatched");
-  assert.match(script, /stream\.removeTrack\?\.\(camera\)/, "a stopped track left in the stream is still a track every reader sees");
+  assert.match(
+    page,
+    /id="meet-presentation"/,
+    "the mode is chosen in the preflight, before the room starts",
+  );
+  assert.match(
+    script,
+    /camera\.stop\(\)/,
+    "the device is released, not merely unwatched",
+  );
+  assert.match(
+    script,
+    /stream\.removeTrack\?\.\(camera\)/,
+    "a stopped track left in the stream is still a track every reader sees",
+  );
 
   // Released before connect(), so nothing downstream is ever handed a camera
   // that is about to vanish.
-  const release = script.indexOf("releaseCameraToPresenter(preflight.userStream)");
+  const release = script.indexOf(
+    "releaseCameraToPresenter(preflight.userStream)",
+  );
   const joinsRoom = script.indexOf("await connect(preflight");
   assert.notEqual(release, -1, "presentation mode must release the camera");
   assert.notEqual(joinsRoom, -1, "init must still join the room");
-  assert.ok(release < joinsRoom, "release before the room, or the publisher still sees the track");
+  assert.ok(
+    release < joinsRoom,
+    "release before the room, or the publisher still sees the track",
+  );
 
   // The mode must not leak back into the media pipeline as special cases.
   // These four all read the stream and get the right answer for free once the
   // track is gone; a flag check reappearing here means the fix regressed.
-  for (const fn of ["publishPreflightTracks", "monitorIntegrityTracks", "startIntegrityTrackStateMonitor", "integrityHeartbeatDetail"]) {
+  for (const fn of [
+    "publishPreflightTracks",
+    "monitorIntegrityTracks",
+    "startIntegrityTrackStateMonitor",
+    "integrityHeartbeatDetail",
+  ]) {
     const start = script.indexOf(`function ${fn}`);
     assert.notEqual(start, -1, `${fn} should still exist`);
     const body = script.slice(start, script.indexOf("\nfunction ", start + 1));
-    assert.doesNotMatch(body, /meetPresentation/, `${fn} must read the stream, not a mode flag`);
+    assert.doesNotMatch(
+      body,
+      /meetPresentation/,
+      `${fn} must read the stream, not a mode flag`,
+    );
   }
 
   // `presenting` was read inside connectLiveKit while only connect had it in
@@ -205,20 +296,36 @@ test("meet presentation releases the camera without accusing the candidate", () 
   // Jim greeted the candidate and then nothing worked. node --check cannot see
   // this and no node test can execute this file, so the scope is pinned as
   // text. A tripwire, not a proof.
-  assert.match(script, /async function connectLiveKit\(connection, preflight, presenting = false\)/,
-    "connectLiveKit reads `presenting`, so it must receive it");
-  assert.match(script, /await connectLiveKit\(connection, preflight, presenting\)/,
-    "and the caller must pass it");
+  assert.match(
+    script,
+    /async function connectLiveKit\(connection, preflight, presenting = false\)/,
+    "connectLiveKit reads `presenting`, so it must receive it",
+  );
+  assert.match(
+    script,
+    /await connectLiveKit\(connection, preflight, presenting\)/,
+    "and the caller must pass it",
+  );
   // The release is evidence, not silence: a report with no face events must not
   // read like one where the camera watched and saw nothing.
-  assert.match(script, /CAMERA_RELEASED_TO_PRESENTER/, "the release is recorded for human review");
+  assert.match(
+    script,
+    /CAMERA_RELEASED_TO_PRESENTER/,
+    "the release is recorded for human review",
+  );
   // Keyed on the candidate's choice, not on an empty stream. A camera that
   // died between the preflight and the room leaves the stream empty too, and
   // recording that as a deliberate release puts a claim in the signed trail
   // that the candidate never made.
   const connectFn = script.slice(script.indexOf("async function connect("));
-  const branch = connectFn.slice(connectFn.indexOf("startIntegrityHeartbeat()"));
-  assert.match(branch, /if \(presenting\)/, "the release event must key on intent");
+  const branch = connectFn.slice(
+    connectFn.indexOf("startIntegrityHeartbeat()"),
+  );
+  assert.match(
+    branch,
+    /if \(presenting\)/,
+    "the release event must key on intent",
+  );
   assert.doesNotMatch(
     branch.slice(0, branch.indexOf("CAMERA_RELEASED_TO_PRESENTER")),
     /getVideoTracks/,
@@ -241,10 +348,19 @@ test("meet presentation releases the camera without accusing the candidate", () 
 test("the media preflight retries through a single shared timer", () => {
   const source = read("devices.js");
   const scheduled = [...source.matchAll(/\bschedule\(/g)];
-  assert.equal(scheduled.length, 1,
-    "the start must be scheduled only by retry(), which collapses concurrent retries");
-  assert.match(source, /retryTimer \?\?= schedule\(/,
-    "the shared retry timer must not be replaced by a fresh one while it is pending");
-  assert.match(read("interview.js"), /pool\.cancelRetry\(\)/,
-    "finishing the preflight must cancel the pending retry");
+  assert.equal(
+    scheduled.length,
+    1,
+    "the start must be scheduled only by retry(), which collapses concurrent retries",
+  );
+  assert.match(
+    source,
+    /retryTimer \?\?= schedule\(/,
+    "the shared retry timer must not be replaced by a fresh one while it is pending",
+  );
+  assert.match(
+    read("interview.js"),
+    /pool\.cancelRetry\(\)/,
+    "finishing the preflight must cancel the pending retry",
+  );
 });

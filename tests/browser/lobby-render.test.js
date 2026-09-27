@@ -64,5 +64,9 @@ test("no other panel of the lobby speaks before anything has loaded", () => {
     const node = dom.node(id);
     if (node && node.spoken().length && !(id in SIGNED_OUT)) spoke.push(id);
   }
-  assert.deepEqual(spoke, [], "a panel put words on the lobby before it had any");
+  assert.deepEqual(
+    spoke,
+    [],
+    "a panel put words on the lobby before it had any",
+  );
 });

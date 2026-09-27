@@ -19,7 +19,8 @@ import {
 } from "../../web/audio-check.js";
 
 const silence = () => new Uint8Array(64).fill(128);
-const speech = () => Uint8Array.from({ length: 64 }, (_, i) => (i % 2 ? 200 : 60));
+const speech = () =>
+  Uint8Array.from({ length: 64 }, (_, i) => (i % 2 ? 200 : 60));
 const passingMedia = {
   outputConfirmed: true,
   micPeak: MIC_SILENT_PEAK,
@@ -28,9 +29,16 @@ const passingMedia = {
 
 test("peak level reads deviation from the analyser midpoint", () => {
   assert.equal(peakLevel(silence()), 0, "a flat 128 signal is silence");
-  assert.equal(peakLevel(new Uint8Array([128, 128, 0])), 1, "full negative swing");
+  assert.equal(
+    peakLevel(new Uint8Array([128, 128, 0])),
+    1,
+    "full negative swing",
+  );
   assert.equal(peakLevel(new Uint8Array([128, 256])), 1, "full positive swing");
-  assert.ok(peakLevel(speech()) > MIC_SILENT_PEAK, "ordinary speech clears the threshold");
+  assert.ok(
+    peakLevel(speech()) > MIC_SILENT_PEAK,
+    "ordinary speech clears the threshold",
+  );
   assert.equal(peakLevel(new Uint8Array()), 0, "no samples yet is not a crash");
 });
 
@@ -53,12 +61,16 @@ test("one loud frame does not prove the microphone works", () => {
     "a run of loud frames is speech",
   );
   assert.equal(
-    sustainedPeak([...Array(20).fill(quiet), ...Array(MIC_CONFIRM_FRAMES).fill(loud)]),
+    sustainedPeak([
+      ...Array(20).fill(quiet),
+      ...Array(MIC_CONFIRM_FRAMES).fill(loud),
+    ]),
     loud,
     "only the most recent frames matter",
   );
   assert.ok(
-    sustainedPeak(Array(MIC_CONFIRM_FRAMES).fill(MIC_SILENT_PEAK)) >= MIC_SILENT_PEAK,
+    sustainedPeak(Array(MIC_CONFIRM_FRAMES).fill(MIC_SILENT_PEAK)) >=
+      MIC_SILENT_PEAK,
     "sustained speech at the threshold still opens the gate",
   );
 });
@@ -72,7 +84,10 @@ test("a silent microphone keeps the room closed", () => {
 });
 
 test("a denied microphone reports the reason and stays closed", () => {
-  const state = mediaReadiness({ ...passingMedia, micError: "Permission denied" });
+  const state = mediaReadiness({
+    ...passingMedia,
+    micError: "Permission denied",
+  });
 
   assert.equal(state.ready, false);
   assert.equal(state.blocker, "mic-error");
@@ -118,7 +133,11 @@ test("the default state is closed, not open", () => {
 });
 
 test("each step reports itself so the panel can tick it off independently", () => {
-  assert.deepEqual(mediaReadiness().steps, { output: false, mic: false, camera: false });
+  assert.deepEqual(mediaReadiness().steps, {
+    output: false,
+    mic: false,
+    camera: false,
+  });
   assert.deepEqual(
     mediaReadiness({ micPeak: 1 }).steps,
     { output: false, mic: true, camera: false },
@@ -129,25 +148,40 @@ test("each step reports itself so the panel can tick it off independently", () =
     { output: true, mic: false, camera: false },
     "hearing the tone ticks even while the mic is silent",
   );
-  assert.deepEqual(mediaReadiness(passingMedia).steps, { output: true, mic: true, camera: true });
+  assert.deepEqual(mediaReadiness(passingMedia).steps, {
+    output: true,
+    mic: true,
+    camera: true,
+  });
 });
 
 test("a microphone failure un-ticks its step even after it once passed", () => {
   const state = mediaReadiness({ ...passingMedia, micError: "Device lost" });
 
-  assert.equal(state.steps.mic, false, "a lost device must not keep a stale tick");
+  assert.equal(
+    state.steps.mic,
+    false,
+    "a lost device must not keep a stale tick",
+  );
   assert.equal(state.steps.output, true, "the other step is unaffected");
   assert.equal(state.ready, false);
 });
 
 test("the tick threshold is the same one that gates joining", () => {
-  const justUnder = mediaReadiness({ ...passingMedia, micPeak: MIC_SILENT_PEAK - 0.001 });
+  const justUnder = mediaReadiness({
+    ...passingMedia,
+    micPeak: MIC_SILENT_PEAK - 0.001,
+  });
   const exactly = mediaReadiness(passingMedia);
 
   assert.equal(justUnder.steps.mic, false);
   assert.equal(justUnder.ready, false);
   assert.equal(exactly.steps.mic, true);
-  assert.equal(exactly.ready, true, "a ticked step must never disagree with the join button");
+  assert.equal(
+    exactly.ready,
+    true,
+    "a ticked step must never disagree with the join button",
+  );
 });
 
 test("an unsupported browser keeps the room closed", () => {
@@ -159,16 +193,31 @@ test("an unsupported browser keeps the room closed", () => {
 });
 
 test("camera tracks must be live and enabled", () => {
-  assert.equal(videoTrackReady({ readyState: "live", enabled: true, muted: false }), true);
-  assert.equal(videoTrackReady({ readyState: "ended", enabled: true, muted: false }), false);
-  assert.equal(videoTrackReady({ readyState: "live", enabled: false, muted: false }), false);
-  assert.equal(videoTrackReady({ readyState: "live", enabled: true, muted: true }), false);
+  assert.equal(
+    videoTrackReady({ readyState: "live", enabled: true, muted: false }),
+    true,
+  );
+  assert.equal(
+    videoTrackReady({ readyState: "ended", enabled: true, muted: false }),
+    false,
+  );
+  assert.equal(
+    videoTrackReady({ readyState: "live", enabled: false, muted: false }),
+    false,
+  );
+  assert.equal(
+    videoTrackReady({ readyState: "live", enabled: true, muted: true }),
+    false,
+  );
   assert.equal(videoTrackReady(null), false);
 });
 
 test("loaded face detector can block camera readiness", () => {
   const missing = mediaReadiness({ ...passingMedia, faceReady: false });
-  const multiple = mediaReadiness({ ...passingMedia, faceError: "multiple faces detected" });
+  const multiple = mediaReadiness({
+    ...passingMedia,
+    faceError: "multiple faces detected",
+  });
 
   assert.equal(missing.ready, false);
   assert.equal(missing.blocker, "camera");
@@ -178,7 +227,11 @@ test("loaded face detector can block camera readiness", () => {
 
 test("output counts as usable only once the context is running", () => {
   assert.equal(outputUsable("running"), true);
-  assert.equal(outputUsable("suspended"), false, "suspended is the autoplay block");
+  assert.equal(
+    outputUsable("suspended"),
+    false,
+    "suspended is the autoplay block",
+  );
   assert.equal(outputUsable("closed"), false);
   assert.equal(outputUsable(undefined), false);
 });
@@ -188,7 +241,11 @@ test("output counts as usable only once the context is running", () => {
 // have been deleted outright and the gate would have fallen through to
 // whichever check came next and reported the wrong cause.
 test("a refused camera reports the camera as the reason and stays closed", () => {
-  const state = mediaReadiness({ ...passingMedia, cameraReady: false, cameraError: "NotReadableError" });
+  const state = mediaReadiness({
+    ...passingMedia,
+    cameraReady: false,
+    cameraError: "NotReadableError",
+  });
   assert.equal(state.ready, false);
   assert.equal(state.blocker, "camera-error");
   assert.match(state.message, /Camera unavailable: NotReadableError/);
@@ -201,8 +258,16 @@ test("a refused camera reports the camera as the reason and stays closed", () =>
   // then failed is the case where `!cameraError` is the deciding conjunct
   // rather than a second opinion about `cameraReady`, and it is how a candidate
   // whose camera was unplugged mid-check keeps a green tick they should not.
-  const late = mediaReadiness({ ...passingMedia, cameraReady: true, cameraError: "NotReadableError" });
-  assert.equal(late.steps.camera, false, "an error un-ticks the step on its own");
+  const late = mediaReadiness({
+    ...passingMedia,
+    cameraReady: true,
+    cameraError: "NotReadableError",
+  });
+  assert.equal(
+    late.steps.camera,
+    false,
+    "an error un-ticks the step on its own",
+  );
   assert.equal(late.blocker, "camera-error");
 });
 
@@ -217,5 +282,9 @@ test("a microphone failure outranks a camera failure", () => {
     micError: "NotAllowedError",
   });
   assert.equal(state.blocker, "mic-error");
-  assert.equal(state.steps.camera, false, "the camera step still shows what it knows");
+  assert.equal(
+    state.steps.camera,
+    false,
+    "the camera step still shows what it knows",
+  );
 });

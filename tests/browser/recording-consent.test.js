@@ -33,12 +33,18 @@ const code = withoutComments(script);
 test("recording-consent the notice is part of the preflight, not the sidebar", () => {
   // Inside the overlay the candidate cannot skip. A notice in a collapsed
   // panel is a notice nobody read.
-  const overlay = page.slice(page.indexOf('id="audio-check"'), page.indexOf('id="ending-overlay"'));
+  const overlay = page.slice(
+    page.indexOf('id="audio-check"'),
+    page.indexOf('id="ending-overlay"'),
+  );
   assert.ok(
     overlay.includes('id="recording-consent-step"'),
     "the consent step belongs inside the media preflight",
   );
-  assert.ok(overlay.includes('id="recording-consent"'), "and it needs a control to agree with");
+  assert.ok(
+    overlay.includes('id="recording-consent"'),
+    "and it needs a control to agree with",
+  );
   assert.ok(
     overlay.includes('id="recording-consent-step" hidden'),
     "hidden by default, because most deployments record nothing",
@@ -69,7 +75,8 @@ test("recording-consent the disclosure names what it promises", () => {
     "how long it is kept": /24 hours/i,
     "that it is deleted": /deleted/i,
     "that consent can be withdrawn": /withdraw consent/i,
-    "that local copies cannot be recalled": /cannot be recalled|outside CodeTrial's control/i,
+    "that local copies cannot be recalled":
+      /cannot be recalled|outside CodeTrial's control/i,
   };
   for (const [promise, pattern] of Object.entries(promises)) {
     assert.match(disclosure, pattern, `the disclosure has to state ${promise}`);
@@ -110,12 +117,17 @@ test("recording-consent the start button waits for an answer", () => {
 test("recording-consent the notice's promise of withdrawal is reachable", () => {
   // The disclosure says consent can be withdrawn during the interview. A
   // promise with no control behind it is the worst kind of privacy copy.
-  assert.ok(page.includes('id="withdraw-consent"'), "there has to be something to withdraw with");
+  assert.ok(
+    page.includes('id="withdraw-consent"'),
+    "there has to be something to withdraw with",
+  );
   assert.ok(
     /id="withdraw-consent"[^>]*hidden/.test(page),
     "hidden where the server records nothing",
   );
-  const body = withoutComments(functionBody(script, "withdrawRecordingConsent"));
+  const body = withoutComments(
+    functionBody(script, "withdrawRecordingConsent"),
+  );
   assert.match(
     body,
     /fetch\(`\/api\/interviews\/\$\{encodeURIComponent\(state\.interviewId\)\}\/consent`/,
@@ -123,7 +135,9 @@ test("recording-consent the notice's promise of withdrawal is reachable", () => 
   );
   assert.match(body, /method: "DELETE"/);
   assert.ok(
-    code.includes('nodes.withdrawConsent.addEventListener("click", withdrawRecordingConsent)'),
+    code.includes(
+      'nodes.withdrawConsent.addEventListener("click", withdrawRecordingConsent)',
+    ),
     "the button has to be wired to it",
   );
   assert.ok(
@@ -147,7 +161,7 @@ test("recording-consent the notice's promise of withdrawal is reachable", () => 
 test("recording-consent is recorded before a token is asked for", () => {
   const body = withoutComments(functionBody(script, "connect"));
   assert.ok(
-    body.includes('if (!consentGiven()) throw new Error('),
+    body.includes("if (!consentGiven()) throw new Error("),
     "the gate is restated where consent is actually written down, not only on the button",
   );
   const consent = body.indexOf("await recordConsent()");
@@ -164,11 +178,16 @@ test("recording-consent is recorded before a token is asked for", () => {
   );
 });
 
-
 test("recording-consent sends the version it displayed", () => {
   const body = withoutComments(functionBody(script, "recordConsent"));
-  assert.ok(body.includes('fetch("/api/interviews"'), "consent is posted, not assumed");
-  assert.ok(body.includes("consentVersion"), "and it names the wording that was shown");
+  assert.ok(
+    body.includes('fetch("/api/interviews"'),
+    "consent is posted, not assumed",
+  );
+  assert.ok(
+    body.includes("consentVersion"),
+    "and it names the wording that was shown",
+  );
   assert.ok(
     body.includes("if (!recordingEnabled) return null;"),
     "a server that records nothing is not asked to record consent",

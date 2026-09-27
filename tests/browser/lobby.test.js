@@ -16,7 +16,12 @@
 import { test, before, beforeEach, after } from "node:test";
 import assert from "node:assert/strict";
 
-import { functionBody, launchChromium, read, startStaticServer } from "./source.js";
+import {
+  functionBody,
+  launchChromium,
+  read,
+  startStaticServer,
+} from "./source.js";
 import { frameworkPhases } from "../../web/lib.js";
 
 let browser = null;
@@ -70,8 +75,13 @@ before(async () => {
         return true;
       }
       if (url.pathname === "/api/session") return json(session);
-      if (request.method === "DELETE" && url.pathname.startsWith("/api/reports/")) {
-        const id = decodeURIComponent(url.pathname.slice("/api/reports/".length));
+      if (
+        request.method === "DELETE" &&
+        url.pathname.startsWith("/api/reports/")
+      ) {
+        const id = decodeURIComponent(
+          url.pathname.slice("/api/reports/".length),
+        );
         deletedIds.push(id);
         const before = reports.length;
         reports = reports.filter((report) => report.id !== id);
@@ -136,16 +146,25 @@ const snapshot = (page) =>
     const one = (selector) => document.querySelector(selector);
     return {
       note: one("#recommendation").textContent,
-      focus: one("#practice-focus").hidden ? "" : one("#practice-focus").textContent,
+      focus: one("#practice-focus").hidden
+        ? ""
+        : one("#practice-focus").textContent,
       card: one(".problem-card.selected")?.dataset.problem ?? null,
-      pressed: one('.problem-card[aria-pressed="true"]')?.dataset.problem ?? null,
+      pressed:
+        one('.problem-card[aria-pressed="true"]')?.dataset.problem ?? null,
       duration: one(".duration-button.selected")?.dataset.duration ?? null,
       durationsOff: [...document.querySelectorAll(".duration-button")]
         .filter((button) => button.disabled)
         .map((button) => button.dataset.duration),
-      durationNote: one("#duration-note").hidden ? "" : one("#duration-note").textContent,
-      levels: [...document.querySelectorAll('[name="difficulty"]:checked')].map((i) => i.value),
-      visibleCards: [...document.querySelectorAll(".problem-card")].filter((c) => !c.hidden).length,
+      durationNote: one("#duration-note").hidden
+        ? ""
+        : one("#duration-note").textContent,
+      levels: [...document.querySelectorAll('[name="difficulty"]:checked')].map(
+        (i) => i.value,
+      ),
+      visibleCards: [...document.querySelectorAll(".problem-card")].filter(
+        (c) => !c.hidden,
+      ).length,
       startDisabled: one("#start").disabled,
       startText: one("#start").textContent,
       account: one("#account-status").textContent,
@@ -158,7 +177,9 @@ const snapshot = (page) =>
 const setLevel = (page, level, on) =>
   page.evaluate(
     ([level, on]) => {
-      const input = document.querySelector(`[name="difficulty"][value="${level}"]`);
+      const input = document.querySelector(
+        `[name="difficulty"][value="${level}"]`,
+      );
       if (input.checked === on) return;
       input.checked = on;
       input.dispatchEvent(new Event("change", { bubbles: true }));
@@ -174,13 +195,17 @@ const setLevel = (page, level, on) =>
 /// is here to remove the race, not to be the check. Ten seconds because the
 /// work behind these is two stubbed fetches, so anything near it is a hang.
 async function settles(page, predicate) {
-  await page.waitForFunction(predicate, null, { timeout: 10_000 }).catch(() => {});
+  await page
+    .waitForFunction(predicate, null, { timeout: 10_000 })
+    .catch(() => {});
 }
 
 /// A page whose first recommendation has landed.
 async function lobby(page) {
   await page.goto(`${base}/`, { waitUntil: "domcontentloaded" });
-  await page.waitForFunction(() => document.querySelector("#recommendation").textContent !== "");
+  await page.waitForFunction(
+    () => document.querySelector("#recommendation").textContent !== "",
+  );
   return snapshot(page);
 }
 
@@ -189,13 +214,22 @@ async function lobby(page) {
 /// `let duration`, which the module-scope setup overwrites before anything
 /// reads it: a chain running through a value nothing observes is not a chain.
 const markupDuration = () =>
-  read("web/index.html").match(/duration-button selected"[^>]*data-duration="(\d+)"/)[1];
+  read("web/index.html").match(
+    /duration-button selected"[^>]*data-duration="(\d+)"/,
+  )[1];
 
 /// The page name a card ships in the URL, from the map the generator writes.
-const pageOf = (problemId) => JSON.parse(read("web/problem-pages.json"))[problemId].page;
+const pageOf = (problemId) =>
+  JSON.parse(read("web/problem-pages.json"))[problemId].page;
 
-const hired = (problemId) => ({ problemId, payload: { report: { decision: "HIRE" } } });
-const missed = (problemId) => ({ problemId, payload: { report: { decision: "NO_HIRE" } } });
+const hired = (problemId) => ({
+  problemId,
+  payload: { report: { decision: "HIRE" } },
+});
+const missed = (problemId) => ({
+  problemId,
+  payload: { report: { decision: "NO_HIRE" } },
+});
 const savedAttempt = (problemId) => ({
   problemId,
   payload: {
@@ -208,25 +242,38 @@ const savedAttempt = (problemId) => ({
 /// A graded report whose plan files `weaknesses`, most important first, under
 /// one `phase`. `assessed` adds the phase scores, whose weakness tags are what
 /// the progress panel reads; without it the report is one no rubric scored.
-const focusedAttempt = (problemId, { phase = "Test", weaknesses = ["Test boundaries"], assessed = false } = {}) => ({
+const focusedAttempt = (
+  problemId,
+  { phase = "Test", weaknesses = ["Test boundaries"], assessed = false } = {},
+) => ({
   problemId,
   payload: {
     problemId,
     date: "2026-01-01T00:00:00Z",
     report: {
-      codingScore: 60, communicationScore: 60, decision: "NO_HIRE", summary: "Grounded assessment.",
+      codingScore: 60,
+      communicationScore: 60,
+      decision: "NO_HIRE",
+      summary: "Grounded assessment.",
       codingFeedback: { strengths: [], improvements: weaknesses },
       communicationFeedback: { strengths: [], improvements: [] },
       improvementPlan: weaknesses.map((weakness) => ({
-        phase, weakness, impact: "high", frequency: 1,
-        drill: "Build a test table", durationMin: 10,
-        successCriterion: "Predict each output", selfReview: ["Name a boundary"],
+        phase,
+        weakness,
+        impact: "high",
+        frequency: 1,
+        drill: "Build a test table",
+        durationMin: 10,
+        successCriterion: "Predict each output",
+        selfReview: ["Name a boundary"],
       })),
       ...(assessed && {
         frameworkAssessment: {
           rubricVersion: 1,
           phases: frameworkPhases.map((row) => ({
-            phase: row, score: row === phase ? 50 : null, weaknessTags: row === phase ? weaknesses : [],
+            phase: row,
+            score: row === phase ? 50 : null,
+            weaknessTags: row === phase ? weaknesses : [],
           })),
         },
       }),
@@ -265,18 +312,23 @@ async function heldLobby(page) {
   await page.goto(`${base}/`, { waitUntil: "domcontentloaded" });
   await settles(
     page,
-    () => document.querySelector("#account-status").textContent !== "Checking account...",
+    () =>
+      document.querySelector("#account-status").textContent !==
+      "Checking account...",
   );
   return release;
 }
 
 /// The lobby has chosen: `settle` is what enables the button, so this is the
 /// one condition that means every derived thing on the page is in place.
-const awaitReady = (page) => settles(page, () => !document.querySelector("#start").disabled);
+const awaitReady = (page) =>
+  settles(page, () => !document.querySelector("#start").disabled);
 
 const restore = (page) =>
   page.evaluate(() =>
-    window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })),
+    window.dispatchEvent(
+      new PageTransitionEvent("pageshow", { persisted: true }),
+    ),
   );
 
 /// What the difficulty filter did to one card.
@@ -297,7 +349,10 @@ lobbyTest(
     const { height } = page.viewportSize();
     // The whole reason the picker collapsed. 150 cards made this about 7500.
     const closed = await page.evaluate(() => document.body.scrollHeight);
-    assert.ok(closed <= height, `the lobby is ${closed}px tall, past one ${height}px screen`);
+    assert.ok(
+      closed <= height,
+      `the lobby is ${closed}px tall, past one ${height}px screen`,
+    );
 
     // And the wall is still reachable, just not in the way.
     await page.click("details.problem-picker summary");
@@ -307,101 +362,141 @@ lobbyTest(
   { viewport: { width: 1280, height: 800 } },
 );
 
-lobbyTest("a candidate who touches nothing gets the server's own default length", async (page) => {
-  const state = await lobby(page);
+lobbyTest(
+  "a candidate who touches nothing gets the server's own default length",
+  async (page) => {
+    const state = await lobby(page);
 
-  // Compared against the markup rather than written here. tests/web.rs pins the
-  // preselected button to the server's DEFAULT_DURATION_MIN, so asserting the
-  // rendered page agrees with it ties what a candidate actually gets to the
-  // server constant, without either file restating the difficulty mapping the
-  // other half owns.
-  assert.equal(
-    state.duration,
-    markupDuration(),
-    "the lobby renders a different length than the markup preselects",
-  );
-  assert.deepEqual(state.levels, ["Medium"]);
-  assert.equal(state.startDisabled, false);
-});
+    // Compared against the markup rather than written here. tests/web.rs pins the
+    // preselected button to the server's DEFAULT_DURATION_MIN, so asserting the
+    // rendered page agrees with it ties what a candidate actually gets to the
+    // server constant, without either file restating the difficulty mapping the
+    // other half owns.
+    assert.equal(
+      state.duration,
+      markupDuration(),
+      "the lobby renders a different length than the markup preselects",
+    );
+    assert.deepEqual(state.levels, ["Medium"]);
+    assert.equal(state.startDisabled, false);
+  },
+);
 
-lobbyTest("the recommendation does not move once it is on screen", async (page) => {
-  reports = [hired("two-sum")];
-  // Every write to the line, not a sample of it every thirty milliseconds. A
-  // sampler misses a value that appears and is replaced inside one gap, which
-  // is the shape of the bug this test is here for: recommending at load and
-  // again when the fetch landed used to show two problems on most runs.
-  await page.addInitScript(() => {
-    window.__recommendations = [];
-    // Attached to the one node, not to the document: a subtree observer on the
-    // root fires across the parse of all 150 cards and costs more than the poll
-    // it replaced. This runs before the document exists, so it waits for the
-    // node and records whatever is already there when it arrives.
-    const attach = () => {
-      const line = document.querySelector("#recommendation");
-      if (!line) return requestAnimationFrame(attach);
-      const record = () => {
-        const text = line.textContent;
-        if (text && window.__recommendations.at(-1) !== text) window.__recommendations.push(text);
+lobbyTest(
+  "the recommendation does not move once it is on screen",
+  async (page) => {
+    reports = [hired("two-sum")];
+    // Every write to the line, not a sample of it every thirty milliseconds. A
+    // sampler misses a value that appears and is replaced inside one gap, which
+    // is the shape of the bug this test is here for: recommending at load and
+    // again when the fetch landed used to show two problems on most runs.
+    await page.addInitScript(() => {
+      window.__recommendations = [];
+      // Attached to the one node, not to the document: a subtree observer on the
+      // root fires across the parse of all 150 cards and costs more than the poll
+      // it replaced. This runs before the document exists, so it waits for the
+      // node and records whatever is already there when it arrives.
+      const attach = () => {
+        const line = document.querySelector("#recommendation");
+        if (!line) return requestAnimationFrame(attach);
+        const record = () => {
+          const text = line.textContent;
+          if (text && window.__recommendations.at(-1) !== text)
+            window.__recommendations.push(text);
+        };
+        record();
+        new MutationObserver(record).observe(line, {
+          childList: true,
+          characterData: true,
+          subtree: true,
+        });
       };
-      record();
-      new MutationObserver(record).observe(line, {
-        childList: true,
-        characterData: true,
-        subtree: true,
-      });
-    };
-    attach();
-  });
-  await page.goto(`${base}/`, { waitUntil: "domcontentloaded" });
-  await awaitReady(page);
+      attach();
+    });
+    await page.goto(`${base}/`, { waitUntil: "domcontentloaded" });
+    await awaitReady(page);
 
-  const seen = await page.evaluate(() => window.__recommendations);
-  assert.equal(seen.length, 1, `the recommendation changed under the reader: ${seen.join(" -> ")}`);
-});
+    const seen = await page.evaluate(() => window.__recommendations);
+    assert.equal(
+      seen.length,
+      1,
+      `the recommendation changed under the reader: ${seen.join(" -> ")}`,
+    );
+  },
+);
 
-lobbyTest("the lobby carries an assessed drill into the next practice session", async (page) => {
-  reports = [focusedAttempt(EASY[0])];
-  const state = await lobby(page);
+lobbyTest(
+  "the lobby carries an assessed drill into the next practice session",
+  async (page) => {
+    reports = [focusedAttempt(EASY[0])];
+    const state = await lobby(page);
 
-  assert.equal(
-    state.focus,
-    "Carry forward: Test boundaries. Drill: Build a test table. Success: Predict each output.",
-  );
-});
+    assert.equal(
+      state.focus,
+      "Carry forward: Test boundaries. Drill: Build a test table. Success: Predict each output.",
+    );
+  },
+);
 
-lobbyTest("a candidate explicitly chooses whether to share the practice focus", async (page) => {
-  reports = [focusedAttempt(EASY[0])];
-  await lobby(page);
-  assert.equal(await page.locator("#practice-focus-share").isHidden(), false);
+lobbyTest(
+  "a candidate explicitly chooses whether to share the practice focus",
+  async (page) => {
+    reports = [focusedAttempt(EASY[0])];
+    await lobby(page);
+    assert.equal(await page.locator("#practice-focus-share").isHidden(), false);
 
-  await page.click("#practice-focus-share-input");
-  await page.click("#start");
-  await page.waitForURL(/\/interview/);
+    await page.click("#practice-focus-share-input");
+    await page.click("#start");
+    await page.waitForURL(/\/interview/);
 
-  // Handed over in session storage, never the address bar, where a crafted
-  // link could put its own text into the interviewer's instructions.
-  assert.equal(new URL(page.url()).searchParams.get("focus"), null);
-  assert.equal(
-    await page.evaluate(() => sessionStorage.getItem("codetrial.sharedPracticeFocus")),
-    "Test boundaries",
-  );
-});
+    // Handed over in session storage, never the address bar, where a crafted
+    // link could put its own text into the interviewer's instructions.
+    assert.equal(new URL(page.url()).searchParams.get("focus"), null);
+    assert.equal(
+      await page.evaluate(() =>
+        sessionStorage.getItem("codetrial.sharedPracticeFocus"),
+      ),
+      "Test boundaries",
+    );
+  },
+);
 
-lobbyTest("loading a resume keeps the JD requirements already checked", async (page) => {
-  await lobby(page);
-  await page.click("details.interview-context summary");
-  const txt = (name, text) => ({ name, mimeType: "text/plain", buffer: Buffer.from(text) });
+lobbyTest(
+  "loading a resume keeps the JD requirements already checked",
+  async (page) => {
+    await lobby(page);
+    await page.click("details.interview-context summary");
+    const txt = (name, text) => ({
+      name,
+      mimeType: "text/plain",
+      buffer: Buffer.from(text),
+    });
 
-  await page.setInputFiles("#grounding-jd", txt("jd.txt", "Must know Rust\nMust know SQL"));
-  const jd = page.locator('#grounding-choices input[data-group="requirements"]');
-  await jd.first().waitFor();
-  await jd.nth(1).check();
+    await page.setInputFiles(
+      "#grounding-jd",
+      txt("jd.txt", "Must know Rust\nMust know SQL"),
+    );
+    const jd = page.locator(
+      '#grounding-choices input[data-group="requirements"]',
+    );
+    await jd.first().waitFor();
+    await jd.nth(1).check();
 
-  await page.setInputFiles("#grounding-resume", txt("resume.txt", "Skills: Rust, Go\nBuilt a parser"));
-  await page.locator('#grounding-choices input[data-group="skills"]').first().waitFor();
+    await page.setInputFiles(
+      "#grounding-resume",
+      txt("resume.txt", "Skills: Rust, Go\nBuilt a parser"),
+    );
+    await page
+      .locator('#grounding-choices input[data-group="skills"]')
+      .first()
+      .waitFor();
 
-  assert.deepEqual(await jd.evaluateAll((boxes) => boxes.map((box) => box.checked)), [false, true]);
-});
+    assert.deepEqual(
+      await jd.evaluateAll((boxes) => boxes.map((box) => box.checked)),
+      [false, true],
+    );
+  },
+);
 
 /// A PDF built here rather than committed: one page per entry of `pages`, each
 /// line a text-showing operator in the standard Helvetica. What matters is
@@ -433,75 +528,158 @@ function pdfOf(pages) {
   });
   const xref = body.length;
   body += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
-  body += offsets.map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("");
+  body += offsets
+    .map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`)
+    .join("");
   body += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
   return Buffer.from(body, "latin1");
 }
 
-lobbyTest("a resume and a JD read out of PDFs with the vendored pdf.js", async (page) => {
-  await lobby(page);
-  await page.click("details.interview-context summary");
-  const asPdf = (name, pages) => ({ name, mimeType: "application/pdf", buffer: pdfOf(pages) });
+lobbyTest(
+  "a resume and a JD read out of PDFs with the vendored pdf.js",
+  async (page) => {
+    await lobby(page);
+    await page.click("details.interview-context summary");
+    const asPdf = (name, pages) => ({
+      name,
+      mimeType: "application/pdf",
+      buffer: pdfOf(pages),
+    });
 
-  await page.setInputFiles("#grounding-resume", asPdf("resume.pdf", [
-    ["Skills: Rust, C, Python", "Led the (key-update) rollback fix"],
-    ["Built a parser"],
-  ]));
-  await page.locator('#grounding-choices input[data-group="anchors"]').nth(1).waitFor();
-  await page.setInputFiles("#grounding-jd", asPdf("jd.pdf", [["Must know Rust"]]));
-  await page.locator('#grounding-choices input[data-group="requirements"]').first().waitFor();
+    await page.setInputFiles(
+      "#grounding-resume",
+      asPdf("resume.pdf", [
+        ["Skills: Rust, C, Python", "Led the (key-update) rollback fix"],
+        ["Built a parser"],
+      ]),
+    );
+    await page
+      .locator('#grounding-choices input[data-group="anchors"]')
+      .nth(1)
+      .waitFor();
+    await page.setInputFiles(
+      "#grounding-jd",
+      asPdf("jd.pdf", [["Must know Rust"]]),
+    );
+    await page
+      .locator('#grounding-choices input[data-group="requirements"]')
+      .first()
+      .waitFor();
 
-  // Both pages, lines kept apart, and the escaped parentheses read back as
-  // the text the candidate wrote.
-  assert.deepEqual(await groundingText(page), [
-    "Must know Rust",
-    "Rust", "C", "Python",
-    "Led the (key-update) rollback fix", "Built a parser",
-  ]);
-  assert.match(await page.locator("#grounding-resume-status").textContent(), /^Parsed locally/);
-});
+    // Both pages, lines kept apart, and the escaped parentheses read back as
+    // the text the candidate wrote.
+    assert.deepEqual(await groundingText(page), [
+      "Must know Rust",
+      "Rust",
+      "C",
+      "Python",
+      "Led the (key-update) rollback fix",
+      "Built a parser",
+    ]);
+    assert.match(
+      await page.locator("#grounding-resume-status").textContent(),
+      /^Parsed locally/,
+    );
+  },
+);
 
-lobbyTest("a PDF the platform types as something else is still read", async (page) => {
-  await lobby(page);
-  await page.click("details.interview-context summary");
-  await page.setInputFiles("#grounding-jd", { name: "jd.pdf", mimeType: "application/octet-stream", buffer: pdfOf([["Must know Rust"]]) });
-  await page.locator('#grounding-choices input[data-group="requirements"]').first().waitFor();
-  assert.deepEqual(await groundingText(page), ["Must know Rust"]);
-});
+lobbyTest(
+  "a PDF the platform types as something else is still read",
+  async (page) => {
+    await lobby(page);
+    await page.click("details.interview-context summary");
+    await page.setInputFiles("#grounding-jd", {
+      name: "jd.pdf",
+      mimeType: "application/octet-stream",
+      buffer: pdfOf([["Must know Rust"]]),
+    });
+    await page
+      .locator('#grounding-choices input[data-group="requirements"]')
+      .first()
+      .waitFor();
+    assert.deepEqual(await groundingText(page), ["Must know Rust"]);
+  },
+);
 
-lobbyTest("a PDF over the page limit is refused with its page count", async (page) => {
-  await lobby(page);
-  await page.click("details.interview-context summary");
-  const pages = Array.from({ length: 11 }, (_, index) => [`Must know topic ${index}`]);
-  await page.setInputFiles("#grounding-jd", { name: "long.pdf", mimeType: "application/pdf", buffer: pdfOf(pages) });
-  await settles(page, () => /11 pages/.test(document.querySelector("#grounding-jd-status").textContent));
-  assert.match(await page.locator("#grounding-jd-status").textContent(), /11 pages/);
-  assert.deepEqual(await groundingText(page), []);
-});
+lobbyTest(
+  "a PDF over the page limit is refused with its page count",
+  async (page) => {
+    await lobby(page);
+    await page.click("details.interview-context summary");
+    const pages = Array.from({ length: 11 }, (_, index) => [
+      `Must know topic ${index}`,
+    ]);
+    await page.setInputFiles("#grounding-jd", {
+      name: "long.pdf",
+      mimeType: "application/pdf",
+      buffer: pdfOf(pages),
+    });
+    await settles(page, () =>
+      /11 pages/.test(
+        document.querySelector("#grounding-jd-status").textContent,
+      ),
+    );
+    assert.match(
+      await page.locator("#grounding-jd-status").textContent(),
+      /11 pages/,
+    );
+    assert.deepEqual(await groundingText(page), []);
+  },
+);
 
-lobbyTest("a missing PDF reader is reported as the reader, not the file", async (page) => {
-  failing.add("/vendor/pdfjs/pdf.min.mjs");
-  await lobby(page);
-  await page.click("details.interview-context summary");
-  await page.setInputFiles("#grounding-jd", { name: "jd.pdf", mimeType: "application/pdf", buffer: pdfOf([["Must know Rust"]]) });
-  await settles(page, () => /reader did not load/.test(document.querySelector("#grounding-jd-status").textContent));
-  assert.match(await page.locator("#grounding-jd-status").textContent(), /reader did not load/);
-});
+lobbyTest(
+  "a missing PDF reader is reported as the reader, not the file",
+  async (page) => {
+    failing.add("/vendor/pdfjs/pdf.min.mjs");
+    await lobby(page);
+    await page.click("details.interview-context summary");
+    await page.setInputFiles("#grounding-jd", {
+      name: "jd.pdf",
+      mimeType: "application/pdf",
+      buffer: pdfOf([["Must know Rust"]]),
+    });
+    await settles(page, () =>
+      /reader did not load/.test(
+        document.querySelector("#grounding-jd-status").textContent,
+      ),
+    );
+    assert.match(
+      await page.locator("#grounding-jd-status").textContent(),
+      /reader did not load/,
+    );
+  },
+);
 
-lobbyTest("a PDF with no text layer says so instead of offering nothing", async (page) => {
-  await lobby(page);
-  await page.click("details.interview-context summary");
-  await page.setInputFiles("#grounding-resume", { name: "scan.pdf", mimeType: "application/pdf", buffer: pdfOf([[]]) });
-  await settles(page, () => /selectable text/.test(document.querySelector("#grounding-resume-status").textContent));
-  assert.match(await page.locator("#grounding-resume-status").textContent(), /selectable text/);
-  assert.deepEqual(await groundingText(page), []);
-});
+lobbyTest(
+  "a PDF with no text layer says so instead of offering nothing",
+  async (page) => {
+    await lobby(page);
+    await page.click("details.interview-context summary");
+    await page.setInputFiles("#grounding-resume", {
+      name: "scan.pdf",
+      mimeType: "application/pdf",
+      buffer: pdfOf([[]]),
+    });
+    await settles(page, () =>
+      /selectable text/.test(
+        document.querySelector("#grounding-resume-status").textContent,
+      ),
+    );
+    assert.match(
+      await page.locator("#grounding-resume-status").textContent(),
+      /selectable text/,
+    );
+    assert.deepEqual(await groundingText(page), []);
+  },
+);
 
 async function holdSlowRead(page) {
   await page.evaluate(() => {
     const read = Blob.prototype.arrayBuffer;
     let open;
-    const gate = new Promise((resolve) => { open = resolve; });
+    const gate = new Promise((resolve) => {
+      open = resolve;
+    });
     let done = null;
     Blob.prototype.arrayBuffer = async function () {
       if (this.name === "slow.txt") {
@@ -513,7 +691,8 @@ async function holdSlowRead(page) {
     };
     window.releaseSlowRead = async () => {
       open();
-      for (let wait = 0; !done && wait < 1000; wait++) await new Promise((resolve) => setTimeout(resolve, 10));
+      for (let wait = 0; !done && wait < 1000; wait++)
+        await new Promise((resolve) => setTimeout(resolve, 10));
       if (!done) throw new Error("the gated read never started");
       await done;
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -522,1261 +701,1965 @@ async function holdSlowRead(page) {
   return () => page.evaluate(() => window.releaseSlowRead());
 }
 
-const groundingTxt = (name, text) => ({ name, mimeType: "text/plain", buffer: Buffer.from(text) });
+const groundingTxt = (name, text) => ({
+  name,
+  mimeType: "text/plain",
+  buffer: Buffer.from(text),
+});
 const groundingText = (page) =>
-  page.evaluate(() => [...document.querySelectorAll("#grounding-choices label")].map((row) => row.textContent.trim()));
-
-lobbyTest("a slower read of an earlier JD does not replace the one picked after it", async (page) => {
-  await lobby(page);
-  await page.click("details.interview-context summary");
-  const release = await holdSlowRead(page);
-
-  await page.setInputFiles("#grounding-jd", groundingTxt("slow.txt", "Must know Rust"));
-  await page.setInputFiles("#grounding-jd", groundingTxt("jd.txt", "Must know SQL"));
-  await settles(page, () => document.querySelector("#grounding-choices label") !== null);
-  await release();
-
-  assert.deepEqual(await groundingText(page), ["Must know SQL"]);
-  assert.match(await page.locator("#grounding-jd-status").textContent(), /^Parsed locally/);
-});
-
-lobbyTest("a resume still reading when grounding is cleared stays cleared", async (page) => {
-  await lobby(page);
-  await page.click("details.interview-context summary");
-  const release = await holdSlowRead(page);
-
-  await page.setInputFiles("#grounding-resume", groundingTxt("slow.txt", "Skills: Rust, Go\nBuilt a parser"));
-  await page.click("#grounding-clear");
-  await release();
-
-  assert.deepEqual(await groundingText(page), []);
-  assert.equal(await page.locator("#grounding-resume-status").textContent(), "");
-});
-
-lobbyTest("a manually selected problem still receives the arriving practice focus", async (page) => {
-  reports = [focusedAttempt(EASY[0])];
-  const release = await heldLobby(page);
-  await page.evaluate((problemId) => {
-    document.querySelector(`[data-problem="${problemId}"]`).click();
-  }, MEDIUM[0]);
-  release();
-  await settles(page, () => !document.querySelector("#practice-focus").hidden);
-
-  const state = await snapshot(page);
-  assert.equal(state.card, MEDIUM[0], "the history must not replace the candidate's selection");
-  assert.match(state.focus, /Carry forward: Test boundaries/);
-});
-
-lobbyTest("start cannot fire before there is a problem to start", async (page) => {
-  // Held open, so this is the pre-history state however slow the machine is,
-  // rather than a snapshot hoping to beat a timer.
-  const release = await heldLobby(page);
-
-  const early = await snapshot(page);
-  assert.equal(early.card, null, "a problem was chosen before the reports arrived");
-  assert.equal(early.startDisabled, true, "start was live with no problem behind it");
-
-  release();
-  await awaitReady(page);
-  const settled = await snapshot(page);
-  assert.equal(settled.startDisabled, false);
-  assert.ok(settled.card, "nothing was recommended");
-});
-
-lobbyTest("the start button ships the problem and length that are on screen", async (page) => {
-  const state = await lobby(page);
-  await page.click("#start");
-  await page.waitForURL(/\/interview/);
-
-  const query = new URL(page.url()).searchParams;
-  // The page name, which is what the address bar shows, and not the id.
-  assert.equal(query.get("problem"), state.card);
-  assert.notEqual(query.get("problem"), "two-sum");
-  assert.equal(query.get("duration"), state.duration);
-  assert.equal(query.get("focus"), null);
-  assert.equal(
-    await page.evaluate(() => sessionStorage.getItem("codetrial.sharedPracticeFocus")),
-    null,
-    "a focus is shared only after an explicit choice",
-  );
-});
-
-lobbyTest("published problem names stay hidden until the candidate asks, and the choice is kept", async (page) => {
-  await lobby(page);
-  const visibleSources = () => page.evaluate(() =>
-    [...document.querySelectorAll(".problem-source")].filter((source) => !source.hidden).length);
-  assert.equal(await visibleSources(), 0, "a published name is on screen by default");
-  const sourceCount = await page.evaluate(() => document.querySelectorAll(".problem-source").length);
-  assert.equal(
-    sourceCount,
-    await page.evaluate(() => document.querySelectorAll(".problem-card").length),
-    "every picker card has one source slot",
-  );
-  const namedSourceCount = Object.values(JSON.parse(read("web/problem-pages.json")))
-    .filter((entry) => entry.source).length;
-
-  await page.evaluate(() => { document.querySelector(".problem-picker").open = true; });
-  await page.check("#show-sources");
-  // The names arrive with the map, fetched on the first request for them.
-  await page.waitForFunction((count) =>
-    [...document.querySelectorAll(".problem-source")].filter((source) => !source.hidden).length === count, namedSourceCount);
-  assert.match(await page.locator(`[data-problem="${pageOf("two-sum")}"] .problem-source`).textContent(), /LeetCode: Two Sum/);
-  // The recommendation still names the scenario only.
-  assert.doesNotMatch(await page.locator("#recommendation").textContent(), /LeetCode:/);
-
-  await lobby(page);
-  await page.waitForFunction((count) =>
-    [...document.querySelectorAll(".problem-source")].filter((source) => !source.hidden).length === count, namedSourceCount);
-});
-
-lobbyTest("the lobby never suggests a length past its own default", async (page) => {
-  // Half of the recording-safety property, and the half a browser can actually
-  // see. The other half is a `const` assertion in src/config.rs holding
-  // DEFAULT_DURATION_MIN at or below DEFAULT_RECORDING_MAX_MINUTES, so a
-  // suggestion inside the default is inside what a default deployment records. Naming the default length "the cap"
-  // here would be wrong: the two are separate environment variables and equal
-  // only by their defaults. The sixty minute button stays reachable either way;
-  // it just has to be a click rather than something the lobby chooses.
-  const ceiling = Number(markupDuration());
-  await lobby(page);
-
-  for (const level of ["Easy", "Medium", "Hard"]) {
-    for (const other of ["Easy", "Medium", "Hard"]) {
-      await setLevel(page, other, other === level);
-    }
-    const suggested = Number((await snapshot(page)).duration);
-    assert.ok(
-      suggested <= ceiling,
-      `${level} suggests ${suggested} minutes, past the ${ceiling} the lobby defaults to`,
-    );
-  }
-});
-
-lobbyTest("the picker shows the levels that are checked and no others", async (page) => {
-  await lobby(page);
-
-  const medium = (await snapshot(page)).visibleCards;
-  await setLevel(page, "Hard", true);
-  const both = (await snapshot(page)).visibleCards;
-  await setLevel(page, "Medium", false);
-  const hard = (await snapshot(page)).visibleCards;
-
-  assert.ok(hard > 0, "checking Hard hid every problem");
-  assert.ok(medium > hard, "Medium is not a different set from Hard");
-  assert.equal(both, medium + hard, "checking both levels is not the union of them");
-
-  // The check that matters: no card from an unchecked level is on screen.
-  const shown = await page.evaluate(() =>
-    [...document.querySelectorAll(".problem-card")]
-      .filter((card) => !card.hidden)
-      .map((card) => card.dataset.difficulty),
-  );
-  assert.deepEqual([...new Set(shown)], ["Hard"]);
-});
-
-lobbyTest("choosing a problem by hand keeps the filter and the length the candidate set", async (page) => {
-  await lobby(page);
-
-  await setLevel(page, "Hard", true);
-  await page.click('[data-duration="60"]');
-  const before = await snapshot(page);
-  assert.deepEqual(before.levels, ["Medium", "Hard"]);
-  assert.equal(before.duration, "60");
-
-  await page.click("details.problem-picker summary");
-  await page.click(`[data-problem="${pageOf("candy")}"]`);
-  const after = await snapshot(page);
-
-  assert.equal(after.card, pageOf("candy"));
-  assert.equal(after.pressed, pageOf("candy"), "the selection is a border colour and nothing else");
-  // And every other card says it is not pressed, rather than saying nothing:
-  // one pressed button among 149 plain ones does not read as a choice.
-  assert.equal(
-    await page.evaluate(
-      () => document.querySelectorAll('.problem-card:not([aria-pressed])').length,
+  page.evaluate(() =>
+    [...document.querySelectorAll("#grounding-choices label")].map((row) =>
+      row.textContent.trim(),
     ),
-    0,
-    "cards nobody selected carry no pressed state at all",
   );
-  assert.deepEqual(after.levels, ["Medium", "Hard"], "picking a card rewrote the difficulty filter");
-  assert.equal(after.duration, "60", "picking a card discarded the length the candidate chose");
-});
 
-lobbyTest("Random problem restores automatic selection and can draw again", async (page) => {
-  await lobby(page);
-  await setLevel(page, "Hard", true);
-  await page.click('[data-duration="60"]');
-  await page.click("details.problem-picker summary");
-  const eligible = await page.locator(".problem-card:not([hidden])")
-    .evaluateAll((cards) => cards.map((card) => card.dataset.problem));
-  await page.click(`[data-problem="${eligible[0]}"]`);
-  await page.evaluate(() => { Math.random = () => 0; });
-  await page.click("#random-problem");
-  const first = await snapshot(page);
-  const title = await page.locator(`[data-problem="${first.card}"] .problem-title`).textContent();
-  assert.equal(first.note, `Selected problem: ${title}.`);
-  assert.equal(first.card, eligible[1]);
-  assert.deepEqual(first.levels, ["Medium", "Hard"]);
-  assert.equal(first.duration, "60");
-  await restore(page);
-  await awaitReady(page);
-  assert.equal((await snapshot(page)).card, first.card);
-  const button = await page.locator("#random-problem").boundingBox();
-  const recommendation = await page.locator("#recommendation").boundingBox();
-  assert.ok(button.x + button.width <= recommendation.x);
-  assert.ok(recommendation.y >= button.y && recommendation.y < button.y + button.height);
+lobbyTest(
+  "a slower read of an earlier JD does not replace the one picked after it",
+  async (page) => {
+    await lobby(page);
+    await page.click("details.interview-context summary");
+    const release = await holdSlowRead(page);
 
-  await page.click("#random-problem");
-  const second = await snapshot(page);
-  assert.equal(second.card, eligible[0]);
-  assert.deepEqual(await page.locator("#random-problem").boundingBox(), button);
-  await page.click("#start");
-  await page.waitForURL(/\/interview/);
-  assert.equal(new URL(page.url()).searchParams.get("problem"), second.card);
-});
+    await page.setInputFiles(
+      "#grounding-jd",
+      groundingTxt("slow.txt", "Must know Rust"),
+    );
+    await page.setInputFiles(
+      "#grounding-jd",
+      groundingTxt("jd.txt", "Must know SQL"),
+    );
+    await settles(
+      page,
+      () => document.querySelector("#grounding-choices label") !== null,
+    );
+    await release();
 
-lobbyTest("changing difficulty clears the previous random-pick exclusion", async (page) => {
-  await page.addInitScript(() => { Math.random = () => 0; });
-  const before = await lobby(page);
-  await page.click("#random-problem");
-  assert.notEqual((await snapshot(page)).card, before.card);
-  await setLevel(page, "Hard", true);
-  await setLevel(page, "Hard", false);
-  assert.equal((await snapshot(page)).card, before.card);
-});
+    assert.deepEqual(await groundingText(page), ["Must know SQL"]);
+    assert.match(
+      await page.locator("#grounding-jd-status").textContent(),
+      /^Parsed locally/,
+    );
+  },
+);
 
-lobbyTest("Random problem waits for history on load and browser restore", async (page) => {
-  const release = await heldLobby(page);
-  assert.equal(await page.isDisabled("#random-problem"), true);
-  release();
-  await awaitReady(page);
-  assert.equal(await page.isEnabled("#random-problem"), true);
+lobbyTest(
+  "a resume still reading when grounding is cleared stays cleared",
+  async (page) => {
+    await lobby(page);
+    await page.click("details.interview-context summary");
+    const release = await holdSlowRead(page);
 
-  const releaseRestore = holdHistory();
-  await restore(page);
-  assert.equal(await page.isDisabled("#random-problem"), true);
-  releaseRestore();
-  await awaitReady(page);
-  assert.equal(await page.isEnabled("#random-problem"), true);
-});
+    await page.setInputFiles(
+      "#grounding-resume",
+      groundingTxt("slow.txt", "Skills: Rust, Go\nBuilt a parser"),
+    );
+    await page.click("#grounding-clear");
+    await release();
 
-lobbyTest("a random draw hides an out-of-filter retry and updates its suggested duration", async (page) => {
-  reports = [savedAttempt(EASY[0])];
-  reports[0].payload.date = new Date().toISOString();
-  await lobby(page);
-  await page.getByRole("button", { name: "Try again", exact: true }).click();
-  const before = await snapshot(page);
-  assert.equal(before.duration, "30");
-  assert.equal((await cardInfo(page, EASY[0])).hidden, false);
-  await page.click("#random-problem");
-  const after = await snapshot(page);
-  assert.equal((await cardInfo(page, EASY[0])).hidden, true);
-  assert.equal((await cardInfo(page, after.card)).level, "Medium");
-  assert.deepEqual(after.levels, before.levels);
-  assert.equal(after.duration, "45");
-});
+    assert.deepEqual(await groundingText(page), []);
+    assert.equal(
+      await page.locator("#grounding-resume-status").textContent(),
+      "",
+    );
+  },
+);
+
+lobbyTest(
+  "a manually selected problem still receives the arriving practice focus",
+  async (page) => {
+    reports = [focusedAttempt(EASY[0])];
+    const release = await heldLobby(page);
+    await page.evaluate((problemId) => {
+      document.querySelector(`[data-problem="${problemId}"]`).click();
+    }, MEDIUM[0]);
+    release();
+    await settles(
+      page,
+      () => !document.querySelector("#practice-focus").hidden,
+    );
+
+    const state = await snapshot(page);
+    assert.equal(
+      state.card,
+      MEDIUM[0],
+      "the history must not replace the candidate's selection",
+    );
+    assert.match(state.focus, /Carry forward: Test boundaries/);
+  },
+);
+
+lobbyTest(
+  "start cannot fire before there is a problem to start",
+  async (page) => {
+    // Held open, so this is the pre-history state however slow the machine is,
+    // rather than a snapshot hoping to beat a timer.
+    const release = await heldLobby(page);
+
+    const early = await snapshot(page);
+    assert.equal(
+      early.card,
+      null,
+      "a problem was chosen before the reports arrived",
+    );
+    assert.equal(
+      early.startDisabled,
+      true,
+      "start was live with no problem behind it",
+    );
+
+    release();
+    await awaitReady(page);
+    const settled = await snapshot(page);
+    assert.equal(settled.startDisabled, false);
+    assert.ok(settled.card, "nothing was recommended");
+  },
+);
+
+lobbyTest(
+  "the start button ships the problem and length that are on screen",
+  async (page) => {
+    const state = await lobby(page);
+    await page.click("#start");
+    await page.waitForURL(/\/interview/);
+
+    const query = new URL(page.url()).searchParams;
+    // The page name, which is what the address bar shows, and not the id.
+    assert.equal(query.get("problem"), state.card);
+    assert.notEqual(query.get("problem"), "two-sum");
+    assert.equal(query.get("duration"), state.duration);
+    assert.equal(query.get("focus"), null);
+    assert.equal(
+      await page.evaluate(() =>
+        sessionStorage.getItem("codetrial.sharedPracticeFocus"),
+      ),
+      null,
+      "a focus is shared only after an explicit choice",
+    );
+  },
+);
+
+lobbyTest(
+  "published problem names stay hidden until the candidate asks, and the choice is kept",
+  async (page) => {
+    await lobby(page);
+    const visibleSources = () =>
+      page.evaluate(
+        () =>
+          [...document.querySelectorAll(".problem-source")].filter(
+            (source) => !source.hidden,
+          ).length,
+      );
+    assert.equal(
+      await visibleSources(),
+      0,
+      "a published name is on screen by default",
+    );
+    const sourceCount = await page.evaluate(
+      () => document.querySelectorAll(".problem-source").length,
+    );
+    assert.equal(
+      sourceCount,
+      await page.evaluate(
+        () => document.querySelectorAll(".problem-card").length,
+      ),
+      "every picker card has one source slot",
+    );
+    const namedSourceCount = Object.values(
+      JSON.parse(read("web/problem-pages.json")),
+    ).filter((entry) => entry.source).length;
+
+    await page.evaluate(() => {
+      document.querySelector(".problem-picker").open = true;
+    });
+    await page.check("#show-sources");
+    // The names arrive with the map, fetched on the first request for them.
+    await page.waitForFunction(
+      (count) =>
+        [...document.querySelectorAll(".problem-source")].filter(
+          (source) => !source.hidden,
+        ).length === count,
+      namedSourceCount,
+    );
+    assert.match(
+      await page
+        .locator(`[data-problem="${pageOf("two-sum")}"] .problem-source`)
+        .textContent(),
+      /LeetCode: Two Sum/,
+    );
+    // The recommendation still names the scenario only.
+    assert.doesNotMatch(
+      await page.locator("#recommendation").textContent(),
+      /LeetCode:/,
+    );
+
+    await lobby(page);
+    await page.waitForFunction(
+      (count) =>
+        [...document.querySelectorAll(".problem-source")].filter(
+          (source) => !source.hidden,
+        ).length === count,
+      namedSourceCount,
+    );
+  },
+);
+
+lobbyTest(
+  "the lobby never suggests a length past its own default",
+  async (page) => {
+    // Half of the recording-safety property, and the half a browser can actually
+    // see. The other half is a `const` assertion in src/config.rs holding
+    // DEFAULT_DURATION_MIN at or below DEFAULT_RECORDING_MAX_MINUTES, so a
+    // suggestion inside the default is inside what a default deployment records. Naming the default length "the cap"
+    // here would be wrong: the two are separate environment variables and equal
+    // only by their defaults. The sixty minute button stays reachable either way;
+    // it just has to be a click rather than something the lobby chooses.
+    const ceiling = Number(markupDuration());
+    await lobby(page);
+
+    for (const level of ["Easy", "Medium", "Hard"]) {
+      for (const other of ["Easy", "Medium", "Hard"]) {
+        await setLevel(page, other, other === level);
+      }
+      const suggested = Number((await snapshot(page)).duration);
+      assert.ok(
+        suggested <= ceiling,
+        `${level} suggests ${suggested} minutes, past the ${ceiling} the lobby defaults to`,
+      );
+    }
+  },
+);
+
+lobbyTest(
+  "the picker shows the levels that are checked and no others",
+  async (page) => {
+    await lobby(page);
+
+    const medium = (await snapshot(page)).visibleCards;
+    await setLevel(page, "Hard", true);
+    const both = (await snapshot(page)).visibleCards;
+    await setLevel(page, "Medium", false);
+    const hard = (await snapshot(page)).visibleCards;
+
+    assert.ok(hard > 0, "checking Hard hid every problem");
+    assert.ok(medium > hard, "Medium is not a different set from Hard");
+    assert.equal(
+      both,
+      medium + hard,
+      "checking both levels is not the union of them",
+    );
+
+    // The check that matters: no card from an unchecked level is on screen.
+    const shown = await page.evaluate(() =>
+      [...document.querySelectorAll(".problem-card")]
+        .filter((card) => !card.hidden)
+        .map((card) => card.dataset.difficulty),
+    );
+    assert.deepEqual([...new Set(shown)], ["Hard"]);
+  },
+);
+
+lobbyTest(
+  "choosing a problem by hand keeps the filter and the length the candidate set",
+  async (page) => {
+    await lobby(page);
+
+    await setLevel(page, "Hard", true);
+    await page.click('[data-duration="60"]');
+    const before = await snapshot(page);
+    assert.deepEqual(before.levels, ["Medium", "Hard"]);
+    assert.equal(before.duration, "60");
+
+    await page.click("details.problem-picker summary");
+    await page.click(`[data-problem="${pageOf("candy")}"]`);
+    const after = await snapshot(page);
+
+    assert.equal(after.card, pageOf("candy"));
+    assert.equal(
+      after.pressed,
+      pageOf("candy"),
+      "the selection is a border colour and nothing else",
+    );
+    // And every other card says it is not pressed, rather than saying nothing:
+    // one pressed button among 149 plain ones does not read as a choice.
+    assert.equal(
+      await page.evaluate(
+        () =>
+          document.querySelectorAll(".problem-card:not([aria-pressed])").length,
+      ),
+      0,
+      "cards nobody selected carry no pressed state at all",
+    );
+    assert.deepEqual(
+      after.levels,
+      ["Medium", "Hard"],
+      "picking a card rewrote the difficulty filter",
+    );
+    assert.equal(
+      after.duration,
+      "60",
+      "picking a card discarded the length the candidate chose",
+    );
+  },
+);
+
+lobbyTest(
+  "Random problem restores automatic selection and can draw again",
+  async (page) => {
+    await lobby(page);
+    await setLevel(page, "Hard", true);
+    await page.click('[data-duration="60"]');
+    await page.click("details.problem-picker summary");
+    const eligible = await page
+      .locator(".problem-card:not([hidden])")
+      .evaluateAll((cards) => cards.map((card) => card.dataset.problem));
+    await page.click(`[data-problem="${eligible[0]}"]`);
+    await page.evaluate(() => {
+      Math.random = () => 0;
+    });
+    await page.click("#random-problem");
+    const first = await snapshot(page);
+    const title = await page
+      .locator(`[data-problem="${first.card}"] .problem-title`)
+      .textContent();
+    assert.equal(first.note, `Selected problem: ${title}.`);
+    assert.equal(first.card, eligible[1]);
+    assert.deepEqual(first.levels, ["Medium", "Hard"]);
+    assert.equal(first.duration, "60");
+    await restore(page);
+    await awaitReady(page);
+    assert.equal((await snapshot(page)).card, first.card);
+    const button = await page.locator("#random-problem").boundingBox();
+    const recommendation = await page.locator("#recommendation").boundingBox();
+    assert.ok(button.x + button.width <= recommendation.x);
+    assert.ok(
+      recommendation.y >= button.y &&
+        recommendation.y < button.y + button.height,
+    );
+
+    await page.click("#random-problem");
+    const second = await snapshot(page);
+    assert.equal(second.card, eligible[0]);
+    assert.deepEqual(
+      await page.locator("#random-problem").boundingBox(),
+      button,
+    );
+    await page.click("#start");
+    await page.waitForURL(/\/interview/);
+    assert.equal(new URL(page.url()).searchParams.get("problem"), second.card);
+  },
+);
+
+lobbyTest(
+  "changing difficulty clears the previous random-pick exclusion",
+  async (page) => {
+    await page.addInitScript(() => {
+      Math.random = () => 0;
+    });
+    const before = await lobby(page);
+    await page.click("#random-problem");
+    assert.notEqual((await snapshot(page)).card, before.card);
+    await setLevel(page, "Hard", true);
+    await setLevel(page, "Hard", false);
+    assert.equal((await snapshot(page)).card, before.card);
+  },
+);
+
+lobbyTest(
+  "Random problem waits for history on load and browser restore",
+  async (page) => {
+    const release = await heldLobby(page);
+    assert.equal(await page.isDisabled("#random-problem"), true);
+    release();
+    await awaitReady(page);
+    assert.equal(await page.isEnabled("#random-problem"), true);
+
+    const releaseRestore = holdHistory();
+    await restore(page);
+    assert.equal(await page.isDisabled("#random-problem"), true);
+    releaseRestore();
+    await awaitReady(page);
+    assert.equal(await page.isEnabled("#random-problem"), true);
+  },
+);
+
+lobbyTest(
+  "a random draw hides an out-of-filter retry and updates its suggested duration",
+  async (page) => {
+    reports = [savedAttempt(EASY[0])];
+    reports[0].payload.date = new Date().toISOString();
+    await lobby(page);
+    await page.getByRole("button", { name: "Try again", exact: true }).click();
+    const before = await snapshot(page);
+    assert.equal(before.duration, "30");
+    assert.equal((await cardInfo(page, EASY[0])).hidden, false);
+    await page.click("#random-problem");
+    const after = await snapshot(page);
+    assert.equal((await cardInfo(page, EASY[0])).hidden, true);
+    assert.equal((await cardInfo(page, after.card)).level, "Medium");
+    assert.deepEqual(after.levels, before.levels);
+    assert.equal(after.duration, "45");
+  },
+);
 
 for (const first of [0, 1]) {
-  lobbyTest(`overlapping history loads ignore the old response when load ${first} finishes first`, async (page) => {
-    await page.addInitScript(() => {
-      const fetch = window.fetch.bind(window);
-      window.pendingHistory = [];
-      window.fetch = (url, ...args) => url === "/api/reports"
-        ? new Promise((resolve) => window.pendingHistory.push((reports) =>
-          resolve(new Response(JSON.stringify({ reports })))))
-        : fetch(url, ...args);
-    });
-    await page.goto(`${base}/`);
-    await page.waitForFunction(() => window.pendingHistory.length === 1);
-    await restore(page);
-    await page.waitForFunction(() => window.pendingHistory.length === 2);
-    let latestDone = false;
-    for (const index of [first, 1 - first]) {
-      await page.evaluate(async ([index, reports]) => {
-        window.pendingHistory[index](reports);
-        await new Promise(requestAnimationFrame);
-      }, [index, [savedAttempt(index === 0 ? EASY[0] : MEDIUM[0])]]);
-      latestDone ||= index === 1;
-      assert.equal(await page.isDisabled("#random-problem"), !latestDone);
-      assert.equal((await snapshot(page)).card, latestDone ? MEDIUM[0] : null);
-    }
-    await page.click("details.problem-picker summary");
-    await page.click(`[data-problem="${MEDIUM[1]}"]`);
-    assert.equal((await snapshot(page)).card, MEDIUM[1]);
-    await page.click("#random-problem");
-    assert.equal((await snapshot(page)).card, MEDIUM[0]);
-    await page.click("#random-problem");
-    assert.notEqual((await snapshot(page)).card, MEDIUM[0]);
-  });
+  lobbyTest(
+    `overlapping history loads ignore the old response when load ${first} finishes first`,
+    async (page) => {
+      await page.addInitScript(() => {
+        const fetch = window.fetch.bind(window);
+        window.pendingHistory = [];
+        window.fetch = (url, ...args) =>
+          url === "/api/reports"
+            ? new Promise((resolve) =>
+                window.pendingHistory.push((reports) =>
+                  resolve(new Response(JSON.stringify({ reports }))),
+                ),
+              )
+            : fetch(url, ...args);
+      });
+      await page.goto(`${base}/`);
+      await page.waitForFunction(() => window.pendingHistory.length === 1);
+      await restore(page);
+      await page.waitForFunction(() => window.pendingHistory.length === 2);
+      let latestDone = false;
+      for (const index of [first, 1 - first]) {
+        await page.evaluate(
+          async ([index, reports]) => {
+            window.pendingHistory[index](reports);
+            await new Promise(requestAnimationFrame);
+          },
+          [index, [savedAttempt(index === 0 ? EASY[0] : MEDIUM[0])]],
+        );
+        latestDone ||= index === 1;
+        assert.equal(await page.isDisabled("#random-problem"), !latestDone);
+        assert.equal(
+          (await snapshot(page)).card,
+          latestDone ? MEDIUM[0] : null,
+        );
+      }
+      await page.click("details.problem-picker summary");
+      await page.click(`[data-problem="${MEDIUM[1]}"]`);
+      assert.equal((await snapshot(page)).card, MEDIUM[1]);
+      await page.click("#random-problem");
+      assert.equal((await snapshot(page)).card, MEDIUM[0]);
+      await page.click("#random-problem");
+      assert.notEqual((await snapshot(page)).card, MEDIUM[0]);
+    },
+  );
 }
 
-lobbyTest("an explicit length survives everything that would otherwise suggest one", async (page) => {
-  await lobby(page);
+lobbyTest(
+  "an explicit length survives everything that would otherwise suggest one",
+  async (page) => {
+    await lobby(page);
 
-  await page.click('[data-duration="60"]');
-  await setLevel(page, "Easy", true);
-  await setLevel(page, "Medium", false);
-  assert.equal((await snapshot(page)).duration, "60", "a suggestion overrode an explicit choice");
-});
+    await page.click('[data-duration="60"]');
+    await setLevel(page, "Easy", true);
+    await setLevel(page, "Medium", false);
+    assert.equal(
+      (await snapshot(page)).duration,
+      "60",
+      "a suggestion overrode an explicit choice",
+    );
+  },
+);
 
-lobbyTest("the last difficulty cannot be unchecked into an empty lobby", async (page) => {
-  const before = await lobby(page);
+lobbyTest(
+  "the last difficulty cannot be unchecked into an empty lobby",
+  async (page) => {
+    const before = await lobby(page);
 
-  await setLevel(page, "Medium", false);
-  const state = await snapshot(page);
-  assert.deepEqual(state.levels, ["Medium"], "the lobby was left filtering on nothing");
-  // The box goes back, so nothing about what is on offer moved and the
-  // recommendation must not move either. Rerolling on the way through swapped
-  // it for a different problem at the same level, which reads as the lobby
-  // changing its mind on its own.
-  assert.equal(state.card, before.card, "a rejected uncheck rerolled the recommendation");
-  assert.equal(state.note, before.note);
-  assert.ok(state.card, "unchecking the last level left no problem to start");
-  assert.ok(state.visibleCards > 0, "the picker was left with nothing in it");
-  assert.equal(state.startDisabled, false);
-  assert.equal(
-    (await cardInfo(page, state.card)).hidden,
-    false,
-    "the surviving selection is a card nobody can see",
-  );
-});
+    await setLevel(page, "Medium", false);
+    const state = await snapshot(page);
+    assert.deepEqual(
+      state.levels,
+      ["Medium"],
+      "the lobby was left filtering on nothing",
+    );
+    // The box goes back, so nothing about what is on offer moved and the
+    // recommendation must not move either. Rerolling on the way through swapped
+    // it for a different problem at the same level, which reads as the lobby
+    // changing its mind on its own.
+    assert.equal(
+      state.card,
+      before.card,
+      "a rejected uncheck rerolled the recommendation",
+    );
+    assert.equal(state.note, before.note);
+    assert.ok(state.card, "unchecking the last level left no problem to start");
+    assert.ok(state.visibleCards > 0, "the picker was left with nothing in it");
+    assert.equal(state.startDisabled, false);
+    assert.equal(
+      (await cardInfo(page, state.card)).hidden,
+      false,
+      "the surviving selection is a card nobody can see",
+    );
+  },
+);
 
-lobbyTest("history saved on this device under published ids still counts as passed", async (page) => {
-  // An earlier build saved the published id. The lobby renames it through the
-  // page map, fetched because such an entry is there; unrenamed, the ids match
-  // no card, so the streak has no level and the lobby stays put. Account
-  // history arrives renamed by the server, so this is the device's own copy.
-  session = { signedIn: false };
-  await page.addInitScript((entries) => {
-    if (!localStorage.getItem("codetrial_history")) {
+lobbyTest(
+  "history saved on this device under published ids still counts as passed",
+  async (page) => {
+    // An earlier build saved the published id. The lobby renames it through the
+    // page map, fetched because such an entry is there; unrenamed, the ids match
+    // no card, so the streak has no level and the lobby stays put. Account
+    // history arrives renamed by the server, so this is the device's own copy.
+    session = { signedIn: false };
+    await page.addInitScript(
+      (entries) => {
+        if (!localStorage.getItem("codetrial_history")) {
+          localStorage.setItem("codetrial_history", JSON.stringify(entries));
+        }
+      },
+      ["jump-game", "gas-station"].map((problemId, index) => ({
+        problemId,
+        date: `2026-01-0${index + 1}T00:00:00Z`,
+        report: { decision: "HIRE" },
+      })),
+    );
+    const state = await lobby(page);
+    assert.match(state.note, /passed your last two Medium problems/);
+    const saved = await page.evaluate(() =>
+      JSON.parse(localStorage.getItem("codetrial_history")),
+    );
+    assert.deepEqual(
+      saved.map((entry) => entry.problemId).sort(),
+      MEDIUM.slice().sort(),
+      "renamed in place",
+    );
+    assert.deepEqual(state.levels, ["Hard"]);
+  },
+);
+
+lobbyTest(
+  "short local history remains visible when full reports exceed the review budget",
+  async (page) => {
+    session = { signedIn: false };
+    await page.addInitScript((problemId) => {
+      const entries = Array.from({ length: 20 }, (_, index) => ({
+        ...(index < 10 ? { id: `attempt-${index}` } : {}),
+        problemId,
+        problemTitle: "Two Sum",
+        date: `2026-01-${String(index + 1).padStart(2, "0")}T00:00:00Z`,
+        report: { decision: "HIRE", summary: "x".repeat(20_000) },
+      }));
       localStorage.setItem("codetrial_history", JSON.stringify(entries));
-    }
-  }, ["jump-game", "gas-station"].map((problemId, index) => ({
-    problemId, date: `2026-01-0${index + 1}T00:00:00Z`, report: { decision: "HIRE" },
-  })));
-  const state = await lobby(page);
-  assert.match(state.note, /passed your last two Medium problems/);
-  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("codetrial_history")));
-  assert.deepEqual(saved.map((entry) => entry.problemId).sort(), MEDIUM.slice().sort(), "renamed in place");
-  assert.deepEqual(state.levels, ["Hard"]);
-});
+    }, EASY[0]);
 
-lobbyTest("short local history remains visible when full reports exceed the review budget", async (page) => {
-  session = { signedIn: false };
-  await page.addInitScript((problemId) => {
-    const entries = Array.from({ length: 20 }, (_, index) => ({
-      ...(index < 10 ? { id: `attempt-${index}` } : {}),
-      problemId,
-      problemTitle: "Two Sum",
-      date: `2026-01-${String(index + 1).padStart(2, "0")}T00:00:00Z`,
-      report: { decision: "HIRE", summary: "x".repeat(20_000) },
-    }));
-    localStorage.setItem("codetrial_history", JSON.stringify(entries));
-  }, EASY[0]);
+    await lobby(page);
+    assert.equal(
+      await page.getByRole("button", { name: "Open report" }).count(),
+      20,
+    );
+  },
+);
 
-  await lobby(page);
-  assert.equal(await page.getByRole("button", { name: "Open report" }).count(), 20);
-});
+lobbyTest(
+  "a lobby with no old history never fetches the published names",
+  async (page) => {
+    const fetched = [];
+    page.on("request", (request) =>
+      fetched.push(new URL(request.url()).pathname),
+    );
+    reports = [hired(EASY[0])];
+    await lobby(page);
+    assert.ok(
+      !fetched.includes("/problem-pages.json"),
+      "the map was fetched without a reason",
+    );
+    const index = await page.content();
+    assert.doesNotMatch(index, /data-problem="two-sum"|LeetCode: Two Sum/);
+  },
+);
 
-lobbyTest("a lobby with no old history never fetches the published names", async (page) => {
-  const fetched = [];
-  page.on("request", (request) => fetched.push(new URL(request.url()).pathname));
-  reports = [hired(EASY[0])];
-  await lobby(page);
-  assert.ok(!fetched.includes("/problem-pages.json"), "the map was fetched without a reason");
-  const index = await page.content();
-  assert.doesNotMatch(index, /data-problem="two-sum"|LeetCode: Two Sum/);
-});
+lobbyTest(
+  "a problem already passed is not what gets recommended",
+  async (page) => {
+    // Passed one Hard and missed another, so the streak has no opinion and the
+    // only thing under test is the exclusion.
+    reports = [hired(HARD[0]), missed(HARD[1])];
+    await lobby(page);
+    await setLevel(page, "Hard", true);
+    await setLevel(page, "Medium", false);
 
-lobbyTest("a problem already passed is not what gets recommended", async (page) => {
-  // Passed one Hard and missed another, so the streak has no opinion and the
-  // only thing under test is the exclusion.
-  reports = [hired(HARD[0]), missed(HARD[1])];
-  await lobby(page);
-  await setLevel(page, "Hard", true);
-  await setLevel(page, "Medium", false);
+    const state = await snapshot(page);
+    // Assert there is a real, visible Hard pick before asserting which one it is
+    // not: "not the passed problem" is also true of no problem at all.
+    assert.ok(state.card, "nothing was recommended");
+    assert.equal(state.startDisabled, false);
+    const picked = await cardInfo(page, state.card);
+    assert.equal(picked.level, "Hard");
+    assert.equal(
+      picked.hidden,
+      false,
+      "the recommendation is a card the filter hides",
+    );
+    assert.notEqual(
+      state.card,
+      HARD[0],
+      "a problem the candidate passed came back",
+    );
+  },
+);
 
-  const state = await snapshot(page);
-  // Assert there is a real, visible Hard pick before asserting which one it is
-  // not: "not the passed problem" is also true of no problem at all.
-  assert.ok(state.card, "nothing was recommended");
-  assert.equal(state.startDisabled, false);
-  const picked = await cardInfo(page, state.card);
-  assert.equal(picked.level, "Hard");
-  assert.equal(picked.hidden, false, "the recommendation is a card the filter hides");
-  assert.notEqual(state.card, HARD[0], "a problem the candidate passed came back");
-});
+lobbyTest(
+  "a completed problem returns with a due-review explanation",
+  async (page) => {
+    reports = [savedAttempt(EASY[0])];
+    await lobby(page);
+    await setLevel(page, "Easy", true);
+    await setLevel(page, "Medium", false);
 
-lobbyTest("a completed problem returns with a due-review explanation", async (page) => {
-  reports = [savedAttempt(EASY[0])];
-  await lobby(page);
-  await setLevel(page, "Easy", true);
-  await setLevel(page, "Medium", false);
+    const state = await snapshot(page);
+    assert.equal(state.card, EASY[0]);
+    assert.match(state.note, /Review due after 1 day/);
+  },
+);
 
-  const state = await snapshot(page);
-  assert.equal(state.card, EASY[0]);
-  assert.match(state.note, /Review due after 1 day/);
-});
+lobbyTest(
+  "a saved report reopens and collapses from the lobby",
+  async (page) => {
+    reports = [savedAttempt(EASY[0])];
+    reports[0].payload.report.debrief = {
+      approach: "Use a map to find the complement in linear time.",
+    };
+    await lobby(page);
+    const history = page.locator("#attempt-history");
+    const report = history.locator(".report-card");
+    const toggle = history.getByRole("button", {
+      name: /^(Open|Collapse) report$/,
+    });
+    assert.equal(await toggle.textContent(), "Open report");
+    assert.equal(await report.isVisible(), false);
 
-lobbyTest("a saved report reopens and collapses from the lobby", async (page) => {
-  reports = [savedAttempt(EASY[0])];
-  reports[0].payload.report.debrief = {
-    approach: "Use a map to find the complement in linear time.",
-  };
-  await lobby(page);
-  const history = page.locator("#attempt-history");
-  const report = history.locator(".report-card");
-  const toggle = history.getByRole("button", { name: /^(Open|Collapse) report$/ });
-  assert.equal(await toggle.textContent(), "Open report");
-  assert.equal(await report.isVisible(), false);
+    await toggle.click();
+    assert.equal(await toggle.textContent(), "Collapse report");
+    assert.equal(await report.isVisible(), true);
+    const finalCode = report
+      .locator("details")
+      .filter({ hasText: "Your final code" });
+    assert.equal(await finalCode.evaluate((node) => node.open), false);
+    await finalCode.locator("summary").click();
+    assert.equal(await finalCode.evaluate((node) => node.open), true);
+    const debrief = report
+      .locator("details")
+      .filter({ hasText: "What the interviewer held back" });
+    assert.equal(await debrief.evaluate((node) => node.open), false);
+    await debrief.locator("summary").click();
+    assert.equal(await debrief.evaluate((node) => node.open), true);
 
-  await toggle.click();
-  assert.equal(await toggle.textContent(), "Collapse report");
-  assert.equal(await report.isVisible(), true);
-  const finalCode = report.locator("details").filter({ hasText: "Your final code" });
-  assert.equal(await finalCode.evaluate((node) => node.open), false);
-  await finalCode.locator("summary").click();
-  assert.equal(await finalCode.evaluate((node) => node.open), true);
-  const debrief = report.locator("details").filter({ hasText: "What the interviewer held back" });
-  assert.equal(await debrief.evaluate((node) => node.open), false);
-  await debrief.locator("summary").click();
-  assert.equal(await debrief.evaluate((node) => node.open), true);
+    await toggle.click();
+    assert.equal(await toggle.textContent(), "Open report");
+    assert.equal(await report.isVisible(), false);
 
-  await toggle.click();
-  assert.equal(await toggle.textContent(), "Open report");
-  assert.equal(await report.isVisible(), false);
-
-  await toggle.click();
-  assert.equal(await toggle.textContent(), "Collapse report");
-  assert.equal(await report.count(), 1);
-  assert.equal(await report.isVisible(), true);
-  assert.equal(await finalCode.evaluate((node) => node.open), true);
-  assert.equal(await debrief.evaluate((node) => node.open), true);
-  assert.equal(await history.locator(".report-actions, #download-report, #done").count(), 0);
-});
+    await toggle.click();
+    assert.equal(await toggle.textContent(), "Collapse report");
+    assert.equal(await report.count(), 1);
+    assert.equal(await report.isVisible(), true);
+    assert.equal(await finalCode.evaluate((node) => node.open), true);
+    assert.equal(await debrief.evaluate((node) => node.open), true);
+    assert.equal(
+      await history.locator(".report-actions, #download-report, #done").count(),
+      0,
+    );
+  },
+);
 
 lobbyTest("try again selects the problem", async (page) => {
   reports = [savedAttempt(EASY[0])];
   await lobby(page);
   await page.getByRole("button", { name: "Try again" }).click();
   assert.equal((await snapshot(page)).card, EASY[0]);
-  assert.match(await page.locator("#recommendation").textContent(), /Selected problem:/);
-});
-
-lobbyTest("an unmappable history entry fetches the page map at most once", async (page) => {
-  session = { signedIn: false };
-  const requests = [];
-  page.on("request", (request) => requests.push(new URL(request.url()).pathname));
-  await page.addInitScript(() => {
-    if (!localStorage.getItem("codetrial_history")) localStorage.setItem("codetrial_history", JSON.stringify([
-      { problemId: "retired-problem", date: "2026-01-01T00:00:00Z", report: { decision: "HIRE" } },
-    ]));
-  });
-  await lobby(page);
-  await lobby(page);
-  assert.equal(requests.filter((path) => path === "/problem-pages.json").length, 1);
-});
-
-lobbyTest("a due review below the suggested level is shown and recommended", async (page) => {
-  reports = [savedAttempt(EASY[0]), hired(EASY[1])];
-  const state = await lobby(page);
-
-  assert.deepEqual(state.levels, ["Medium"]);
-  assert.equal(state.card, EASY[0]);
-  assert.match(state.note, /Review due after 1 day \(Easy\)/);
-  assert.equal((await cardInfo(page, EASY[0])).hidden, false);
-});
-
-lobbyTest("two passes move the candidate up a level, and the lobby says why", async (page) => {
-  reports = [hired(EASY[0]), hired(EASY[1])];
-  const state = await lobby(page);
-
-  assert.deepEqual(state.levels, ["Medium"], "passing twice at Easy did not move the candidate");
-  assert.match(state.note, /passed your last two Easy problems/);
-  assert.equal(
-    (await cardInfo(page, state.card)).level,
-    "Medium",
-    "the level moved but the problem did not follow it",
+  assert.match(
+    await page.locator("#recommendation").textContent(),
+    /Selected problem:/,
   );
 });
 
-lobbyTest("two misses move the candidate down a level, and the lobby says why", async (page) => {
-  reports = [missed(MEDIUM[0]), missed(MEDIUM[1])];
-  const state = await lobby(page);
+lobbyTest(
+  "an unmappable history entry fetches the page map at most once",
+  async (page) => {
+    session = { signedIn: false };
+    const requests = [];
+    page.on("request", (request) =>
+      requests.push(new URL(request.url()).pathname),
+    );
+    await page.addInitScript(() => {
+      if (!localStorage.getItem("codetrial_history"))
+        localStorage.setItem(
+          "codetrial_history",
+          JSON.stringify([
+            {
+              problemId: "retired-problem",
+              date: "2026-01-01T00:00:00Z",
+              report: { decision: "HIRE" },
+            },
+          ]),
+        );
+    });
+    await lobby(page);
+    await lobby(page);
+    assert.equal(
+      requests.filter((path) => path === "/problem-pages.json").length,
+      1,
+    );
+  },
+);
 
-  assert.deepEqual(state.levels, ["Easy"]);
-  assert.match(state.note, /last two Medium problems did not land/);
-  // Easy carries the shorter slot with it.
-  assert.equal(state.duration, "30");
-});
+lobbyTest(
+  "a due review below the suggested level is shown and recommended",
+  async (page) => {
+    reports = [savedAttempt(EASY[0]), hired(EASY[1])];
+    const state = await lobby(page);
 
-lobbyTest("a candidate who picks a level first is not overruled by their history", async (page) => {
-  // Two passed Easy problems, which would otherwise check Medium and say so.
-  reports = [hired(EASY[0]), hired(EASY[1])];
-  const release = await heldLobby(page);
+    assert.deepEqual(state.levels, ["Medium"]);
+    assert.equal(state.card, EASY[0]);
+    assert.match(state.note, /Review due after 1 day \(Easy\)/);
+    assert.equal((await cardInfo(page, EASY[0])).hidden, false);
+  },
+);
 
-  // Checked while the reports are held, so the suggestion arrives strictly
-  // after the candidate has already said what they want.
-  await setLevel(page, "Hard", true);
-  await setLevel(page, "Medium", false);
-  release();
-  await awaitReady(page);
+lobbyTest(
+  "two passes move the candidate up a level, and the lobby says why",
+  async (page) => {
+    reports = [hired(EASY[0]), hired(EASY[1])];
+    const state = await lobby(page);
 
-  const state = await snapshot(page);
-  assert.deepEqual(state.levels, ["Hard"], "the history overrode a level the candidate chose");
-  assert.equal(
-    state.note.includes("passed your last two"),
-    false,
-    "the lobby explained a level the candidate had chosen for themselves",
-  );
-});
+    assert.deepEqual(
+      state.levels,
+      ["Medium"],
+      "passing twice at Easy did not move the candidate",
+    );
+    assert.match(state.note, /passed your last two Easy problems/);
+    assert.equal(
+      (await cardInfo(page, state.card)).level,
+      "Medium",
+      "the level moved but the problem did not follow it",
+    );
+  },
+);
 
-lobbyTest("a gated candidate signs in and reaches the interview", async (page) => {
-  session = { signedIn: false, loginRequired: true };
-  reports = [];
-  const errors = [];
-  page.on("pageerror", (error) => errors.push(error.message));
+lobbyTest(
+  "two misses move the candidate down a level, and the lobby says why",
+  async (page) => {
+    reports = [missed(MEDIUM[0]), missed(MEDIUM[1])];
+    const state = await lobby(page);
 
-  await lobby(page);
-  assert.equal((await snapshot(page)).startText, "Use GitHub to start");
+    assert.deepEqual(state.levels, ["Easy"]);
+    assert.match(state.note, /last two Medium problems did not land/);
+    // Easy carries the shorter slot with it.
+    assert.equal(state.duration, "30");
+  },
+);
 
-  await page.fill("#github-login", "candidate");
-  await page.click("#start");
-  // The regression this pins: the handler kept using the event's target across
-  // an await, where the browser has already cleared it. It threw on the line
-  // after the login succeeded, so the name was recorded and the interview never
-  // started, leaving the button disabled on "Recording GitHub..." for good.
-  await page.waitForURL(/\/interview/);
-  assert.deepEqual(errors, [], "the start handler threw on the way to the interview");
-});
+lobbyTest(
+  "a candidate who picks a level first is not overruled by their history",
+  async (page) => {
+    // Two passed Easy problems, which would otherwise check Medium and say so.
+    reports = [hired(EASY[0]), hired(EASY[1])];
+    const release = await heldLobby(page);
 
-lobbyTest("a lobby restored from cache rechecks the session instead of replaying it", async (page) => {
-  session = { signedIn: false, loginRequired: true };
-  reports = [];
-  await lobby(page);
-  assert.equal((await snapshot(page)).startText, "Use GitHub to start");
+    // Checked while the reports are held, so the suggestion arrives strictly
+    // after the candidate has already said what they want.
+    await setLevel(page, "Hard", true);
+    await setLevel(page, "Medium", false);
+    release();
+    await awaitReady(page);
 
-  // The login lands while this page is not the one in front: on the way out to
-  // the interview, or in another tab. The cached page knows none of it, so what
-  // it holds about the session is now wrong in every part.
-  session = { signedIn: true, user: { login: "candidate" } };
-  await restore(page);
-  await settles(
-    page,
-    () =>
-      document.querySelector("#account-status").textContent.startsWith("Signed in") &&
-      !document.querySelector("#start").disabled,
-  );
+    const state = await snapshot(page);
+    assert.deepEqual(
+      state.levels,
+      ["Hard"],
+      "the history overrode a level the candidate chose",
+    );
+    assert.equal(
+      state.note.includes("passed your last two"),
+      false,
+      "the lobby explained a level the candidate had chosen for themselves",
+    );
+  },
+);
 
-  const restored = await snapshot(page);
-  assert.equal(restored.startText, "Start interview", "a signed-in candidate was told to sign in");
-  assert.equal(restored.startDisabled, false, "the restored button never came back");
-  assert.match(restored.account, /Signed in as candidate/);
-});
+lobbyTest(
+  "a gated candidate signs in and reaches the interview",
+  async (page) => {
+    session = { signedIn: false, loginRequired: true };
+    reports = [];
+    const errors = [];
+    page.on("pageerror", (error) => errors.push(error.message));
 
-lobbyTest("a restored lobby re-reads the history, not just the session", async (page) => {
-  reports = [hired(MEDIUM[0]), hired(MEDIUM[1])];
-  const before = await lobby(page);
-  assert.deepEqual(before.levels, ["Hard"]);
-  assert.match(before.note, /passed your last two Medium problems/);
+    await lobby(page);
+    assert.equal((await snapshot(page)).startText, "Use GitHub to start");
 
-  // An interview finished in between, in the tab this page was cached behind.
-  // The restore refetches the reports, so everything the old ones decided has
-  // to be decided again: re-enabling the button while the checked level and the
-  // sentence under it still describe the replaced history is the bug here.
-  reports = [missed(MEDIUM[0]), missed(MEDIUM[1])];
-  await restore(page);
-  await settles(
-    page,
-    () =>
-      !document.querySelector("#start").disabled &&
-      document.querySelector("#recommendation").textContent.includes("did not land"),
-  );
+    await page.fill("#github-login", "candidate");
+    await page.click("#start");
+    // The regression this pins: the handler kept using the event's target across
+    // an await, where the browser has already cleared it. It threw on the line
+    // after the login succeeded, so the name was recorded and the interview never
+    // started, leaving the button disabled on "Recording GitHub..." for good.
+    await page.waitForURL(/\/interview/);
+    assert.deepEqual(
+      errors,
+      [],
+      "the start handler threw on the way to the interview",
+    );
+  },
+);
 
-  const after = await snapshot(page);
-  assert.deepEqual(after.levels, ["Easy"], "the restored lobby kept the level the old reports set");
-  assert.match(after.note, /last two Medium problems did not land/);
-  assert.equal(after.duration, "30", "the level moved but the length it implies did not");
-});
+lobbyTest(
+  "a lobby restored from cache rechecks the session instead of replaying it",
+  async (page) => {
+    session = { signedIn: false, loginRequired: true };
+    reports = [];
+    await lobby(page);
+    assert.equal((await snapshot(page)).startText, "Use GitHub to start");
 
-lobbyTest("dropping the level of a hand-picked problem does not leave it startable", async (page) => {
-  const release = await heldLobby(page);
+    // The login lands while this page is not the one in front: on the way out to
+    // the interview, or in another tab. The cached page knows none of it, so what
+    // it holds about the session is now wrong in every part.
+    session = { signedIn: true, user: { login: "candidate" } };
+    await restore(page);
+    await settles(
+      page,
+      () =>
+        document
+          .querySelector("#account-status")
+          .textContent.startsWith("Signed in") &&
+        !document.querySelector("#start").disabled,
+    );
 
-  // All of this while the history is held open, where there is nothing to
-  // choose a replacement with.
-  await page.click("details.problem-picker summary");
-  await page.click(`[data-problem="${pageOf("jump-game")}"]`);
-  assert.equal((await snapshot(page)).card, pageOf("jump-game"));
+    const restored = await snapshot(page);
+    assert.equal(
+      restored.startText,
+      "Start interview",
+      "a signed-in candidate was told to sign in",
+    );
+    assert.equal(
+      restored.startDisabled,
+      false,
+      "the restored button never came back",
+    );
+    assert.match(restored.account, /Signed in as candidate/);
+  },
+);
 
-  await setLevel(page, "Hard", true);
-  await setLevel(page, "Medium", false);
-  const dropped = await snapshot(page);
-  // The card is hidden by the filter now, so a start button still carrying it
-  // would begin an interview on a level the candidate had just cleared.
-  assert.equal(dropped.card, null, "a problem the filter hides stayed selected");
-  assert.equal(dropped.startDisabled, true, "start still carried the filtered-out problem");
+lobbyTest(
+  "a restored lobby re-reads the history, not just the session",
+  async (page) => {
+    reports = [hired(MEDIUM[0]), hired(MEDIUM[1])];
+    const before = await lobby(page);
+    assert.deepEqual(before.levels, ["Hard"]);
+    assert.match(before.note, /passed your last two Medium problems/);
 
-  release();
-  await awaitReady(page);
-  const settled = await snapshot(page);
-  assert.deepEqual(settled.levels, ["Hard"]);
+    // An interview finished in between, in the tab this page was cached behind.
+    // The restore refetches the reports, so everything the old ones decided has
+    // to be decided again: re-enabling the button while the checked level and the
+    // sentence under it still describe the replaced history is the bug here.
+    reports = [missed(MEDIUM[0]), missed(MEDIUM[1])];
+    await restore(page);
+    await settles(
+      page,
+      () =>
+        !document.querySelector("#start").disabled &&
+        document
+          .querySelector("#recommendation")
+          .textContent.includes("did not land"),
+    );
 
-  // Assert on what start actually ships, not on which card wears a class: the
-  // class is cleared either way, so it cannot tell a cleared pick from a stale
-  // one still sitting in the query string.
-  await page.click("#start");
-  await page.waitForURL(/\/interview/);
-  const shipped = new URL(page.url()).searchParams.get("problem");
-  assert.equal(shipped, settled.card);
-  assert.notEqual(shipped, pageOf("jump-game"), "start shipped the problem the filter dropped");
-});
+    const after = await snapshot(page);
+    assert.deepEqual(
+      after.levels,
+      ["Easy"],
+      "the restored lobby kept the level the old reports set",
+    );
+    assert.match(after.note, /last two Medium problems did not land/);
+    assert.equal(
+      after.duration,
+      "30",
+      "the level moved but the length it implies did not",
+    );
+  },
+);
 
-lobbyTest("widening the filter keeps a problem the candidate picked by hand", async (page) => {
-  const release = await heldLobby(page);
+lobbyTest(
+  "dropping the level of a hand-picked problem does not leave it startable",
+  async (page) => {
+    const release = await heldLobby(page);
 
-  await page.click("details.problem-picker summary");
-  await page.click(`[data-problem="${pageOf("jump-game")}"]`);
+    // All of this while the history is held open, where there is nothing to
+    // choose a replacement with.
+    await page.click("details.problem-picker summary");
+    await page.click(`[data-problem="${pageOf("jump-game")}"]`);
+    assert.equal((await snapshot(page)).card, pageOf("jump-game"));
 
-  // Adding a level does not hide their card, so it is not a reason to discard
-  // a choice they made on purpose.
-  await setLevel(page, "Hard", true);
-  const widened = await snapshot(page);
-  assert.equal(widened.card, pageOf("jump-game"), "adding a difficulty threw away an explicit pick");
-  assert.deepEqual(widened.levels, ["Medium", "Hard"]);
-  assert.equal(widened.startDisabled, false);
+    await setLevel(page, "Hard", true);
+    await setLevel(page, "Medium", false);
+    const dropped = await snapshot(page);
+    // The card is hidden by the filter now, so a start button still carrying it
+    // would begin an interview on a level the candidate had just cleared.
+    assert.equal(
+      dropped.card,
+      null,
+      "a problem the filter hides stayed selected",
+    );
+    assert.equal(
+      dropped.startDisabled,
+      true,
+      "start still carried the filtered-out problem",
+    );
 
-  // And the arriving history does not overrule it either.
-  release();
-  await awaitReady(page);
-  assert.equal((await snapshot(page)).card, pageOf("jump-game"), "the history overruled an explicit pick");
-});
+    release();
+    await awaitReady(page);
+    const settled = await snapshot(page);
+    assert.deepEqual(settled.levels, ["Hard"]);
 
-lobbyTest("a restore in flight is not a history a difficulty change may read", async (page) => {
-  reports = [savedAttempt(MEDIUM[0])];
-  await lobby(page);
+    // Assert on what start actually ships, not on which card wears a class: the
+    // class is cleared either way, so it cannot tell a cleared pick from a stale
+    // one still sitting in the query string.
+    await page.click("#start");
+    await page.waitForURL(/\/interview/);
+    const shipped = new URL(page.url()).searchParams.get("problem");
+    assert.equal(shipped, settled.card);
+    assert.notEqual(
+      shipped,
+      pageOf("jump-game"),
+      "start shipped the problem the filter dropped",
+    );
+  },
+);
 
-  // Restored from cache, so the reports in hand are the ones from before the
-  // candidate left. Held open, the page is back in the same state a first load
-  // starts in, and a difficulty change during it must wait the same way.
-  const release = holdHistory();
-  reports = [hired(HARD[0]), hired(HARD[1])];
-  await restore(page);
-  await setLevel(page, "Hard", true);
-  await setLevel(page, "Medium", false);
+lobbyTest(
+  "widening the filter keeps a problem the candidate picked by hand",
+  async (page) => {
+    const release = await heldLobby(page);
 
-  const midflight = await snapshot(page);
-  assert.equal(midflight.card, null, "a problem was chosen from the history being replaced");
-  assert.equal(midflight.startDisabled, true, "start went live on a history already known stale");
-  assert.equal(await page.locator("#delete-reports").isDisabled(), true);
+    await page.click("details.problem-picker summary");
+    await page.click(`[data-problem="${pageOf("jump-game")}"]`);
 
-  release();
-  await awaitReady(page);
-  const settled = await snapshot(page);
-  assert.ok(settled.card, "nothing was recommended once the refreshed reports arrived");
-  assert.ok(
-    ![HARD[0], HARD[1]].includes(settled.card),
-    "the refreshed history was not applied to the pick",
-  );
-});
+    // Adding a level does not hide their card, so it is not a reason to discard
+    // a choice they made on purpose.
+    await setLevel(page, "Hard", true);
+    const widened = await snapshot(page);
+    assert.equal(
+      widened.card,
+      pageOf("jump-game"),
+      "adding a difficulty threw away an explicit pick",
+    );
+    assert.deepEqual(widened.levels, ["Medium", "Hard"]);
+    assert.equal(widened.startDisabled, false);
+
+    // And the arriving history does not overrule it either.
+    release();
+    await awaitReady(page);
+    assert.equal(
+      (await snapshot(page)).card,
+      pageOf("jump-game"),
+      "the history overruled an explicit pick",
+    );
+  },
+);
+
+lobbyTest(
+  "a restore in flight is not a history a difficulty change may read",
+  async (page) => {
+    reports = [savedAttempt(MEDIUM[0])];
+    await lobby(page);
+
+    // Restored from cache, so the reports in hand are the ones from before the
+    // candidate left. Held open, the page is back in the same state a first load
+    // starts in, and a difficulty change during it must wait the same way.
+    const release = holdHistory();
+    reports = [hired(HARD[0]), hired(HARD[1])];
+    await restore(page);
+    await setLevel(page, "Hard", true);
+    await setLevel(page, "Medium", false);
+
+    const midflight = await snapshot(page);
+    assert.equal(
+      midflight.card,
+      null,
+      "a problem was chosen from the history being replaced",
+    );
+    assert.equal(
+      midflight.startDisabled,
+      true,
+      "start went live on a history already known stale",
+    );
+    assert.equal(await page.locator("#delete-reports").isDisabled(), true);
+
+    release();
+    await awaitReady(page);
+    const settled = await snapshot(page);
+    assert.ok(
+      settled.card,
+      "nothing was recommended once the refreshed reports arrived",
+    );
+    assert.ok(
+      ![HARD[0], HARD[1]].includes(settled.card),
+      "the refreshed history was not applied to the pick",
+    );
+  },
+);
 
 // One value, not the shape matrix: what only a browser can show is the DOM
 // outcome, and "a stored history that is not a list reads as no history" in
 // account.test.js already pins the shapes for free.
-lobbyTest("local history that is not a list does not take the lobby out", async (page) => {
-  session = { signedIn: false };
-  const errors = [];
-  page.on("pageerror", (error) => errors.push(error.message));
-  await page.addInitScript(() => localStorage.setItem("codetrial_history", '{"a":1}'));
-  await page.goto(`${base}/`, { waitUntil: "domcontentloaded" });
-  await awaitReady(page);
+lobbyTest(
+  "local history that is not a list does not take the lobby out",
+  async (page) => {
+    session = { signedIn: false };
+    const errors = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await page.addInitScript(() =>
+      localStorage.setItem("codetrial_history", '{"a":1}'),
+    );
+    await page.goto(`${base}/`, { waitUntil: "domcontentloaded" });
+    await awaitReady(page);
 
-  const state = await snapshot(page);
-  assert.equal(state.startDisabled, false, "the lobby was left with no way to start");
-  assert.ok(state.card, "nothing was recommended");
-  assert.deepEqual(errors, [], `it threw: ${errors[0]}`);
-  assert.equal(state.history, "", "it was counted as past reports");
-});
+    const state = await snapshot(page);
+    assert.equal(
+      state.startDisabled,
+      false,
+      "the lobby was left with no way to start",
+    );
+    assert.ok(state.card, "nothing was recommended");
+    assert.deepEqual(errors, [], `it threw: ${errors[0]}`);
+    assert.equal(state.history, "", "it was counted as past reports");
+  },
+);
 
-lobbyTest("a server that cannot answer at all still leaves a usable lobby", async (page) => {
-  // Both endpoints 500, which is what a half-deployed or failing server looks
-  // like from here. Nothing is recommended until the history settles, so a
-  // history that never arrives has to settle as "none" rather than as a wait
-  // with no end and a button that never comes back.
-  session = null;
-  reports = null;
-  failing = new Set(["/api/session", "/api/reports"]);
-  await page.goto(`${base}/`, { waitUntil: "domcontentloaded" });
-  await awaitReady(page);
+lobbyTest(
+  "a server that cannot answer at all still leaves a usable lobby",
+  async (page) => {
+    // Both endpoints 500, which is what a half-deployed or failing server looks
+    // like from here. Nothing is recommended until the history settles, so a
+    // history that never arrives has to settle as "none" rather than as a wait
+    // with no end and a button that never comes back.
+    session = null;
+    reports = null;
+    failing = new Set(["/api/session", "/api/reports"]);
+    await page.goto(`${base}/`, { waitUntil: "domcontentloaded" });
+    await awaitReady(page);
 
-  const state = await snapshot(page);
-  assert.ok(state.card, "a lobby whose history never arrived recommended nothing at all");
-  assert.equal(state.startDisabled, false, "the lobby waited forever on a fetch that failed");
-});
+    const state = await snapshot(page);
+    assert.ok(
+      state.card,
+      "a lobby whose history never arrived recommended nothing at all",
+    );
+    assert.equal(
+      state.startDisabled,
+      false,
+      "the lobby waited forever on a fetch that failed",
+    );
+  },
+);
 
-lobbyTest("a signed-in candidate whose reports fail still gets a problem", async (page) => {
-  // The half that is easy to miss: the session answers, so the account row is
-  // right, and only the history is missing. Without a recommendation on this
-  // path the candidate is signed in and cannot start.
-  failing = new Set(["/api/reports"]);
-  await page.goto(`${base}/`, { waitUntil: "domcontentloaded" });
-  await awaitReady(page);
+lobbyTest(
+  "a signed-in candidate whose reports fail still gets a problem",
+  async (page) => {
+    // The half that is easy to miss: the session answers, so the account row is
+    // right, and only the history is missing. Without a recommendation on this
+    // path the candidate is signed in and cannot start.
+    failing = new Set(["/api/reports"]);
+    await page.goto(`${base}/`, { waitUntil: "domcontentloaded" });
+    await awaitReady(page);
 
-  const state = await snapshot(page);
-  assert.match(state.account, /Signed in as candidate/);
-  assert.ok(state.card, "a failed report fetch left nothing to start");
-  assert.equal(state.startDisabled, false);
-});
+    const state = await snapshot(page);
+    assert.match(state.account, /Signed in as candidate/);
+    assert.ok(state.card, "a failed report fetch left nothing to start");
+    assert.equal(state.startDisabled, false);
+  },
+);
 
-lobbyTest("changing the level before the reports land waits for them", async (page) => {
-  // Both Hard problems in the bank that this test can reach are passed, so a
-  // recommendation made from an empty history would offer one of them back.
-  reports = [hired(HARD[0]), hired(HARD[1])];
-  const release = await heldLobby(page);
+lobbyTest(
+  "changing the level before the reports land waits for them",
+  async (page) => {
+    // Both Hard problems in the bank that this test can reach are passed, so a
+    // recommendation made from an empty history would offer one of them back.
+    reports = [hired(HARD[0]), hired(HARD[1])];
+    const release = await heldLobby(page);
 
-  // Checked while the reports are still in flight.
-  await setLevel(page, "Hard", true);
-  await setLevel(page, "Medium", false);
-  const early = await snapshot(page);
-  assert.equal(early.card, null, "a problem was chosen from a history that had not arrived");
-  assert.equal(early.startDisabled, true, "start went live before the reports did");
+    // Checked while the reports are still in flight.
+    await setLevel(page, "Hard", true);
+    await setLevel(page, "Medium", false);
+    const early = await snapshot(page);
+    assert.equal(
+      early.card,
+      null,
+      "a problem was chosen from a history that had not arrived",
+    );
+    assert.equal(
+      early.startDisabled,
+      true,
+      "start went live before the reports did",
+    );
 
-  release();
-  await awaitReady(page);
-  const settled = await snapshot(page);
-  assert.deepEqual(settled.levels, ["Hard"], "the level the candidate chose did not survive");
-  assert.ok(settled.card, "nothing was recommended once the reports arrived");
-  assert.ok(
-    ![HARD[0], HARD[1]].includes(settled.card),
-    "a problem the candidate already passed was recommended",
-  );
-});
+    release();
+    await awaitReady(page);
+    const settled = await snapshot(page);
+    assert.deepEqual(
+      settled.levels,
+      ["Hard"],
+      "the level the candidate chose did not survive",
+    );
+    assert.ok(settled.card, "nothing was recommended once the reports arrived");
+    assert.ok(
+      ![HARD[0], HARD[1]].includes(settled.card),
+      "a problem the candidate already passed was recommended",
+    );
+  },
+);
 
-lobbyTest("a start ships the length that was on screen when it was pressed", async (page) => {
-  // The duration row stays live while the sign-in round trip is in flight, so
-  // the handler has to have taken the length with it. Reading the global after
-  // the await shipped whatever the candidate landed on in the meantime.
-  session = { signedIn: false, loginRequired: true };
-  await lobby(page);
-  const pressed = (await snapshot(page)).duration;
+lobbyTest(
+  "a start ships the length that was on screen when it was pressed",
+  async (page) => {
+    // The duration row stays live while the sign-in round trip is in flight, so
+    // the handler has to have taken the length with it. Reading the global after
+    // the await shipped whatever the candidate landed on in the meantime.
+    session = { signedIn: false, loginRequired: true };
+    await lobby(page);
+    const pressed = (await snapshot(page)).duration;
 
-  const finishLogin = (() => {
-    let done;
-    holdLogin = new Promise((resolve) => (done = resolve));
-    return done;
-  })();
-  await page.fill("#github-login", "candidate");
-  await page.click("#start");
-  await page.click('[data-duration="60"]');
-  finishLogin();
+    const finishLogin = (() => {
+      let done;
+      holdLogin = new Promise((resolve) => (done = resolve));
+      return done;
+    })();
+    await page.fill("#github-login", "candidate");
+    await page.click("#start");
+    await page.click('[data-duration="60"]');
+    finishLogin();
 
-  await page.waitForURL(/\/interview/);
-  assert.equal(
-    new URL(page.url()).searchParams.get("duration"),
-    pressed,
-    "start shipped a different length than the one showing when it was pressed",
-  );
-});
+    await page.waitForURL(/\/interview/);
+    assert.equal(
+      new URL(page.url()).searchParams.get("duration"),
+      pressed,
+      "start shipped a different length than the one showing when it was pressed",
+    );
+  },
+);
 
-lobbyTest("a start ships the grounding snippets that were checked when it was pressed", async (page) => {
-  session = { signedIn: false, loginRequired: true };
-  await lobby(page);
-  await page.click("details.interview-context summary");
-  const txt = (name, text) => ({ name, mimeType: "text/plain", buffer: Buffer.from(text) });
+lobbyTest(
+  "a start ships the grounding snippets that were checked when it was pressed",
+  async (page) => {
+    session = { signedIn: false, loginRequired: true };
+    await lobby(page);
+    await page.click("details.interview-context summary");
+    const txt = (name, text) => ({
+      name,
+      mimeType: "text/plain",
+      buffer: Buffer.from(text),
+    });
 
-  await page.setInputFiles("#grounding-jd", txt("first.txt", "Must know Rust"));
-  await page.locator('#grounding-choices input[data-group="requirements"]').first().check();
-  await page.check("#grounding-consent");
+    await page.setInputFiles(
+      "#grounding-jd",
+      txt("first.txt", "Must know Rust"),
+    );
+    await page
+      .locator('#grounding-choices input[data-group="requirements"]')
+      .first()
+      .check();
+    await page.check("#grounding-consent");
 
-  const finishLogin = (() => {
-    let done;
-    holdLogin = new Promise((resolve) => (done = resolve));
-    return done;
-  })();
-  await page.fill("#github-login", "candidate");
-  await page.click("#start");
-  await page.click("#grounding-clear");
-  await page.setInputFiles("#grounding-jd", txt("second.txt", "Must know SQL"));
-  await settles(page, () => document.querySelector("#grounding-choices label")?.textContent.includes("SQL"));
-  await page.locator('#grounding-choices input[data-group="requirements"]').first().check();
-  await page.check("#grounding-consent");
-  finishLogin();
+    const finishLogin = (() => {
+      let done;
+      holdLogin = new Promise((resolve) => (done = resolve));
+      return done;
+    })();
+    await page.fill("#github-login", "candidate");
+    await page.click("#start");
+    await page.click("#grounding-clear");
+    await page.setInputFiles(
+      "#grounding-jd",
+      txt("second.txt", "Must know SQL"),
+    );
+    await settles(page, () =>
+      document
+        .querySelector("#grounding-choices label")
+        ?.textContent.includes("SQL"),
+    );
+    await page
+      .locator('#grounding-choices input[data-group="requirements"]')
+      .first()
+      .check();
+    await page.check("#grounding-consent");
+    finishLogin();
 
-  await page.waitForURL(/\/interview/);
-  const stored = await page.evaluate(() => JSON.parse(sessionStorage.getItem("codetrial.interview-grounding.v1")));
-  assert.deepEqual(stored?.requirements, ["Must know Rust"]);
-});
+    await page.waitForURL(/\/interview/);
+    const stored = await page.evaluate(() =>
+      JSON.parse(sessionStorage.getItem("codetrial.interview-grounding.v1")),
+    );
+    assert.deepEqual(stored?.requirements, ["Must know Rust"]);
+  },
+);
 
-lobbyTest("consent withdrawn during the sign-in wait stores no grounding", async (page) => {
-  session = { signedIn: false, loginRequired: true };
-  await lobby(page);
-  await page.click("details.interview-context summary");
-  await page.setInputFiles("#grounding-jd", {
-    name: "jd.txt",
-    mimeType: "text/plain",
-    buffer: Buffer.from("Must know Rust"),
-  });
-  await page.locator('#grounding-choices input[data-group="requirements"]').first().check();
-  await page.check("#grounding-consent");
+lobbyTest(
+  "consent withdrawn during the sign-in wait stores no grounding",
+  async (page) => {
+    session = { signedIn: false, loginRequired: true };
+    await lobby(page);
+    await page.click("details.interview-context summary");
+    await page.setInputFiles("#grounding-jd", {
+      name: "jd.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("Must know Rust"),
+    });
+    await page
+      .locator('#grounding-choices input[data-group="requirements"]')
+      .first()
+      .check();
+    await page.check("#grounding-consent");
 
-  const finishLogin = (() => {
-    let done;
-    holdLogin = new Promise((resolve) => (done = resolve));
-    return done;
-  })();
-  await page.fill("#github-login", "candidate");
-  await page.click("#start");
-  await page.uncheck("#grounding-consent");
-  finishLogin();
+    const finishLogin = (() => {
+      let done;
+      holdLogin = new Promise((resolve) => (done = resolve));
+      return done;
+    })();
+    await page.fill("#github-login", "candidate");
+    await page.click("#start");
+    await page.uncheck("#grounding-consent");
+    finishLogin();
 
-  await page.waitForURL(/\/interview/);
-  const stored = await page.evaluate(() => sessionStorage.getItem("codetrial.interview-grounding.v1"));
-  assert.equal(stored, null);
-});
+    await page.waitForURL(/\/interview/);
+    const stored = await page.evaluate(() =>
+      sessionStorage.getItem("codetrial.interview-grounding.v1"),
+    );
+    assert.equal(stored, null);
+  },
+);
 
-lobbyTest("a start the grounding packet refuses does not sign in first", async (page) => {
-  session = { signedIn: false, loginRequired: true };
-  await lobby(page);
-  await page.click("details.interview-context summary");
-  await page.setInputFiles("#grounding-jd", { name: "jd.txt", mimeType: "text/plain", buffer: Buffer.from("Must know Rust") });
-  await page.locator('#grounding-choices input[data-group="requirements"]').first().check();
+lobbyTest(
+  "a start the grounding packet refuses does not sign in first",
+  async (page) => {
+    session = { signedIn: false, loginRequired: true };
+    await lobby(page);
+    await page.click("details.interview-context summary");
+    await page.setInputFiles("#grounding-jd", {
+      name: "jd.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("Must know Rust"),
+    });
+    await page
+      .locator('#grounding-choices input[data-group="requirements"]')
+      .first()
+      .check();
 
-  await page.fill("#github-login", "candidate");
-  await page.click("#start");
-  await settles(page, () => document.querySelector("#grounding-error").textContent.includes("Agree"));
-  assert.equal(session.signedIn, false, "no /api/login for a start that was never going to go");
-  assert.equal(await page.isDisabled("#start"), false);
-});
+    await page.fill("#github-login", "candidate");
+    await page.click("#start");
+    await settles(page, () =>
+      document.querySelector("#grounding-error").textContent.includes("Agree"),
+    );
+    assert.equal(
+      session.signedIn,
+      false,
+      "no /api/login for a start that was never going to go",
+    );
+    assert.equal(await page.isDisabled("#start"), false);
+  },
+);
 
-lobbyTest("a start already on its way out is not undone by a later choice", async (page) => {
-  // The sign-in round trip is the one window where the start handler is
-  // suspended with the page still live under it, and everything the candidate
-  // can touch during it writes the two things that handler is holding: which
-  // problem is chosen, and whether the button is armed.
-  session = { signedIn: false, loginRequired: true };
-  const errors = [];
-  page.on("pageerror", (error) => errors.push(error.message));
-  const release = await heldLobby(page);
+lobbyTest(
+  "a start already on its way out is not undone by a later choice",
+  async (page) => {
+    // The sign-in round trip is the one window where the start handler is
+    // suspended with the page still live under it, and everything the candidate
+    // can touch during it writes the two things that handler is holding: which
+    // problem is chosen, and whether the button is armed.
+    session = { signedIn: false, loginRequired: true };
+    const errors = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    const release = await heldLobby(page);
 
-  await page.click("details.problem-picker summary");
-  await page.click(`[data-problem="${pageOf("jump-game")}"]`);
-  await page.fill("#github-login", "candidate");
+    await page.click("details.problem-picker summary");
+    await page.click(`[data-problem="${pageOf("jump-game")}"]`);
+    await page.fill("#github-login", "candidate");
 
-  // Held rather than slowed: everything below lands while /api/login is in
-  // flight because the stub is waiting on this, not because 400ms was long
-  // enough to win a race.
-  const finishLogin = (() => {
-    let done;
-    holdLogin = new Promise((resolve) => (done = resolve));
-    return done;
-  })();
-  await page.click("#start");
+    // Held rather than slowed: everything below lands while /api/login is in
+    // flight because the stub is waiting on this, not because 400ms was long
+    // enough to win a race.
+    const finishLogin = (() => {
+      let done;
+      holdLogin = new Promise((resolve) => (done = resolve));
+      return done;
+    })();
+    await page.click("#start");
 
-  // A second card while the button reads "Recording GitHub...": re-arming it
-  // here buys the candidate a second navigation out of one start.
-  await page.click(`[data-problem="${pageOf("gas-station")}"]`);
-  assert.equal(
-    (await snapshot(page)).startDisabled,
-    true,
-    "a card click re-armed a start button that was already leaving",
-  );
+    // A second card while the button reads "Recording GitHub...": re-arming it
+    // here buys the candidate a second navigation out of one start.
+    await page.click(`[data-problem="${pageOf("gas-station")}"]`);
+    assert.equal(
+      (await snapshot(page)).startDisabled,
+      true,
+      "a card click re-armed a start button that was already leaving",
+    );
 
-  // And a filter that drops the pick clears it, so a handler that read the
-  // problem after its await rather than before had nothing left to read an id
-  // off: it threw, and the button stayed down on "Recording GitHub..." for good.
-  await setLevel(page, "Hard", true);
-  await setLevel(page, "Medium", false);
+    // And a filter that drops the pick clears it, so a handler that read the
+    // problem after its await rather than before had nothing left to read an id
+    // off: it threw, and the button stayed down on "Recording GitHub..." for good.
+    await setLevel(page, "Hard", true);
+    await setLevel(page, "Medium", false);
 
-  finishLogin();
-  await page.waitForURL(/\/interview/);
-  assert.deepEqual(errors, [], "the start handler threw after the login came back");
-  assert.equal(
-    new URL(page.url()).searchParams.get("problem"),
-    pageOf("jump-game"),
-    "start shipped something other than the problem that was on screen when it was pressed",
-  );
-  release();
-});
+    finishLogin();
+    await page.waitForURL(/\/interview/);
+    assert.deepEqual(
+      errors,
+      [],
+      "the start handler threw after the login came back",
+    );
+    assert.equal(
+      new URL(page.url()).searchParams.get("problem"),
+      pageOf("jump-game"),
+      "start shipped something other than the problem that was on screen when it was pressed",
+    );
+    release();
+  },
+);
 
-lobbyTest("a length this deployment cannot record is disabled, and says why", async (page) => {
-  // The cap the server reports, which is `DEFAULT_RECORDING_MAX_MINUTES` on a
-  // default deployment. Sixty is the length the row offers past it, and
-  // `stale_after` reaps that recording ten minutes before the interview ends.
-  session = { signedIn: true, user: { login: "candidate" }, maxDurationMin: 45 };
-
-  const state = await lobby(page);
-
-  assert.deepEqual(state.durationsOff, ["60"], "a length past the recording cap was still on offer");
-  assert.match(state.durationNote, /at most 45 minutes/, "the disabled button gave no reason");
-  assert.equal(state.duration, "45", "the cap moved a length that was already under it");
-});
-
-lobbyTest("the recording cap outranks the length the markup preselected", async (page) => {
-  // Nothing else here overrules a length that is already set. This does,
-  // because it is not a second opinion about what suits the candidate: it is
-  // what this server is able to record.
-  session = { signedIn: true, user: { login: "candidate" }, maxDurationMin: 30 };
-
-  const state = await lobby(page);
-
-  assert.equal(state.duration, "30", "the lobby kept a length longer than the recording");
-  assert.deepEqual(state.durationsOff, ["45", "60"]);
-});
-
-lobbyTest("a server that can record every length on offer disables nothing", async (page) => {
-  session = { signedIn: true, user: { login: "candidate" }, maxDurationMin: 90 };
-
-  const state = await lobby(page);
-
-  assert.deepEqual(state.durationsOff, []);
-  assert.equal(state.durationNote, "", "a lobby with nothing capped explained a cap anyway");
-  assert.equal(state.duration, markupDuration());
-});
-
-lobbyTest("saved reports require confirmation and clear the progress panel", async (page) => {
-  reports = [savedAttempt(EASY[0]), savedAttempt(EASY[1])];
-  await lobby(page);
-  assert.match(await page.locator("#recommendation").textContent(), /passed your last two Easy problems/);
-
-  page.once("dialog", (dialog) => dialog.dismiss());
-  await page.click("#delete-reports");
-  assert.equal(deleteRequests, 0);
-  assert.equal(await page.locator("#history").isHidden(), false);
-
-  page.once("dialog", (dialog) => {
-    assert.match(dialog.message(), /reports and progress/);
-    assert.match(dialog.message(), /Recording files follow their separate retention policy/);
-    return dialog.accept();
-  });
-  await page.click("#delete-reports");
-  await settles(page, () => document.querySelector("#history").hidden);
-  assert.equal(deleteRequests, 1);
-  assert.deepEqual(reports, []);
-  assert.equal(await page.locator("#history").isHidden(), true);
-  assert.equal(await page.locator("#delete-reports").isHidden(), true);
-  assert.doesNotMatch(await page.locator("#recommendation").textContent(), /passed your last two/);
-  assert.equal(await page.locator("#report-delete-status").textContent(), "Saved reports and progress were deleted.");
-  assert.equal(await page.evaluate(() => document.activeElement.id), "report-delete-status");
-});
-
-lobbyTest("a filtered attempt list deletes the report the row shows", async (page) => {
-  const attempt = (id, language, day) => ({
-    id,
-    problemId: EASY[0],
-    payload: {
-      id, problemId: EASY[0], problemTitle: `Attempt ${id}`, language,
-      date: `2026-01-0${day}T00:00:00Z`, report: { decision: "HIRE" },
-    },
-  });
-  reports = [attempt("a", "python", 1), attempt("b", "cpp", 2), attempt("c", "python", 3)];
-  await lobby(page);
-  await page.selectOption("#progress-language", "python");
-  const rows = () => page.locator("#attempt-history > li > p").allTextContents();
-  assert.equal((await rows()).length, 2);
-  // Newest first, so the first row shown is the third report stored and the
-  // first report stored is not on screen at all.
-  const first = page.locator("#attempt-history > li").first().getByRole("button", { name: /^Delete the / });
-
-  page.once("dialog", (dialog) => dialog.dismiss());
-  await first.click();
-  assert.deepEqual(deletedIds, []);
-
-  page.once("dialog", (dialog) => {
-    assert.match(dialog.message(), /report for Attempt c\?/);
-    return dialog.accept();
-  });
-  await first.click();
-  await settles(page, () => document.querySelector("#report-delete-status").textContent !== "");
-  assert.deepEqual(deletedIds, ["c"]);
-  assert.deepEqual(reports.map((report) => report.id), ["a", "b"]);
-  assert.equal(await page.locator("#progress-language").inputValue(), "python", "the filter outlived the reload");
-  const left = await rows();
-  assert.equal(left.length, 1);
-  assert.match(left[0], /Attempt a/);
-  assert.equal(await page.locator("#report-delete-status").textContent(), "The report was deleted.");
-  assert.equal(deleteRequests, 0, "one report deleted was every report deleted");
-});
-
-lobbyTest("two attempts on one day have Delete buttons that name different reports", async (page) => {
-  const attempt = (id, time) => ({
-    id,
-    problemId: EASY[0],
-    payload: {
-      id, problemId: EASY[0], problemTitle: "Same problem", language: "python",
-      date: `2026-01-01T${time}:00Z`, report: { decision: "HIRE" },
-    },
-  });
-  reports = [attempt("morning", "09:00"), attempt("evening", "18:30")];
-  await lobby(page);
-  const names = await page.locator("#attempt-history [data-delete-report]")
-    .evaluateAll((buttons) => buttons.map((button) => button.getAttribute("aria-label")));
-  assert.equal(names.length, 2);
-  assert.notEqual(names[0], names[1]);
-});
-
-lobbyTest("deleting a row leaves focus in the list and announces the result", async (page) => {
-  const attempt = (id, day) => ({
-    id,
-    problemId: EASY[0],
-    payload: {
-      id, problemId: EASY[0], problemTitle: `Attempt ${id}`, language: "python",
-      date: `2026-01-0${day}T00:00:00Z`, report: { decision: "HIRE" },
-    },
-  });
-  reports = [attempt("a", 1), attempt("b", 2), attempt("c", 3)];
-  await lobby(page);
-  page.once("dialog", (dialog) => dialog.accept());
-  // Newest first, so the second row shown is "b" and "a" takes its place.
-  await page.locator("#attempt-history [data-delete-report]").nth(1).click();
-  await settles(page, () => document.querySelector("#report-delete-status").textContent !== "");
-  assert.deepEqual(deletedIds, ["b"]);
-  assert.equal(await page.locator("#report-delete-status").getAttribute("role"), "status");
-  assert.match(
-    await page.evaluate(() => document.activeElement.getAttribute("aria-label")),
-    /report for Attempt a$/,
-  );
-});
-
-lobbyTest("a device row still deletes after the first session check failed", async (page) => {
-  session = { signedIn: false };
-  await page.addInitScript((entry) => {
-    if (!localStorage.getItem("codetrial_history")) {
-      localStorage.setItem("codetrial_history", JSON.stringify([entry]));
-    }
-  }, { id: "local", problemId: EASY[0], date: "2026-01-04T00:00:00Z", report: { decision: "HIRE" } });
-  failing.add("/api/session");
-  await lobby(page);
-  // One flaky call at load, answered on the recheck: the list drawn was this
-  // device's, and that is the copy there is to delete.
-  failing.delete("/api/session");
-  page.once("dialog", (dialog) => dialog.accept());
-  await page.locator("#attempt-history [data-delete-report]").click();
-  await settles(page, () => document.querySelector("#report-delete-status").textContent !== "");
-  assert.equal(await page.locator("#report-delete-status").textContent(), "The report was deleted.");
-  assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem("codetrial_history"))), []);
-});
-
-lobbyTest("a back/forward restore holds the row deletes down until the lobby reloads", async (page) => {
-  reports = [{ ...savedAttempt(EASY[0]), id: "kept", payload: { ...savedAttempt(EASY[0]).payload, id: "kept" } }];
-  await lobby(page);
-  const remove = page.locator("#attempt-history [data-delete-report]");
-  assert.equal(await remove.isDisabled(), false);
-  const release = holdHistory();
-  await restore(page);
-  assert.equal(await remove.isDisabled(), true);
-  release();
-  await awaitReady(page);
-  assert.equal(await remove.isDisabled(), false);
-});
-
-lobbyTest("an account delete this device could not follow shows the copy it kept", async (page) => {
-  const entry = { id: "both", problemId: EASY[0], date: "2026-01-03T00:00:00Z", report: { decision: "HIRE" } };
-  reports = [{ id: "both", problemId: EASY[0], payload: entry }];
-  await page.addInitScript((saved) => {
-    localStorage.setItem("codetrial_history", JSON.stringify([saved]));
-    const setItem = Storage.prototype.setItem;
-    Storage.prototype.setItem = function writeHistory(key, value) {
-      if (key === "codetrial_history") throw new Error("blocked");
-      return setItem.call(this, key, value);
+lobbyTest(
+  "a length this deployment cannot record is disabled, and says why",
+  async (page) => {
+    // The cap the server reports, which is `DEFAULT_RECORDING_MAX_MINUTES` on a
+    // default deployment. Sixty is the length the row offers past it, and
+    // `stale_after` reaps that recording ten minutes before the interview ends.
+    session = {
+      signedIn: true,
+      user: { login: "candidate" },
+      maxDurationMin: 45,
     };
-  }, entry);
-  await lobby(page);
-  page.once("dialog", (dialog) => dialog.accept());
-  await page.locator("#attempt-history [data-delete-report]").click();
-  await settles(page, () => document.querySelector("#report-delete-status").textContent !== "");
-  assert.deepEqual(reports, []);
-  assert.equal(
-    await page.locator("#report-delete-status").textContent(),
-    "The report was deleted from your account, but its copy on this device could not be deleted.",
-  );
-  assert.match(await page.locator("#progress-summary").textContent(), /saved on this device/);
-  assert.equal(await page.locator("#attempt-history > li").count(), 1);
-});
+
+    const state = await lobby(page);
+
+    assert.deepEqual(
+      state.durationsOff,
+      ["60"],
+      "a length past the recording cap was still on offer",
+    );
+    assert.match(
+      state.durationNote,
+      /at most 45 minutes/,
+      "the disabled button gave no reason",
+    );
+    assert.equal(
+      state.duration,
+      "45",
+      "the cap moved a length that was already under it",
+    );
+  },
+);
+
+lobbyTest(
+  "the recording cap outranks the length the markup preselected",
+  async (page) => {
+    // Nothing else here overrules a length that is already set. This does,
+    // because it is not a second opinion about what suits the candidate: it is
+    // what this server is able to record.
+    session = {
+      signedIn: true,
+      user: { login: "candidate" },
+      maxDurationMin: 30,
+    };
+
+    const state = await lobby(page);
+
+    assert.equal(
+      state.duration,
+      "30",
+      "the lobby kept a length longer than the recording",
+    );
+    assert.deepEqual(state.durationsOff, ["45", "60"]);
+  },
+);
+
+lobbyTest(
+  "a server that can record every length on offer disables nothing",
+  async (page) => {
+    session = {
+      signedIn: true,
+      user: { login: "candidate" },
+      maxDurationMin: 90,
+    };
+
+    const state = await lobby(page);
+
+    assert.deepEqual(state.durationsOff, []);
+    assert.equal(
+      state.durationNote,
+      "",
+      "a lobby with nothing capped explained a cap anyway",
+    );
+    assert.equal(state.duration, markupDuration());
+  },
+);
+
+lobbyTest(
+  "saved reports require confirmation and clear the progress panel",
+  async (page) => {
+    reports = [savedAttempt(EASY[0]), savedAttempt(EASY[1])];
+    await lobby(page);
+    assert.match(
+      await page.locator("#recommendation").textContent(),
+      /passed your last two Easy problems/,
+    );
+
+    page.once("dialog", (dialog) => dialog.dismiss());
+    await page.click("#delete-reports");
+    assert.equal(deleteRequests, 0);
+    assert.equal(await page.locator("#history").isHidden(), false);
+
+    page.once("dialog", (dialog) => {
+      assert.match(dialog.message(), /reports and progress/);
+      assert.match(
+        dialog.message(),
+        /Recording files follow their separate retention policy/,
+      );
+      return dialog.accept();
+    });
+    await page.click("#delete-reports");
+    await settles(page, () => document.querySelector("#history").hidden);
+    assert.equal(deleteRequests, 1);
+    assert.deepEqual(reports, []);
+    assert.equal(await page.locator("#history").isHidden(), true);
+    assert.equal(await page.locator("#delete-reports").isHidden(), true);
+    assert.doesNotMatch(
+      await page.locator("#recommendation").textContent(),
+      /passed your last two/,
+    );
+    assert.equal(
+      await page.locator("#report-delete-status").textContent(),
+      "Saved reports and progress were deleted.",
+    );
+    assert.equal(
+      await page.evaluate(() => document.activeElement.id),
+      "report-delete-status",
+    );
+  },
+);
+
+lobbyTest(
+  "a filtered attempt list deletes the report the row shows",
+  async (page) => {
+    const attempt = (id, language, day) => ({
+      id,
+      problemId: EASY[0],
+      payload: {
+        id,
+        problemId: EASY[0],
+        problemTitle: `Attempt ${id}`,
+        language,
+        date: `2026-01-0${day}T00:00:00Z`,
+        report: { decision: "HIRE" },
+      },
+    });
+    reports = [
+      attempt("a", "python", 1),
+      attempt("b", "cpp", 2),
+      attempt("c", "python", 3),
+    ];
+    await lobby(page);
+    await page.selectOption("#progress-language", "python");
+    const rows = () =>
+      page.locator("#attempt-history > li > p").allTextContents();
+    assert.equal((await rows()).length, 2);
+    // Newest first, so the first row shown is the third report stored and the
+    // first report stored is not on screen at all.
+    const first = page
+      .locator("#attempt-history > li")
+      .first()
+      .getByRole("button", { name: /^Delete the / });
+
+    page.once("dialog", (dialog) => dialog.dismiss());
+    await first.click();
+    assert.deepEqual(deletedIds, []);
+
+    page.once("dialog", (dialog) => {
+      assert.match(dialog.message(), /report for Attempt c\?/);
+      return dialog.accept();
+    });
+    await first.click();
+    await settles(
+      page,
+      () => document.querySelector("#report-delete-status").textContent !== "",
+    );
+    assert.deepEqual(deletedIds, ["c"]);
+    assert.deepEqual(
+      reports.map((report) => report.id),
+      ["a", "b"],
+    );
+    assert.equal(
+      await page.locator("#progress-language").inputValue(),
+      "python",
+      "the filter outlived the reload",
+    );
+    const left = await rows();
+    assert.equal(left.length, 1);
+    assert.match(left[0], /Attempt a/);
+    assert.equal(
+      await page.locator("#report-delete-status").textContent(),
+      "The report was deleted.",
+    );
+    assert.equal(
+      deleteRequests,
+      0,
+      "one report deleted was every report deleted",
+    );
+  },
+);
+
+lobbyTest(
+  "two attempts on one day have Delete buttons that name different reports",
+  async (page) => {
+    const attempt = (id, time) => ({
+      id,
+      problemId: EASY[0],
+      payload: {
+        id,
+        problemId: EASY[0],
+        problemTitle: "Same problem",
+        language: "python",
+        date: `2026-01-01T${time}:00Z`,
+        report: { decision: "HIRE" },
+      },
+    });
+    reports = [attempt("morning", "09:00"), attempt("evening", "18:30")];
+    await lobby(page);
+    const names = await page
+      .locator("#attempt-history [data-delete-report]")
+      .evaluateAll((buttons) =>
+        buttons.map((button) => button.getAttribute("aria-label")),
+      );
+    assert.equal(names.length, 2);
+    assert.notEqual(names[0], names[1]);
+  },
+);
+
+lobbyTest(
+  "deleting a row leaves focus in the list and announces the result",
+  async (page) => {
+    const attempt = (id, day) => ({
+      id,
+      problemId: EASY[0],
+      payload: {
+        id,
+        problemId: EASY[0],
+        problemTitle: `Attempt ${id}`,
+        language: "python",
+        date: `2026-01-0${day}T00:00:00Z`,
+        report: { decision: "HIRE" },
+      },
+    });
+    reports = [attempt("a", 1), attempt("b", 2), attempt("c", 3)];
+    await lobby(page);
+    page.once("dialog", (dialog) => dialog.accept());
+    // Newest first, so the second row shown is "b" and "a" takes its place.
+    await page.locator("#attempt-history [data-delete-report]").nth(1).click();
+    await settles(
+      page,
+      () => document.querySelector("#report-delete-status").textContent !== "",
+    );
+    assert.deepEqual(deletedIds, ["b"]);
+    assert.equal(
+      await page.locator("#report-delete-status").getAttribute("role"),
+      "status",
+    );
+    assert.match(
+      await page.evaluate(() =>
+        document.activeElement.getAttribute("aria-label"),
+      ),
+      /report for Attempt a$/,
+    );
+  },
+);
+
+lobbyTest(
+  "a device row still deletes after the first session check failed",
+  async (page) => {
+    session = { signedIn: false };
+    await page.addInitScript(
+      (entry) => {
+        if (!localStorage.getItem("codetrial_history")) {
+          localStorage.setItem("codetrial_history", JSON.stringify([entry]));
+        }
+      },
+      {
+        id: "local",
+        problemId: EASY[0],
+        date: "2026-01-04T00:00:00Z",
+        report: { decision: "HIRE" },
+      },
+    );
+    failing.add("/api/session");
+    await lobby(page);
+    // One flaky call at load, answered on the recheck: the list drawn was this
+    // device's, and that is the copy there is to delete.
+    failing.delete("/api/session");
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.locator("#attempt-history [data-delete-report]").click();
+    await settles(
+      page,
+      () => document.querySelector("#report-delete-status").textContent !== "",
+    );
+    assert.equal(
+      await page.locator("#report-delete-status").textContent(),
+      "The report was deleted.",
+    );
+    assert.deepEqual(
+      await page.evaluate(() =>
+        JSON.parse(localStorage.getItem("codetrial_history")),
+      ),
+      [],
+    );
+  },
+);
+
+lobbyTest(
+  "a back/forward restore holds the row deletes down until the lobby reloads",
+  async (page) => {
+    reports = [
+      {
+        ...savedAttempt(EASY[0]),
+        id: "kept",
+        payload: { ...savedAttempt(EASY[0]).payload, id: "kept" },
+      },
+    ];
+    await lobby(page);
+    const remove = page.locator("#attempt-history [data-delete-report]");
+    assert.equal(await remove.isDisabled(), false);
+    const release = holdHistory();
+    await restore(page);
+    assert.equal(await remove.isDisabled(), true);
+    release();
+    await awaitReady(page);
+    assert.equal(await remove.isDisabled(), false);
+  },
+);
+
+lobbyTest(
+  "an account delete this device could not follow shows the copy it kept",
+  async (page) => {
+    const entry = {
+      id: "both",
+      problemId: EASY[0],
+      date: "2026-01-03T00:00:00Z",
+      report: { decision: "HIRE" },
+    };
+    reports = [{ id: "both", problemId: EASY[0], payload: entry }];
+    await page.addInitScript((saved) => {
+      localStorage.setItem("codetrial_history", JSON.stringify([saved]));
+      const setItem = Storage.prototype.setItem;
+      Storage.prototype.setItem = function writeHistory(key, value) {
+        if (key === "codetrial_history") throw new Error("blocked");
+        return setItem.call(this, key, value);
+      };
+    }, entry);
+    await lobby(page);
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.locator("#attempt-history [data-delete-report]").click();
+    await settles(
+      page,
+      () => document.querySelector("#report-delete-status").textContent !== "",
+    );
+    assert.deepEqual(reports, []);
+    assert.equal(
+      await page.locator("#report-delete-status").textContent(),
+      "The report was deleted from your account, but its copy on this device could not be deleted.",
+    );
+    assert.match(
+      await page.locator("#progress-summary").textContent(),
+      /saved on this device/,
+    );
+    assert.equal(await page.locator("#attempt-history > li").count(), 1);
+  },
+);
 
 lobbyTest("a row without an id offers no delete", async (page) => {
   reports = [savedAttempt(EASY[0])];
   await lobby(page);
-  assert.equal(await page.locator("#attempt-history").getByRole("button", { name: /^Delete/ }).count(), 0);
-});
-
-lobbyTest("a phase row lists three weaknesses and folds the rest where they can still be read", async (page) => {
-  const ranked = ["Explain the algorithm before coding", "Justify time complexity", "Justify space complexity", "Name an alternative"];
-  reports = [focusedAttempt(EASY[0], { phase: "Algorithm", weaknesses: ranked, assessed: true })];
-  await lobby(page);
-  await settles(page, () => document.querySelector("#progress-weaknesses > li"));
-
-  const row = await page.evaluate(() => {
-    const item = document.querySelector("#progress-weaknesses > li");
-    const list = document.querySelector("#progress-weaknesses");
-    return {
-      note: document.getElementById(list.getAttribute("aria-describedby"))?.textContent.slice(0, 16),
-      heading: item.querySelector(":scope > p").textContent,
-      shown: [...item.querySelectorAll(":scope > ul > li")].map((node) => node.textContent),
-      summary: item.querySelector(":scope > details > summary")?.textContent,
-      folded: [...item.querySelectorAll(":scope > details > ul > li")].map((node) => node.textContent),
-    };
-  });
-  assert.deepEqual(row, {
-    note: "Each row counts ",
-    heading: "REACTO · Algorithm · flagged in 1 of 1 assessed attempt",
-    shown: ranked.slice(0, 3),
-    summary: "1 more weakness",
-    folded: ranked.slice(3),
-  }, "the report's highest-ranked weakness is shown, and the notice is not one more list item");
-});
-
-lobbyTest("a failed report deletion retains the current progress", async (page) => {
-  reports = [savedAttempt(EASY[0])];
-  await lobby(page);
-  failing.add("/api/reports");
-  page.once("dialog", (dialog) => dialog.accept());
-
-  await page.click("#delete-reports");
-  await settles(page, () => document.querySelector("#report-delete-status").textContent !== "");
-
-  assert.equal(deleteRequests, 1);
-  assert.equal(await page.locator("#history").isHidden(), false);
-  assert.match(await page.locator("#progress-summary").textContent(), /1 of 1 attempts shown/);
   assert.equal(
-    await page.locator("#report-delete-status").textContent(),
-    "Could not delete saved reports. Your reports may not have been removed.",
+    await page
+      .locator("#attempt-history")
+      .getByRole("button", { name: /^Delete/ })
+      .count(),
+    0,
   );
 });
 
-lobbyTest("a signed-in account can erase reports saved only on this device", async (page) => {
-  await page.addInitScript((entry) => {
-    localStorage.setItem("codetrial_history", JSON.stringify([entry]));
-  }, {
-    problemId: EASY[0],
-    date: "2026-01-03T00:00:00Z",
-    report: { decision: "HIRE" },
-  });
-  await lobby(page);
-  assert.equal(await page.locator("#history").isHidden(), true);
-  assert.equal(await page.locator("#delete-reports").isVisible(), true);
-  page.once("dialog", (dialog) => dialog.accept());
+lobbyTest(
+  "a phase row lists three weaknesses and folds the rest where they can still be read",
+  async (page) => {
+    const ranked = [
+      "Explain the algorithm before coding",
+      "Justify time complexity",
+      "Justify space complexity",
+      "Name an alternative",
+    ];
+    reports = [
+      focusedAttempt(EASY[0], {
+        phase: "Algorithm",
+        weaknesses: ranked,
+        assessed: true,
+      }),
+    ];
+    await lobby(page);
+    await settles(page, () =>
+      document.querySelector("#progress-weaknesses > li"),
+    );
 
-  await page.click("#delete-reports");
-  await settles(page, () => document.querySelector("#report-delete-status").textContent !== "");
-
-  assert.equal(await page.evaluate(() => localStorage.getItem("codetrial_history")), null);
-  assert.equal(await page.locator("#delete-reports").isHidden(), true);
-});
-
-lobbyTest("an unavailable account check retains visible local reports", async (page) => {
-  await page.addInitScript((entry) => {
-    localStorage.setItem("codetrial_history", JSON.stringify([entry]));
-  }, {
-    problemId: EASY[0],
-    date: "2026-01-04T00:00:00Z",
-    report: { decision: "HIRE" },
-  });
-  failing.add("/api/session");
-  await lobby(page);
-  page.once("dialog", (dialog) => dialog.accept());
-
-  await page.click("#delete-reports");
-  await settles(page, () => document.querySelector("#report-delete-status").textContent !== "");
-
-  assert.notEqual(await page.evaluate(() => localStorage.getItem("codetrial_history")), null);
-  assert.equal(
-    await page.locator("#report-delete-status").textContent(),
-    "Could not delete saved reports. Your reports may not have been removed.",
-  );
-});
-
-lobbyTest("a partial clear stays visible when local storage cannot be read", async (page) => {
-  reports = [savedAttempt(EASY[0])];
-  await page.addInitScript(() => {
-    const getItem = Storage.prototype.getItem;
-    const removeItem = Storage.prototype.removeItem;
-    Storage.prototype.getItem = function readHistory(key) {
-      if (key === "codetrial_history") throw new Error("blocked");
-      return getItem.call(this, key);
-    };
-    Storage.prototype.removeItem = function removeHistory(key) {
-      if (key === "codetrial_history") throw new Error("blocked");
-      return removeItem.call(this, key);
-    };
-  });
-  await lobby(page);
-  page.once("dialog", (dialog) => dialog.accept());
-
-  await page.click("#delete-reports");
-  await settles(page, () => document.querySelector("#report-delete-status").textContent !== "");
-
-  assert.equal(await page.locator("#history").isHidden(), true);
-  assert.equal(await page.locator("#report-delete-status").isVisible(), true);
-  assert.equal(
-    await page.locator("#report-delete-status").textContent(),
-    "Account reports were deleted, but reports saved on this device could not be deleted.",
-  );
-});
-
-lobbyTest("blocked local storage does not prevent account deletion", async (page) => {
-  reports = [savedAttempt(EASY[0])];
-  await page.addInitScript(() => {
-    Object.defineProperty(window, "localStorage", {
-      configurable: true,
-      get() { throw new DOMException("blocked", "SecurityError"); },
+    const row = await page.evaluate(() => {
+      const item = document.querySelector("#progress-weaknesses > li");
+      const list = document.querySelector("#progress-weaknesses");
+      return {
+        note: document
+          .getElementById(list.getAttribute("aria-describedby"))
+          ?.textContent.slice(0, 16),
+        heading: item.querySelector(":scope > p").textContent,
+        shown: [...item.querySelectorAll(":scope > ul > li")].map(
+          (node) => node.textContent,
+        ),
+        summary: item.querySelector(":scope > details > summary")?.textContent,
+        folded: [...item.querySelectorAll(":scope > details > ul > li")].map(
+          (node) => node.textContent,
+        ),
+      };
     });
-  });
-  await lobby(page);
-  page.once("dialog", (dialog) => dialog.accept());
+    assert.deepEqual(
+      row,
+      {
+        note: "Each row counts ",
+        heading: "REACTO · Algorithm · flagged in 1 of 1 assessed attempt",
+        shown: ranked.slice(0, 3),
+        summary: "1 more weakness",
+        folded: ranked.slice(3),
+      },
+      "the report's highest-ranked weakness is shown, and the notice is not one more list item",
+    );
+  },
+);
 
-  await page.click("#delete-reports");
-  await settles(page, () => document.querySelector("#report-delete-status").textContent !== "");
+lobbyTest(
+  "a failed report deletion retains the current progress",
+  async (page) => {
+    reports = [savedAttempt(EASY[0])];
+    await lobby(page);
+    failing.add("/api/reports");
+    page.once("dialog", (dialog) => dialog.accept());
 
-  assert.equal(deleteRequests, 1);
-  assert.deepEqual(reports, []);
-  assert.equal(
-    await page.locator("#report-delete-status").textContent(),
-    "Account reports were deleted, but reports saved on this device could not be deleted.",
-  );
-  assert.equal(await page.evaluate(() => document.activeElement.id), "report-delete-status");
-});
+    await page.click("#delete-reports");
+    await settles(
+      page,
+      () => document.querySelector("#report-delete-status").textContent !== "",
+    );
 
-lobbyTest("a partial clear reloads local reports and states what remains", async (page) => {
-  reports = [savedAttempt(EASY[0])];
-  await page.addInitScript((entry) => {
-    localStorage.setItem("codetrial_history", JSON.stringify([entry]));
-    const removeItem = Storage.prototype.removeItem;
-    Storage.prototype.removeItem = function removeHistory(key) {
-      if (key === "codetrial_history") throw new Error("blocked");
-      return removeItem.call(this, key);
+    assert.equal(deleteRequests, 1);
+    assert.equal(await page.locator("#history").isHidden(), false);
+    assert.match(
+      await page.locator("#progress-summary").textContent(),
+      /1 of 1 attempts shown/,
+    );
+    assert.equal(
+      await page.locator("#report-delete-status").textContent(),
+      "Could not delete saved reports. Your reports may not have been removed.",
+    );
+  },
+);
+
+lobbyTest(
+  "a signed-in account can erase reports saved only on this device",
+  async (page) => {
+    await page.addInitScript(
+      (entry) => {
+        localStorage.setItem("codetrial_history", JSON.stringify([entry]));
+      },
+      {
+        problemId: EASY[0],
+        date: "2026-01-03T00:00:00Z",
+        report: { decision: "HIRE" },
+      },
+    );
+    await lobby(page);
+    assert.equal(await page.locator("#history").isHidden(), true);
+    assert.equal(await page.locator("#delete-reports").isVisible(), true);
+    page.once("dialog", (dialog) => dialog.accept());
+
+    await page.click("#delete-reports");
+    await settles(
+      page,
+      () => document.querySelector("#report-delete-status").textContent !== "",
+    );
+
+    assert.equal(
+      await page.evaluate(() => localStorage.getItem("codetrial_history")),
+      null,
+    );
+    assert.equal(await page.locator("#delete-reports").isHidden(), true);
+  },
+);
+
+lobbyTest(
+  "an unavailable account check retains visible local reports",
+  async (page) => {
+    await page.addInitScript(
+      (entry) => {
+        localStorage.setItem("codetrial_history", JSON.stringify([entry]));
+      },
+      {
+        problemId: EASY[0],
+        date: "2026-01-04T00:00:00Z",
+        report: { decision: "HIRE" },
+      },
+    );
+    failing.add("/api/session");
+    await lobby(page);
+    page.once("dialog", (dialog) => dialog.accept());
+
+    await page.click("#delete-reports");
+    await settles(
+      page,
+      () => document.querySelector("#report-delete-status").textContent !== "",
+    );
+
+    assert.notEqual(
+      await page.evaluate(() => localStorage.getItem("codetrial_history")),
+      null,
+    );
+    assert.equal(
+      await page.locator("#report-delete-status").textContent(),
+      "Could not delete saved reports. Your reports may not have been removed.",
+    );
+  },
+);
+
+lobbyTest(
+  "a partial clear stays visible when local storage cannot be read",
+  async (page) => {
+    reports = [savedAttempt(EASY[0])];
+    await page.addInitScript(() => {
+      const getItem = Storage.prototype.getItem;
+      const removeItem = Storage.prototype.removeItem;
+      Storage.prototype.getItem = function readHistory(key) {
+        if (key === "codetrial_history") throw new Error("blocked");
+        return getItem.call(this, key);
+      };
+      Storage.prototype.removeItem = function removeHistory(key) {
+        if (key === "codetrial_history") throw new Error("blocked");
+        return removeItem.call(this, key);
+      };
+    });
+    await lobby(page);
+    page.once("dialog", (dialog) => dialog.accept());
+
+    await page.click("#delete-reports");
+    await settles(
+      page,
+      () => document.querySelector("#report-delete-status").textContent !== "",
+    );
+
+    assert.equal(await page.locator("#history").isHidden(), true);
+    assert.equal(await page.locator("#report-delete-status").isVisible(), true);
+    assert.equal(
+      await page.locator("#report-delete-status").textContent(),
+      "Account reports were deleted, but reports saved on this device could not be deleted.",
+    );
+  },
+);
+
+lobbyTest(
+  "blocked local storage does not prevent account deletion",
+  async (page) => {
+    reports = [savedAttempt(EASY[0])];
+    await page.addInitScript(() => {
+      Object.defineProperty(window, "localStorage", {
+        configurable: true,
+        get() {
+          throw new DOMException("blocked", "SecurityError");
+        },
+      });
+    });
+    await lobby(page);
+    page.once("dialog", (dialog) => dialog.accept());
+
+    await page.click("#delete-reports");
+    await settles(
+      page,
+      () => document.querySelector("#report-delete-status").textContent !== "",
+    );
+
+    assert.equal(deleteRequests, 1);
+    assert.deepEqual(reports, []);
+    assert.equal(
+      await page.locator("#report-delete-status").textContent(),
+      "Account reports were deleted, but reports saved on this device could not be deleted.",
+    );
+    assert.equal(
+      await page.evaluate(() => document.activeElement.id),
+      "report-delete-status",
+    );
+  },
+);
+
+lobbyTest(
+  "a partial clear reloads local reports and states what remains",
+  async (page) => {
+    reports = [savedAttempt(EASY[0])];
+    await page.addInitScript(
+      (entry) => {
+        localStorage.setItem("codetrial_history", JSON.stringify([entry]));
+        const removeItem = Storage.prototype.removeItem;
+        Storage.prototype.removeItem = function removeHistory(key) {
+          if (key === "codetrial_history") throw new Error("blocked");
+          return removeItem.call(this, key);
+        };
+      },
+      {
+        problemId: EASY[1],
+        date: "2026-01-02T00:00:00Z",
+        report: { decision: "HIRE" },
+      },
+    );
+    await lobby(page);
+    page.once("dialog", (dialog) => dialog.accept());
+
+    await page.click("#delete-reports");
+    await settles(
+      page,
+      () => document.querySelector("#report-delete-status").textContent !== "",
+    );
+
+    assert.equal(deleteRequests, 1);
+    assert.deepEqual(reports, []);
+    assert.match(
+      await page.locator("#progress-summary").textContent(),
+      /saved on this device/,
+    );
+    assert.equal(
+      await page.locator("#report-delete-status").textContent(),
+      "Account reports were deleted, but reports saved on this device could not be deleted.",
+    );
+    assert.equal(
+      await page.evaluate(() => document.activeElement.id),
+      "report-delete-status",
+    );
+  },
+);
+
+lobbyTest(
+  "a cap under every length on offer leaves the row alone",
+  async (page) => {
+    // A deployment that records less than the shortest interview it offers is
+    // misconfigured, and `recording_config` refuses that pairing at startup. If
+    // one reaches the browser anyway, a row with every button dead is a lobby
+    // nobody can start; the server's own floor decides instead.
+    session = {
+      signedIn: true,
+      user: { login: "candidate" },
+      maxDurationMin: 15,
     };
-  }, {
-    problemId: EASY[1],
-    date: "2026-01-02T00:00:00Z",
-    report: { decision: "HIRE" },
-  });
-  await lobby(page);
-  page.once("dialog", (dialog) => dialog.accept());
 
-  await page.click("#delete-reports");
-  await settles(page, () => document.querySelector("#report-delete-status").textContent !== "");
+    const state = await lobby(page);
 
-  assert.equal(deleteRequests, 1);
-  assert.deepEqual(reports, []);
-  assert.match(await page.locator("#progress-summary").textContent(), /saved on this device/);
-  assert.equal(
-    await page.locator("#report-delete-status").textContent(),
-    "Account reports were deleted, but reports saved on this device could not be deleted.",
-  );
-  assert.equal(await page.evaluate(() => document.activeElement.id), "report-delete-status");
-});
-
-lobbyTest("a cap under every length on offer leaves the row alone", async (page) => {
-  // A deployment that records less than the shortest interview it offers is
-  // misconfigured, and `recording_config` refuses that pairing at startup. If
-  // one reaches the browser anyway, a row with every button dead is a lobby
-  // nobody can start; the server's own floor decides instead.
-  session = { signedIn: true, user: { login: "candidate" }, maxDurationMin: 15 };
-
-  const state = await lobby(page);
-
-  assert.deepEqual(state.durationsOff, []);
-  assert.equal(state.durationNote, "");
-});
+    assert.deepEqual(state.durationsOff, []);
+    assert.equal(state.durationNote, "");
+  },
+);
 
 test("a failed history load leaves no other account's attempts behind", () => {
   // reports and progressNormalized outlive the panel: recommendations and
@@ -1788,679 +2671,1247 @@ test("a failed history load leaves no other account's attempts behind", () => {
   assert.match(shown, /progressNormalized = \[\]/);
 });
 
-lobbyTest("Enter in the GitHub field submits the account choice", async (page) => {
-  session = { signedIn: false, loginRequired: true };
-  await lobby(page);
-  await page.fill("#github-login", "@candidate");
-  const login = page.waitForRequest((request) => request.url().endsWith("/api/login"), { timeout: 10_000 });
-  await page.press("#github-login", "Enter");
-  assert.deepEqual((await login).postDataJSON(), { login: "candidate" });
-  await page.waitForFunction(() => document.querySelector("#account-status").textContent === "Signed in as candidate", null, { timeout: 10_000 });
-});
-
-lobbyTest("composition Enter does not submit a GitHub username", async (page) => {
-  session = { signedIn: false, loginRequired: true };
-  let release;
-  holdLogin = new Promise((resolve) => (release = resolve));
-  try {
+lobbyTest(
+  "Enter in the GitHub field submits the account choice",
+  async (page) => {
+    session = { signedIn: false, loginRequired: true };
     await lobby(page);
-    await page.fill("#github-login", "composing");
-    const login = page.waitForRequest((request) => request.url().endsWith("/api/login"), { timeout: 10_000 });
-    await page.evaluate(() => document.querySelector("#github-login").dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", isComposing: true, bubbles: true })));
-    // Hold the response so an early submit fails on its payload rather than
-    // hiding the field while the test is still entering the committed name.
-    await page.fill("#github-login", "candidate");
+    await page.fill("#github-login", "@candidate");
+    const login = page.waitForRequest(
+      (request) => request.url().endsWith("/api/login"),
+      { timeout: 10_000 },
+    );
     await page.press("#github-login", "Enter");
     assert.deepEqual((await login).postDataJSON(), { login: "candidate" });
-    release();
-    await page.waitForFunction(() => document.querySelector("#account-status").textContent === "Signed in as candidate", null, { timeout: 10_000 });
-  } finally {
-    release();
-  }
-});
+    await page.waitForFunction(
+      () =>
+        document.querySelector("#account-status").textContent ===
+        "Signed in as candidate",
+      null,
+      { timeout: 10_000 },
+    );
+  },
+);
 
-lobbyTest("composition-end Enter does not submit a GitHub username", async (page) => {
-  session = { signedIn: false, loginRequired: true };
-  let release;
-  holdLogin = new Promise((resolve) => (release = resolve));
-  try {
-    await lobby(page);
-    await page.fill("#github-login", "composing");
-    const login = page.waitForRequest((request) => request.url().endsWith("/api/login"), { timeout: 10_000 });
-    await page.evaluate(() => {
-      const input = document.querySelector("#github-login");
-      input.dispatchEvent(new CompositionEvent("compositionend", { data: "composing", bubbles: true }));
-      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", keyCode: 229, isComposing: false, bubbles: true }));
-    });
-    await page.fill("#github-login", "candidate");
-    await page.press("#github-login", "Enter");
-    assert.deepEqual((await login).postDataJSON(), { login: "candidate" });
-    release();
-    await page.waitForFunction(() => document.querySelector("#account-status").textContent === "Signed in as candidate", null, { timeout: 10_000 });
-  } finally {
-    release();
-  }
-});
-
-lobbyTest("Enter does not submit again while the GitHub choice is pending", async (page) => {
-  session = { signedIn: false, loginRequired: true };
-  let release;
-  holdLogin = new Promise((resolve) => (release = resolve));
-  const submitted = [];
-  page.on("request", (request) => { if (request.url().endsWith("/api/login")) submitted.push(request); });
-  try {
-    await lobby(page);
-    await page.fill("#github-login", "candidate");
-    const login = page.waitForRequest((request) => request.url().endsWith("/api/login"), { timeout: 10_000 });
-    await page.press("#github-login", "Enter");
-    await login;
-    assert.equal(await page.locator("#login-link").isDisabled(), true);
-    await page.press("#github-login", "Enter");
-    await page.press("#github-login", "Enter");
-    release();
-    await page.waitForFunction(() => document.querySelector("#account-status").textContent === "Signed in as candidate", null, { timeout: 10_000 });
-    assert.equal(submitted.length, 1);
-  } finally {
-    release();
-  }
-});
-
-lobbyTest("a pending start owns the GitHub login until the interview opens", async (page) => {
-  session = { signedIn: false, loginRequired: true };
-  let release;
-  holdLogin = new Promise((resolve) => (release = resolve));
-  const submitted = [];
-  page.on("request", (request) => { if (request.url().endsWith("/api/login")) submitted.push(request); });
-  try {
-    const selected = await lobby(page);
-    await page.evaluate(() => {
-      const fetch = window.fetch;
-      window.loginRequests = 0;
-      window.fetch = (...args) => {
-        if (args[0] === "/api/login") window.loginRequests += 1;
-        return fetch(...args);
-      };
-    });
-    await page.fill("#github-login", "candidate");
-    const login = page.waitForRequest((request) => request.url().endsWith("/api/login"), { timeout: 10_000 });
-    await page.click("#start");
-    await login;
-    await page.press("#github-login", "Enter");
-    // Both keyboard and mouse use the same header login handler.
-    await page.evaluate(() => document.querySelector("#login-link").click());
-    assert.equal(await page.evaluate(() => window.loginRequests), 1, "the header sent another login while Start was pending");
-    release();
-    await page.waitForURL(/\/interview/, { timeout: 10_000 });
-    assert.equal(submitted.length, 1, "the header sent another login while Start was pending");
-    assert.equal(new URL(page.url()).searchParams.get("problem"), selected.card);
-  } finally {
-    release();
-  }
-});
-
-lobbyTest("a pending GitHub login prevents Start from sending another login", async (page) => {
-  session = { signedIn: false, loginRequired: true };
-  let release;
-  holdLogin = new Promise((resolve) => (release = resolve));
-  const submitted = [];
-  const interviews = [];
-  page.on("request", (request) => {
-    if (request.url().endsWith("/api/login")) submitted.push(request);
-    if (new URL(request.url()).pathname === "/interview") interviews.push(request);
-  });
-  try {
-    await lobby(page);
-    await page.evaluate(() => {
-      const fetch = window.fetch;
-      window.loginRequests = 0;
-      window.fetch = (...args) => {
-        if (args[0] === "/api/login") window.loginRequests += 1;
-        return fetch(...args);
-      };
-    });
-    await page.fill("#github-login", "candidate");
-    const login = page.waitForRequest((request) => request.url().endsWith("/api/login"), { timeout: 10_000 });
-    await page.press("#github-login", "Enter");
-    await login;
-    await page.evaluate(() => document.querySelector("#start").click());
-    await page.click("details.problem-picker summary");
-    await page.click(`[data-problem="${pageOf("gas-station")}"]`);
-    await page.evaluate(() => document.querySelector("#start").click());
-    assert.equal(await page.evaluate(() => window.loginRequests), 1, "Start sent another login while the header login was pending");
-    release();
-    await page.waitForFunction(() => document.querySelector("#account-status").textContent === "Signed in as candidate", null, { timeout: 10_000 });
-    assert.equal(submitted.length, 1, "Start sent another login while the header login was pending");
-    assert.equal(interviews.length, 0, "Start raced the header login with an interview navigation");
-  } finally {
-    release();
-  }
-});
-
-lobbyTest("a successful GitHub login stays busy through the account and history refresh", async (page) => {
-  session = { signedIn: false, loginRequired: true };
-  await lobby(page);
-  await page.evaluate(() => {
-    const fetch = window.fetch;
-    window.loginRequests = 0;
-    window.fetch = (...args) => {
-      if (args[0] === "/api/login") window.loginRequests += 1;
-      return fetch(...args);
-    };
-  });
-  const submitted = [];
-  page.on("request", (request) => { if (request.url().endsWith("/api/login")) submitted.push(request); });
-  let releaseAccount;
-  const holdAccount = new Promise((resolve) => (releaseAccount = resolve));
-  const releaseReports = holdHistory();
-  await page.route(`${base}/api/session`, async (route) => {
-    await holdAccount;
-    await route.continue();
-  });
-  const assertBusy = async () => {
-    for (const selector of ["#start", "#random-problem", "#delete-reports", "#login-link"]) {
-      assert.equal(await page.locator(selector).isDisabled(), true, `${selector} was live during the account refresh`);
+lobbyTest(
+  "composition Enter does not submit a GitHub username",
+  async (page) => {
+    session = { signedIn: false, loginRequired: true };
+    let release;
+    holdLogin = new Promise((resolve) => (release = resolve));
+    try {
+      await lobby(page);
+      await page.fill("#github-login", "composing");
+      const login = page.waitForRequest(
+        (request) => request.url().endsWith("/api/login"),
+        { timeout: 10_000 },
+      );
+      await page.evaluate(() =>
+        document.querySelector("#github-login").dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: "Enter",
+            isComposing: true,
+            bubbles: true,
+          }),
+        ),
+      );
+      // Hold the response so an early submit fails on its payload rather than
+      // hiding the field while the test is still entering the committed name.
+      await page.fill("#github-login", "candidate");
+      await page.press("#github-login", "Enter");
+      assert.deepEqual((await login).postDataJSON(), { login: "candidate" });
+      release();
+      await page.waitForFunction(
+        () =>
+          document.querySelector("#account-status").textContent ===
+          "Signed in as candidate",
+        null,
+        { timeout: 10_000 },
+      );
+    } finally {
+      release();
     }
+  },
+);
+
+lobbyTest(
+  "composition-end Enter does not submit a GitHub username",
+  async (page) => {
+    session = { signedIn: false, loginRequired: true };
+    let release;
+    holdLogin = new Promise((resolve) => (release = resolve));
+    try {
+      await lobby(page);
+      await page.fill("#github-login", "composing");
+      const login = page.waitForRequest(
+        (request) => request.url().endsWith("/api/login"),
+        { timeout: 10_000 },
+      );
+      await page.evaluate(() => {
+        const input = document.querySelector("#github-login");
+        input.dispatchEvent(
+          new CompositionEvent("compositionend", {
+            data: "composing",
+            bubbles: true,
+          }),
+        );
+        input.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: "Enter",
+            keyCode: 229,
+            isComposing: false,
+            bubbles: true,
+          }),
+        );
+      });
+      await page.fill("#github-login", "candidate");
+      await page.press("#github-login", "Enter");
+      assert.deepEqual((await login).postDataJSON(), { login: "candidate" });
+      release();
+      await page.waitForFunction(
+        () =>
+          document.querySelector("#account-status").textContent ===
+          "Signed in as candidate",
+        null,
+        { timeout: 10_000 },
+      );
+    } finally {
+      release();
+    }
+  },
+);
+
+lobbyTest(
+  "Enter does not submit again while the GitHub choice is pending",
+  async (page) => {
+    session = { signedIn: false, loginRequired: true };
+    let release;
+    holdLogin = new Promise((resolve) => (release = resolve));
+    const submitted = [];
+    page.on("request", (request) => {
+      if (request.url().endsWith("/api/login")) submitted.push(request);
+    });
+    try {
+      await lobby(page);
+      await page.fill("#github-login", "candidate");
+      const login = page.waitForRequest(
+        (request) => request.url().endsWith("/api/login"),
+        { timeout: 10_000 },
+      );
+      await page.press("#github-login", "Enter");
+      await login;
+      assert.equal(await page.locator("#login-link").isDisabled(), true);
+      await page.press("#github-login", "Enter");
+      await page.press("#github-login", "Enter");
+      release();
+      await page.waitForFunction(
+        () =>
+          document.querySelector("#account-status").textContent ===
+          "Signed in as candidate",
+        null,
+        { timeout: 10_000 },
+      );
+      assert.equal(submitted.length, 1);
+    } finally {
+      release();
+    }
+  },
+);
+
+lobbyTest(
+  "a pending start owns the GitHub login until the interview opens",
+  async (page) => {
+    session = { signedIn: false, loginRequired: true };
+    let release;
+    holdLogin = new Promise((resolve) => (release = resolve));
+    const submitted = [];
+    page.on("request", (request) => {
+      if (request.url().endsWith("/api/login")) submitted.push(request);
+    });
+    try {
+      const selected = await lobby(page);
+      await page.evaluate(() => {
+        const fetch = window.fetch;
+        window.loginRequests = 0;
+        window.fetch = (...args) => {
+          if (args[0] === "/api/login") window.loginRequests += 1;
+          return fetch(...args);
+        };
+      });
+      await page.fill("#github-login", "candidate");
+      const login = page.waitForRequest(
+        (request) => request.url().endsWith("/api/login"),
+        { timeout: 10_000 },
+      );
+      await page.click("#start");
+      await login;
+      await page.press("#github-login", "Enter");
+      // Both keyboard and mouse use the same header login handler.
+      await page.evaluate(() => document.querySelector("#login-link").click());
+      assert.equal(
+        await page.evaluate(() => window.loginRequests),
+        1,
+        "the header sent another login while Start was pending",
+      );
+      release();
+      await page.waitForURL(/\/interview/, { timeout: 10_000 });
+      assert.equal(
+        submitted.length,
+        1,
+        "the header sent another login while Start was pending",
+      );
+      assert.equal(
+        new URL(page.url()).searchParams.get("problem"),
+        selected.card,
+      );
+    } finally {
+      release();
+    }
+  },
+);
+
+lobbyTest(
+  "a pending GitHub login prevents Start from sending another login",
+  async (page) => {
+    session = { signedIn: false, loginRequired: true };
+    let release;
+    holdLogin = new Promise((resolve) => (release = resolve));
+    const submitted = [];
+    const interviews = [];
+    page.on("request", (request) => {
+      if (request.url().endsWith("/api/login")) submitted.push(request);
+      if (new URL(request.url()).pathname === "/interview")
+        interviews.push(request);
+    });
+    try {
+      await lobby(page);
+      await page.evaluate(() => {
+        const fetch = window.fetch;
+        window.loginRequests = 0;
+        window.fetch = (...args) => {
+          if (args[0] === "/api/login") window.loginRequests += 1;
+          return fetch(...args);
+        };
+      });
+      await page.fill("#github-login", "candidate");
+      const login = page.waitForRequest(
+        (request) => request.url().endsWith("/api/login"),
+        { timeout: 10_000 },
+      );
+      await page.press("#github-login", "Enter");
+      await login;
+      await page.evaluate(() => document.querySelector("#start").click());
+      await page.click("details.problem-picker summary");
+      await page.click(`[data-problem="${pageOf("gas-station")}"]`);
+      await page.evaluate(() => document.querySelector("#start").click());
+      assert.equal(
+        await page.evaluate(() => window.loginRequests),
+        1,
+        "Start sent another login while the header login was pending",
+      );
+      release();
+      await page.waitForFunction(
+        () =>
+          document.querySelector("#account-status").textContent ===
+          "Signed in as candidate",
+        null,
+        { timeout: 10_000 },
+      );
+      assert.equal(
+        submitted.length,
+        1,
+        "Start sent another login while the header login was pending",
+      );
+      assert.equal(
+        interviews.length,
+        0,
+        "Start raced the header login with an interview navigation",
+      );
+    } finally {
+      release();
+    }
+  },
+);
+
+lobbyTest(
+  "a successful GitHub login stays busy through the account and history refresh",
+  async (page) => {
+    session = { signedIn: false, loginRequired: true };
+    await lobby(page);
     await page.evaluate(() => {
-      document.querySelector("#login-link").click();
-      document.querySelector("#start").click();
+      const fetch = window.fetch;
+      window.loginRequests = 0;
+      window.fetch = (...args) => {
+        if (args[0] === "/api/login") window.loginRequests += 1;
+        return fetch(...args);
+      };
     });
-  };
-  try {
-    await page.fill("#github-login", "candidate");
-    const account = page.waitForRequest((request) => request.url().endsWith("/api/session"), { timeout: 10_000 });
-    await page.press("#github-login", "Enter");
-    await account;
-    await assertBusy();
-    await page.click("details.problem-picker summary");
-    await page.click(`[data-problem="${pageOf("gas-station")}"]`);
-    assert.equal(await page.locator("#start").isDisabled(), true, "a card click re-armed Start during the account refresh");
-    const history = page.waitForRequest((request) => request.url().endsWith("/api/reports"), { timeout: 10_000 });
-    releaseAccount();
-    await history;
-    await assertBusy();
-    releaseReports();
-    await settles(page, () => !document.querySelector("#start").disabled);
-    assert.equal(await page.locator("#start").isDisabled(), false);
-    assert.equal(await page.locator("#random-problem").isDisabled(), false);
-    assert.equal(await page.locator("#login-link").isHidden(), true);
-    const loginRequests = await page.evaluate(() => {
-      document.querySelector("#github-login").dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-      document.querySelector("#login-link").click();
-      return window.loginRequests;
+    const submitted = [];
+    page.on("request", (request) => {
+      if (request.url().endsWith("/api/login")) submitted.push(request);
     });
-    assert.equal(loginRequests, 1, "a queued input submitted the hidden login button again");
-    assert.equal(submitted.length, 1, "another login was sent during the account refresh");
-    assert.equal(new URL(page.url()).pathname, "/");
-  } finally {
-    releaseAccount();
-    releaseReports();
-  }
-});
+    let releaseAccount;
+    const holdAccount = new Promise((resolve) => (releaseAccount = resolve));
+    const releaseReports = holdHistory();
+    await page.route(`${base}/api/session`, async (route) => {
+      await holdAccount;
+      await route.continue();
+    });
+    const assertBusy = async () => {
+      for (const selector of [
+        "#start",
+        "#random-problem",
+        "#delete-reports",
+        "#login-link",
+      ]) {
+        assert.equal(
+          await page.locator(selector).isDisabled(),
+          true,
+          `${selector} was live during the account refresh`,
+        );
+      }
+      await page.evaluate(() => {
+        document.querySelector("#login-link").click();
+        document.querySelector("#start").click();
+      });
+    };
+    try {
+      await page.fill("#github-login", "candidate");
+      const account = page.waitForRequest(
+        (request) => request.url().endsWith("/api/session"),
+        { timeout: 10_000 },
+      );
+      await page.press("#github-login", "Enter");
+      await account;
+      await assertBusy();
+      await page.click("details.problem-picker summary");
+      await page.click(`[data-problem="${pageOf("gas-station")}"]`);
+      assert.equal(
+        await page.locator("#start").isDisabled(),
+        true,
+        "a card click re-armed Start during the account refresh",
+      );
+      const history = page.waitForRequest(
+        (request) => request.url().endsWith("/api/reports"),
+        { timeout: 10_000 },
+      );
+      releaseAccount();
+      await history;
+      await assertBusy();
+      releaseReports();
+      await settles(page, () => !document.querySelector("#start").disabled);
+      assert.equal(await page.locator("#start").isDisabled(), false);
+      assert.equal(await page.locator("#random-problem").isDisabled(), false);
+      assert.equal(await page.locator("#login-link").isHidden(), true);
+      const loginRequests = await page.evaluate(() => {
+        document
+          .querySelector("#github-login")
+          .dispatchEvent(
+            new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+          );
+        document.querySelector("#login-link").click();
+        return window.loginRequests;
+      });
+      assert.equal(
+        loginRequests,
+        1,
+        "a queued input submitted the hidden login button again",
+      );
+      assert.equal(
+        submitted.length,
+        1,
+        "another login was sent during the account refresh",
+      );
+      assert.equal(new URL(page.url()).pathname, "/");
+    } finally {
+      releaseAccount();
+      releaseReports();
+    }
+  },
+);
 
 lobbyTest("a failed GitHub login can be retried with Enter", async (page) => {
   session = { signedIn: false, loginRequired: true };
   failing.add("/api/login");
   await lobby(page);
   await page.fill("#github-login", "candidate");
-  const failure = page.waitForResponse((response) => response.url().endsWith("/api/login") && response.status() === 500, { timeout: 10_000 });
+  const failure = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/login") && response.status() === 500,
+    { timeout: 10_000 },
+  );
   await page.press("#github-login", "Enter");
   await failure;
-  await settles(page, () => document.querySelector("#account-status").textContent === "Could not record GitHub username.");
-  assert.equal(await page.locator("#login-link").isDisabled(), false, "a failed login left the button disabled");
+  await settles(
+    page,
+    () =>
+      document.querySelector("#account-status").textContent ===
+      "Could not record GitHub username.",
+  );
+  assert.equal(
+    await page.locator("#login-link").isDisabled(),
+    false,
+    "a failed login left the button disabled",
+  );
   failing.delete("/api/login");
-  const retry = page.waitForRequest((request) => request.url().endsWith("/api/login"), { timeout: 10_000 });
+  const retry = page.waitForRequest(
+    (request) => request.url().endsWith("/api/login"),
+    { timeout: 10_000 },
+  );
   await page.press("#github-login", "Enter");
   assert.deepEqual((await retry).postDataJSON(), { login: "candidate" });
-  await page.waitForFunction(() => document.querySelector("#account-status").textContent === "Signed in as candidate", null, { timeout: 10_000 });
+  await page.waitForFunction(
+    () =>
+      document.querySelector("#account-status").textContent ===
+      "Signed in as candidate",
+    null,
+    { timeout: 10_000 },
+  );
 });
 
 for (const trigger of ["Enter", "button"]) {
-  lobbyTest(`${trigger} login refreshes the account without losing interview choices`, async (page) => {
+  lobbyTest(
+    `${trigger} login refreshes the account without losing interview choices`,
+    async (page) => {
+      session = { signedIn: false, loginRequired: true };
+      await page.addInitScript((entry) => {
+        localStorage.setItem("codetrial_history", JSON.stringify([entry]));
+      }, focusedAttempt(EASY[0]).payload);
+      await lobby(page);
+      await page.check("#practice-focus-share-input");
+      await page.click("details.problem-picker summary");
+      await setLevel(page, "Hard", true);
+      await page.click(`[data-problem="${MEDIUM[1]}"]`);
+      await page.click('[data-duration="60"]');
+      await page.click('[data-loop="coding_only"]');
+      await page.click("details.interview-context summary");
+      await page.fill("#profile-role", "Backend engineer");
+      await page.selectOption("#profile-seniority", "senior");
+      await page.fill("#profile-company", "Example");
+      await page.setInputFiles(
+        "#grounding-jd",
+        groundingTxt("jd.txt", "Must know Rust\nMust know SQL"),
+      );
+      await page
+        .locator('#grounding-choices input[data-group="requirements"]')
+        .nth(1)
+        .check();
+      await page.setInputFiles(
+        "#grounding-resume",
+        groundingTxt("resume.txt", "Skills: Rust, Go\nBuilt a parser"),
+      );
+      await page
+        .locator('#grounding-choices input[data-group="skills"]')
+        .first()
+        .check();
+      await page
+        .locator('#grounding-choices input[data-group="anchors"]')
+        .first()
+        .check();
+      await page.check("#grounding-consent");
+      const choices = await page
+        .locator("#grounding-choices input")
+        .evaluateAll((inputs) => inputs.map((input) => input.checked));
+      const selected = await snapshot(page);
+      await page.evaluate(() => {
+        window.loginPageMarker = "same document";
+      });
+      const updated = focusedAttempt(MEDIUM[0]);
+      updated.payload.report.improvementPlan[0].weakness = "Explain invariants";
+      reports = [updated];
+      await page.fill("#github-login", "candidate");
+      if (trigger === "Enter") await page.press("#github-login", "Enter");
+      else await page.click("#login-link");
+      await settles(
+        page,
+        () =>
+          !document.querySelector("#start").disabled &&
+          document.querySelector("#account-status").textContent ===
+            "Signed in as candidate",
+      );
+      assert.equal(
+        await page.evaluate(() => window.loginPageMarker),
+        "same document",
+        "login replaced the document",
+      );
+      const signedIn = await snapshot(page);
+      assert.equal(signedIn.account, "Signed in as candidate");
+      assert.equal(signedIn.card, selected.card);
+      assert.equal(signedIn.duration, selected.duration);
+      assert.deepEqual(signedIn.levels, selected.levels);
+      assert.match(signedIn.history, /saved to your account/);
+      assert.match(signedIn.focus, /Explain invariants/);
+      assert.equal(
+        await page.locator("#practice-focus-share-input").isChecked(),
+        false,
+        "a new practice focus inherited consent to the old text",
+      );
+      assert.equal(await page.locator("#grounding-consent").isChecked(), true);
+      assert.deepEqual(
+        await page
+          .locator("#grounding-choices input")
+          .evaluateAll((inputs) => inputs.map((input) => input.checked)),
+        choices,
+      );
+      assert.deepEqual(await groundingText(page), [
+        "Must know Rust",
+        "Must know SQL",
+        "Rust",
+        "Go",
+        "Built a parser",
+      ]);
+      await page.click("#start");
+      await page.waitForURL(/\/interview/, { timeout: 10_000 });
+      const query = new URL(page.url()).searchParams;
+      assert.equal(query.get("problem"), MEDIUM[1]);
+      assert.equal(query.get("duration"), "60");
+      assert.equal(query.get("loop"), "coding_only");
+      assert.equal(query.get("role"), "Backend engineer");
+      assert.equal(query.get("seniority"), "senior");
+      assert.equal(query.get("company"), "Example");
+      const stored = await page.evaluate(() =>
+        JSON.parse(sessionStorage.getItem("codetrial.interview-grounding.v1")),
+      );
+      assert.deepEqual(stored.requirements, ["Must know SQL"]);
+      assert.deepEqual(stored.skills, ["Rust"]);
+      assert.deepEqual(stored.anchors, ["Built a parser"]);
+      assert.equal(
+        await page.evaluate(() =>
+          sessionStorage.getItem("codetrial.sharedPracticeFocus"),
+        ),
+        null,
+      );
+    },
+  );
+}
+
+lobbyTest(
+  "an account check can be retried without recording the GitHub username again",
+  async (page) => {
+    session = { signedIn: false, loginRequired: true };
+    await lobby(page);
+    failing.add("/api/session");
+    const submitted = [];
+    page.on("request", (request) => {
+      if (request.url().endsWith("/api/login")) submitted.push(request);
+    });
+    await page.fill("#github-login", "candidate");
+    await page.press("#github-login", "Enter");
+    await settles(
+      page,
+      () =>
+        document.querySelector("#login-link").textContent ===
+        "Retry account check",
+    );
+    assert.match(
+      await page.locator("#account-status").textContent(),
+      /account could not be refreshed/,
+    );
+    assert.equal(await page.locator("#github-login").isHidden(), true);
+    assert.equal(await page.locator("#login-link").isVisible(), true);
+    assert.equal(await page.locator("#login-link").isDisabled(), false);
+    assert.equal(await page.locator("#start").isDisabled(), true);
+    await page.click("details.problem-picker summary");
+    await page.click(`[data-problem="${MEDIUM[1]}"]`);
+    assert.equal(
+      await page.locator("#start").isDisabled(),
+      true,
+      "a card click bypassed the unfinished account check",
+    );
+    failing.delete("/api/session");
+    reports = [savedAttempt(EASY[0])];
+    const account = page.waitForRequest(
+      (request) => request.url().endsWith("/api/session"),
+      { timeout: 10_000 },
+    );
+    await page.click("#login-link");
+    await account;
+    await settles(page, () => !document.querySelector("#start").disabled);
+    assert.equal(
+      await page.locator("#account-status").textContent(),
+      "Signed in as candidate",
+    );
+    assert.equal(await page.locator("#start").isDisabled(), false);
+    assert.match(
+      await page.locator("#progress-summary").textContent(),
+      /1 of 1 attempts shown/,
+    );
+    assert.equal(
+      submitted.length,
+      1,
+      "retry recorded the same GitHub username again",
+    );
+    // A later failed account read uses the normal sign-in path again. Its
+    // button must not retain the earlier GET-only retry label.
+    failing.add("/api/session");
+    await restore(page);
+    await settles(
+      page,
+      () =>
+        document.querySelector("#account-status").textContent === "Signed out",
+    );
+    assert.equal(await page.locator("#login-link").textContent(), "Use GitHub");
+  },
+);
+
+lobbyTest(
+  "a login without a signed-in session returns to the GitHub choice",
+  async (page) => {
+    session = { signedIn: false, loginRequired: true };
+    await lobby(page);
+    await page.route(
+      `${base}/api/session`,
+      (route) =>
+        route.fulfill({
+          json: { signedIn: false, loginRequired: true },
+        }),
+      { times: 1 },
+    );
+    await page.fill("#github-login", "candidate");
+    await page.press("#github-login", "Enter");
+    await settles(page, () =>
+      document
+        .querySelector("#account-status")
+        .textContent.includes("no signed-in session"),
+    );
+    assert.match(
+      await page.locator("#account-status").textContent(),
+      /no signed-in session/,
+    );
+    assert.equal(await page.locator("#github-login").isVisible(), true);
+    assert.equal(await page.locator("#login-link").textContent(), "Use GitHub");
+    assert.equal(await page.locator("#login-link").isDisabled(), false);
+    assert.equal(
+      await page.locator("#start").textContent(),
+      "Use GitHub to start",
+    );
+    const retry = page.waitForRequest(
+      (request) => request.url().endsWith("/api/login"),
+      { timeout: 10_000 },
+    );
+    await page.click("#login-link");
+    await retry;
+    await settles(
+      page,
+      () =>
+        document.querySelector("#account-status").textContent ===
+        "Signed in as candidate",
+    );
+    assert.equal(
+      await page.locator("#account-status").textContent(),
+      "Signed in as candidate",
+    );
+  },
+);
+
+lobbyTest(
+  "failed account history after login clears stale local progress and focus",
+  async (page) => {
     session = { signedIn: false, loginRequired: true };
     await page.addInitScript((entry) => {
       localStorage.setItem("codetrial_history", JSON.stringify([entry]));
     }, focusedAttempt(EASY[0]).payload);
     await lobby(page);
+    assert.match(
+      await page.locator("#progress-summary").textContent(),
+      /1 of 1 attempts shown/,
+    );
     await page.check("#practice-focus-share-input");
-    await page.click("details.problem-picker summary");
-    await setLevel(page, "Hard", true);
-    await page.click(`[data-problem="${MEDIUM[1]}"]`);
-    await page.click('[data-duration="60"]');
-    await page.click('[data-loop="coding_only"]');
-    await page.click("details.interview-context summary");
-    await page.fill("#profile-role", "Backend engineer");
-    await page.selectOption("#profile-seniority", "senior");
-    await page.fill("#profile-company", "Example");
-    await page.setInputFiles("#grounding-jd", groundingTxt("jd.txt", "Must know Rust\nMust know SQL"));
-    await page.locator('#grounding-choices input[data-group="requirements"]').nth(1).check();
-    await page.setInputFiles("#grounding-resume", groundingTxt("resume.txt", "Skills: Rust, Go\nBuilt a parser"));
-    await page.locator('#grounding-choices input[data-group="skills"]').first().check();
-    await page.locator('#grounding-choices input[data-group="anchors"]').first().check();
-    await page.check("#grounding-consent");
-    const choices = await page.locator("#grounding-choices input").evaluateAll((inputs) => inputs.map((input) => input.checked));
-    const selected = await snapshot(page);
-    await page.evaluate(() => { window.loginPageMarker = "same document"; });
-    const updated = focusedAttempt(MEDIUM[0]);
-    updated.payload.report.improvementPlan[0].weakness = "Explain invariants";
-    reports = [updated];
-    await page.fill("#github-login", "candidate");
-    if (trigger === "Enter") await page.press("#github-login", "Enter");
-    else await page.click("#login-link");
-    await settles(page, () => !document.querySelector("#start").disabled && document.querySelector("#account-status").textContent === "Signed in as candidate");
-    assert.equal(await page.evaluate(() => window.loginPageMarker), "same document", "login replaced the document");
-    const signedIn = await snapshot(page);
-    assert.equal(signedIn.account, "Signed in as candidate");
-    assert.equal(signedIn.card, selected.card);
-    assert.equal(signedIn.duration, selected.duration);
-    assert.deepEqual(signedIn.levels, selected.levels);
-    assert.match(signedIn.history, /saved to your account/);
-    assert.match(signedIn.focus, /Explain invariants/);
-    assert.equal(await page.locator("#practice-focus-share-input").isChecked(), false, "a new practice focus inherited consent to the old text");
-    assert.equal(await page.locator("#grounding-consent").isChecked(), true);
-    assert.deepEqual(await page.locator("#grounding-choices input").evaluateAll((inputs) => inputs.map((input) => input.checked)), choices);
-    assert.deepEqual(await groundingText(page), ["Must know Rust", "Must know SQL", "Rust", "Go", "Built a parser"]);
-    await page.click("#start");
-    await page.waitForURL(/\/interview/, { timeout: 10_000 });
-    const query = new URL(page.url()).searchParams;
-    assert.equal(query.get("problem"), MEDIUM[1]);
-    assert.equal(query.get("duration"), "60");
-    assert.equal(query.get("loop"), "coding_only");
-    assert.equal(query.get("role"), "Backend engineer");
-    assert.equal(query.get("seniority"), "senior");
-    assert.equal(query.get("company"), "Example");
-    const stored = await page.evaluate(() => JSON.parse(sessionStorage.getItem("codetrial.interview-grounding.v1")));
-    assert.deepEqual(stored.requirements, ["Must know SQL"]);
-    assert.deepEqual(stored.skills, ["Rust"]);
-    assert.deepEqual(stored.anchors, ["Built a parser"]);
-    assert.equal(await page.evaluate(() => sessionStorage.getItem("codetrial.sharedPracticeFocus")), null);
-  });
-}
-
-lobbyTest("an account check can be retried without recording the GitHub username again", async (page) => {
-  session = { signedIn: false, loginRequired: true };
-  await lobby(page);
-  failing.add("/api/session");
-  const submitted = [];
-  page.on("request", (request) => { if (request.url().endsWith("/api/login")) submitted.push(request); });
-  await page.fill("#github-login", "candidate");
-  await page.press("#github-login", "Enter");
-  await settles(page, () => document.querySelector("#login-link").textContent === "Retry account check");
-  assert.match(await page.locator("#account-status").textContent(), /account could not be refreshed/);
-  assert.equal(await page.locator("#github-login").isHidden(), true);
-  assert.equal(await page.locator("#login-link").isVisible(), true);
-  assert.equal(await page.locator("#login-link").isDisabled(), false);
-  assert.equal(await page.locator("#start").isDisabled(), true);
-  await page.click("details.problem-picker summary");
-  await page.click(`[data-problem="${MEDIUM[1]}"]`);
-  assert.equal(await page.locator("#start").isDisabled(), true, "a card click bypassed the unfinished account check");
-  failing.delete("/api/session");
-  reports = [savedAttempt(EASY[0])];
-  const account = page.waitForRequest((request) => request.url().endsWith("/api/session"), { timeout: 10_000 });
-  await page.click("#login-link");
-  await account;
-  await settles(page, () => !document.querySelector("#start").disabled);
-  assert.equal(await page.locator("#account-status").textContent(), "Signed in as candidate");
-  assert.equal(await page.locator("#start").isDisabled(), false);
-  assert.match(await page.locator("#progress-summary").textContent(), /1 of 1 attempts shown/);
-  assert.equal(submitted.length, 1, "retry recorded the same GitHub username again");
-  // A later failed account read uses the normal sign-in path again. Its
-  // button must not retain the earlier GET-only retry label.
-  failing.add("/api/session");
-  await restore(page);
-  await settles(page, () => document.querySelector("#account-status").textContent === "Signed out");
-  assert.equal(await page.locator("#login-link").textContent(), "Use GitHub");
-});
-
-lobbyTest("a login without a signed-in session returns to the GitHub choice", async (page) => {
-  session = { signedIn: false, loginRequired: true };
-  await lobby(page);
-  await page.route(`${base}/api/session`, (route) => route.fulfill({
-    json: { signedIn: false, loginRequired: true },
-  }), { times: 1 });
-  await page.fill("#github-login", "candidate");
-  await page.press("#github-login", "Enter");
-  await settles(page, () => document.querySelector("#account-status").textContent.includes("no signed-in session"));
-  assert.match(await page.locator("#account-status").textContent(), /no signed-in session/);
-  assert.equal(await page.locator("#github-login").isVisible(), true);
-  assert.equal(await page.locator("#login-link").textContent(), "Use GitHub");
-  assert.equal(await page.locator("#login-link").isDisabled(), false);
-  assert.equal(await page.locator("#start").textContent(), "Use GitHub to start");
-  const retry = page.waitForRequest((request) => request.url().endsWith("/api/login"), { timeout: 10_000 });
-  await page.click("#login-link");
-  await retry;
-  await settles(page, () => document.querySelector("#account-status").textContent === "Signed in as candidate");
-  assert.equal(await page.locator("#account-status").textContent(), "Signed in as candidate");
-});
-
-lobbyTest("failed account history after login clears stale local progress and focus", async (page) => {
-  session = { signedIn: false, loginRequired: true };
-  await page.addInitScript((entry) => {
-    localStorage.setItem("codetrial_history", JSON.stringify([entry]));
-  }, focusedAttempt(EASY[0]).payload);
-  await lobby(page);
-  assert.match(await page.locator("#progress-summary").textContent(), /1 of 1 attempts shown/);
-  await page.check("#practice-focus-share-input");
-  failing.add("/api/reports");
-  await page.fill("#github-login", "candidate");
-  await page.press("#github-login", "Enter");
-  await settles(page, () => !document.querySelector("#start").disabled && document.querySelector("#history").textContent.includes("Could not load saved account progress."));
-  assert.equal(await page.locator("#account-status").textContent(), "Signed in as candidate");
-  assert.equal(await page.locator("#start").isDisabled(), false);
-  assert.match(await page.locator("#history").textContent(), /Could not load saved account progress/);
-  assert.equal(await page.locator("#attempt-history").textContent(), "");
-  assert.equal(await page.locator("#practice-focus").isHidden(), true);
-  assert.equal(await page.locator("#practice-focus-share-input").isChecked(), false);
-  await page.click("#random-problem");
-  assert.equal(await page.locator("#practice-focus").isHidden(), true, "a redraw revived stale local history");
-});
-
-lobbyTest("an account refresh clamps a manual duration to the server recording cap", async (page) => {
-  session = { signedIn: false, loginRequired: true };
-  await lobby(page);
-  await page.click('[data-duration="60"]');
-  await page.route(`${base}/api/session`, (route) => route.fulfill({
-    json: { signedIn: true, user: { login: "candidate" }, maxDurationMin: 30 },
-  }), { times: 1 });
-  await page.fill("#github-login", "candidate");
-  await page.press("#github-login", "Enter");
-  await settles(page, () => !document.querySelector("#start").disabled);
-  const state = await snapshot(page);
-  assert.equal(state.duration, "30");
-  assert.deepEqual(state.durationsOff, ["45", "60"]);
-  assert.match(state.durationNote, /at most 30 minutes/);
-});
-
-lobbyTest("an older login refresh cannot re-arm controls while the restored history is pending", async (page) => {
-  session = { signedIn: false, loginRequired: true };
-  await lobby(page);
-  await page.evaluate(() => {
-    const fetch = window.fetch.bind(window);
-    window.pendingHistory = [];
-    window.fetch = (url, ...args) => url === "/api/reports"
-      ? new Promise((resolve) => window.pendingHistory.push((reports) =>
-        resolve(new Response(JSON.stringify({ reports })))))
-      : fetch(url, ...args);
-  });
-  try {
+    failing.add("/api/reports");
     await page.fill("#github-login", "candidate");
     await page.press("#github-login", "Enter");
-    await page.waitForFunction(() => window.pendingHistory.length === 1);
-    await restore(page);
-    await page.waitForFunction(() => window.pendingHistory.length === 2);
-    await page.evaluate(async (reports) => {
-      window.pendingHistory[0](reports);
-      await new Promise(requestAnimationFrame);
-    }, [focusedAttempt(EASY[0])]);
-    for (const selector of ["#start", "#login-link", "#random-problem", "#delete-reports"]) {
-      assert.equal(await page.locator(selector).isDisabled(), true, `${selector} was re-armed by the older refresh`);
-    }
-    await page.evaluate(async (reports) => {
-      window.pendingHistory[1](reports);
-      await new Promise(requestAnimationFrame);
-    }, [savedAttempt(MEDIUM[0])]);
+    await settles(
+      page,
+      () =>
+        !document.querySelector("#start").disabled &&
+        document
+          .querySelector("#history")
+          .textContent.includes("Could not load saved account progress."),
+    );
+    assert.equal(
+      await page.locator("#account-status").textContent(),
+      "Signed in as candidate",
+    );
     assert.equal(await page.locator("#start").isDisabled(), false);
-    assert.equal(await page.locator("#random-problem").isDisabled(), false);
-    assert.equal(await page.locator("#account-status").textContent(), "Signed in as candidate");
-    assert.match(await page.locator("#progress-summary").textContent(), /1 of 1 attempts shown/);
-    assert.equal((await snapshot(page)).card, MEDIUM[0]);
-    assert.equal(await page.locator("#practice-focus").isHidden(), true, "the older history replaced the current reports");
-  } finally {
-    await page.evaluate(() => window.pendingHistory.forEach((release) => release([])));
-  }
-});
+    assert.match(
+      await page.locator("#history").textContent(),
+      /Could not load saved account progress/,
+    );
+    assert.equal(await page.locator("#attempt-history").textContent(), "");
+    assert.equal(await page.locator("#practice-focus").isHidden(), true);
+    assert.equal(
+      await page.locator("#practice-focus-share-input").isChecked(),
+      false,
+    );
+    await page.click("#random-problem");
+    assert.equal(
+      await page.locator("#practice-focus").isHidden(),
+      true,
+      "a redraw revived stale local history",
+    );
+  },
+);
+
+lobbyTest(
+  "an account refresh clamps a manual duration to the server recording cap",
+  async (page) => {
+    session = { signedIn: false, loginRequired: true };
+    await lobby(page);
+    await page.click('[data-duration="60"]');
+    await page.route(
+      `${base}/api/session`,
+      (route) =>
+        route.fulfill({
+          json: {
+            signedIn: true,
+            user: { login: "candidate" },
+            maxDurationMin: 30,
+          },
+        }),
+      { times: 1 },
+    );
+    await page.fill("#github-login", "candidate");
+    await page.press("#github-login", "Enter");
+    await settles(page, () => !document.querySelector("#start").disabled);
+    const state = await snapshot(page);
+    assert.equal(state.duration, "30");
+    assert.deepEqual(state.durationsOff, ["45", "60"]);
+    assert.match(state.durationNote, /at most 30 minutes/);
+  },
+);
+
+lobbyTest(
+  "an older login refresh cannot re-arm controls while the restored history is pending",
+  async (page) => {
+    session = { signedIn: false, loginRequired: true };
+    await lobby(page);
+    await page.evaluate(() => {
+      const fetch = window.fetch.bind(window);
+      window.pendingHistory = [];
+      window.fetch = (url, ...args) =>
+        url === "/api/reports"
+          ? new Promise((resolve) =>
+              window.pendingHistory.push((reports) =>
+                resolve(new Response(JSON.stringify({ reports }))),
+              ),
+            )
+          : fetch(url, ...args);
+    });
+    try {
+      await page.fill("#github-login", "candidate");
+      await page.press("#github-login", "Enter");
+      await page.waitForFunction(() => window.pendingHistory.length === 1);
+      await restore(page);
+      await page.waitForFunction(() => window.pendingHistory.length === 2);
+      await page.evaluate(
+        async (reports) => {
+          window.pendingHistory[0](reports);
+          await new Promise(requestAnimationFrame);
+        },
+        [focusedAttempt(EASY[0])],
+      );
+      for (const selector of [
+        "#start",
+        "#login-link",
+        "#random-problem",
+        "#delete-reports",
+      ]) {
+        assert.equal(
+          await page.locator(selector).isDisabled(),
+          true,
+          `${selector} was re-armed by the older refresh`,
+        );
+      }
+      await page.evaluate(
+        async (reports) => {
+          window.pendingHistory[1](reports);
+          await new Promise(requestAnimationFrame);
+        },
+        [savedAttempt(MEDIUM[0])],
+      );
+      assert.equal(await page.locator("#start").isDisabled(), false);
+      assert.equal(await page.locator("#random-problem").isDisabled(), false);
+      assert.equal(
+        await page.locator("#account-status").textContent(),
+        "Signed in as candidate",
+      );
+      assert.match(
+        await page.locator("#progress-summary").textContent(),
+        /1 of 1 attempts shown/,
+      );
+      assert.equal((await snapshot(page)).card, MEDIUM[0]);
+      assert.equal(
+        await page.locator("#practice-focus").isHidden(),
+        true,
+        "the older history replaced the current reports",
+      );
+    } finally {
+      await page.evaluate(() =>
+        window.pendingHistory.forEach((release) => release([])),
+      );
+    }
+  },
+);
 
 /// The request stays pending until the application's own timeout signal aborts.
 /// Keeping headers and body stalls separate catches a timeout that stops as
 /// soon as fetch resolves, before response.json has consumed the response.
-async function stallTimedRequest(page, { url, after = 0, body = false, status = 200 }) {
-  await page.addInitScript(({ url, after, body, status }) => {
-    const timers = new WeakMap();
-    AbortSignal.timeout = (delay) => {
-      const controller = new AbortController();
-      timers.set(controller.signal, { controller, delay });
-      return controller.signal;
-    };
-    const fetch = window.fetch.bind(window);
-    let matched = 0;
-    window.lobbyRequests = [];
-    window.fetch = (path, options = {}) => {
-      window.lobbyRequests.push({ path, method: options.method ?? "GET" });
-      if (path !== url || matched++ !== after) return fetch(path, options);
-      const signal = options.signal;
-      const timer = timers.get(signal);
-      window.stalledRequest = {
-        hasSignal: signal instanceof AbortSignal,
-        delay: timer?.delay,
-        aborted: false,
-        expire: () => timer?.controller.abort(new DOMException("Request timed out", "TimeoutError")),
+async function stallTimedRequest(
+  page,
+  { url, after = 0, body = false, status = 200 },
+) {
+  await page.addInitScript(
+    ({ url, after, body, status }) => {
+      const timers = new WeakMap();
+      AbortSignal.timeout = (delay) => {
+        const controller = new AbortController();
+        timers.set(controller.signal, { controller, delay });
+        return controller.signal;
       };
-      const onAbort = (reject) => {
-        signal?.addEventListener("abort", () => {
-          window.stalledRequest.aborted = true;
-          reject(signal.reason);
-        }, { once: true });
+      const fetch = window.fetch.bind(window);
+      let matched = 0;
+      window.lobbyRequests = [];
+      window.fetch = (path, options = {}) => {
+        window.lobbyRequests.push({ path, method: options.method ?? "GET" });
+        if (path !== url || matched++ !== after) return fetch(path, options);
+        const signal = options.signal;
+        const timer = timers.get(signal);
+        window.stalledRequest = {
+          hasSignal: signal instanceof AbortSignal,
+          delay: timer?.delay,
+          aborted: false,
+          expire: () =>
+            timer?.controller.abort(
+              new DOMException("Request timed out", "TimeoutError"),
+            ),
+        };
+        const onAbort = (reject) => {
+          signal?.addEventListener(
+            "abort",
+            () => {
+              window.stalledRequest.aborted = true;
+              reject(signal.reason);
+            },
+            { once: true },
+          );
+        };
+        if (body) {
+          return Promise.resolve(
+            new Response(
+              new ReadableStream({
+                start(controller) {
+                  onAbort((error) => controller.error(error));
+                },
+              }),
+              { status, headers: { "Content-Type": "application/json" } },
+            ),
+          );
+        }
+        return new Promise((resolve, reject) => {
+          onAbort(reject);
+        });
       };
-      if (body) {
-        return Promise.resolve(new Response(new ReadableStream({
-          start(controller) { onAbort((error) => controller.error(error)); },
-        }), { status, headers: { "Content-Type": "application/json" } }));
-      }
-      return new Promise((resolve, reject) => { onAbort(reject); });
-    };
-  }, { url, after, body, status });
+    },
+    { url, after, body, status },
+  );
 }
 
 async function expireStalledRequest(page) {
   await page.waitForFunction(() => window.stalledRequest !== undefined);
-  assert.equal(await page.evaluate(() => window.stalledRequest.hasSignal), true, "the pending fetch did not receive an abort signal");
-  assert.equal(await page.evaluate(() => window.stalledRequest.delay), 10_000, "the request did not use the ten-second deadline");
+  assert.equal(
+    await page.evaluate(() => window.stalledRequest.hasSignal),
+    true,
+    "the pending fetch did not receive an abort signal",
+  );
+  assert.equal(
+    await page.evaluate(() => window.stalledRequest.delay),
+    10_000,
+    "the request did not use the ten-second deadline",
+  );
   await page.evaluate(() => window.stalledRequest.expire());
-  assert.equal(await page.evaluate(() => window.stalledRequest.aborted), true, "the pending request did not observe the timeout");
+  assert.equal(
+    await page.evaluate(() => window.stalledRequest.aborted),
+    true,
+    "the pending request did not observe the timeout",
+  );
 }
 
-lobbyTest("an initial account timeout falls back to usable local progress", async (page) => {
-  await stallTimedRequest(page, { url: "/api/session" });
-  await page.addInitScript((entry) => {
-    localStorage.setItem("codetrial_history", JSON.stringify([entry]));
-  }, savedAttempt(EASY[0]).payload);
-  await page.goto(`${base}/`, { waitUntil: "domcontentloaded" });
-  assert.equal(await page.locator("#start").isDisabled(), true);
-  await expireStalledRequest(page);
-  await awaitReady(page);
-  assert.equal(await page.locator("#start").isDisabled(), false);
-  assert.equal(await page.locator("#account-status").textContent(), "Signed out");
-  assert.match(await page.locator("#progress-summary").textContent(), /1 of 1 attempts shown/);
-  assert.match(await page.locator("#history").textContent(), /saved on this device/);
-});
-
-lobbyTest("an account response body timeout offers a GET-only account retry", async (page) => {
-  session = { signedIn: false, loginRequired: true };
-  await stallTimedRequest(page, { url: "/api/session", after: 1, body: true });
-  await lobby(page);
-  await page.fill("#github-login", "candidate");
-  await page.press("#github-login", "Enter");
-  await expireStalledRequest(page);
-  await settles(page, () => document.querySelector("#login-link").textContent === "Retry account check");
-  assert.match(await page.locator("#account-status").textContent(), /account could not be refreshed/);
-  assert.equal(await page.locator("#start").isDisabled(), true);
-  assert.equal(await page.locator("#github-login").isHidden(), true);
-  assert.equal(await page.locator("#login-link").isDisabled(), false);
-  await page.click("#login-link");
-  await awaitReady(page);
-  assert.equal(await page.locator("#account-status").textContent(), "Signed in as candidate");
-  assert.deepEqual(await page.evaluate(() => window.lobbyRequests.filter(({ path }) => path === "/api/login").map(({ method }) => method)), ["POST"]);
-});
-
-lobbyTest("an account history body timeout clears stale progress and releases Start", async (page) => {
-  session = { signedIn: false, loginRequired: true };
-  await stallTimedRequest(page, { url: "/api/reports", body: true });
-  await page.addInitScript((entry) => {
-    localStorage.setItem("codetrial_history", JSON.stringify([entry]));
-  }, focusedAttempt(EASY[0]).payload);
-  await lobby(page);
-  await page.check("#practice-focus-share-input");
-  await page.fill("#github-login", "candidate");
-  await page.press("#github-login", "Enter");
-  await expireStalledRequest(page);
-  await awaitReady(page);
-  assert.equal(await page.locator("#account-status").textContent(), "Signed in as candidate");
-  assert.equal(await page.locator("#start").isDisabled(), false);
-  assert.equal(await page.locator("#random-problem").isDisabled(), false);
-  assert.match(await page.locator("#history").textContent(), /Could not load saved account progress/);
-  assert.equal(await page.locator("#attempt-history").textContent(), "");
-  assert.equal(await page.locator("#practice-focus").isHidden(), true);
-  assert.equal(await page.locator("#practice-focus-share-input").isChecked(), false);
-});
-
-for (const trigger of ["header", "Start"]) {
-  lobbyTest(`a ${trigger} login timeout checks the account before allowing another POST`, async (page) => {
-    session = { signedIn: false, loginRequired: true };
-    await stallTimedRequest(page, { url: "/api/login" });
-    await lobby(page);
-    await page.click("details.problem-picker summary");
-    await page.click(`[data-problem="${MEDIUM[1]}"]`);
-    await page.click('[data-duration="60"]');
-    await page.fill("#github-login", "candidate");
-    if (trigger === "header") await page.press("#github-login", "Enter");
-    else await page.click("#start");
-    await expireStalledRequest(page);
-    await settles(page, () => document.querySelector("#login-link").textContent === "Retry account check");
-    assert.equal(await page.locator("#account-status").textContent(), "Could not confirm the sign-in result. Retry the account check.");
-    assert.equal(await page.locator("#github-login").isHidden(), true);
-    assert.equal(await page.locator("#login-link").isDisabled(), false);
+lobbyTest(
+  "an initial account timeout falls back to usable local progress",
+  async (page) => {
+    await stallTimedRequest(page, { url: "/api/session" });
+    await page.addInitScript((entry) => {
+      localStorage.setItem("codetrial_history", JSON.stringify([entry]));
+    }, savedAttempt(EASY[0]).payload);
+    await page.goto(`${base}/`, { waitUntil: "domcontentloaded" });
     assert.equal(await page.locator("#start").isDisabled(), true);
-    assert.equal(new URL(page.url()).pathname, "/", "a login timeout navigated into the interview");
-    const selected = await snapshot(page);
-    assert.equal(selected.card, MEDIUM[1]);
-    assert.equal(selected.duration, "60");
-    await page.evaluate(() => document.querySelector("#start").click());
-    if (trigger === "header") {
-      // A malformed account response cannot establish that the POST failed.
-      await page.route(`${base}/api/session`, (route) => route.fulfill({ json: {} }), { times: 1 });
-      await page.click("#login-link");
-      await settles(page, () => !document.querySelector("#login-link").disabled);
-      assert.equal(await page.locator("#login-link").textContent(), "Retry account check");
-      assert.equal(await page.locator("#start").isDisabled(), true);
-      session = { signedIn: true, user: { login: "candidate" } };
-    }
-    await page.click("#login-link");
-    await settles(page, () => !document.querySelector("#start").disabled);
-    assert.deepEqual(await page.evaluate(() => window.lobbyRequests.filter(({ path }) => path === "/api/login").map(({ method }) => method)), ["POST"]);
-    if (trigger === "header") {
-      assert.equal(await page.locator("#account-status").textContent(), "Signed in as candidate");
-      assert.equal(await page.locator("#login-link").isHidden(), true);
-    } else {
-      assert.match(await page.locator("#account-status").textContent(), /no signed-in session/i);
-      assert.equal(await page.locator("#login-link").textContent(), "Use GitHub");
-      assert.equal(await page.locator("#github-login").isVisible(), true);
-      await page.click("#login-link");
-      await awaitReady(page);
-      assert.equal(await page.locator("#account-status").textContent(), "Signed in as candidate");
-      assert.equal(await page.evaluate(() => window.lobbyRequests.filter(({ path }) => path === "/api/login").length), 2);
-    }
-    assert.equal(new URL(page.url()).pathname, "/", "an account retry navigated without another Start");
-    const recovered = await snapshot(page);
-    assert.equal(recovered.card, selected.card);
-    assert.equal(recovered.duration, selected.duration);
-    assert.equal(recovered.startDisabled, false);
-  });
-}
+    await expireStalledRequest(page);
+    await awaitReady(page);
+    assert.equal(await page.locator("#start").isDisabled(), false);
+    assert.equal(
+      await page.locator("#account-status").textContent(),
+      "Signed out",
+    );
+    assert.match(
+      await page.locator("#progress-summary").textContent(),
+      /1 of 1 attempts shown/,
+    );
+    assert.match(
+      await page.locator("#history").textContent(),
+      /saved on this device/,
+    );
+  },
+);
 
-lobbyTest("a rejected login whose error body times out remains safe to resubmit", async (page) => {
-  session = { signedIn: false, loginRequired: true };
-  await stallTimedRequest(page, { url: "/api/login", body: true, status: 500 });
-  await lobby(page);
-  await page.fill("#github-login", "candidate");
-  await page.press("#github-login", "Enter");
-  await expireStalledRequest(page);
-  await settles(page, () => !document.querySelector("#login-link").disabled);
-  assert.equal(await page.locator("#account-status").textContent(), "Could not record GitHub username.");
-  assert.equal(await page.locator("#github-login").isVisible(), true);
-  assert.equal(await page.locator("#login-link").textContent(), "Use GitHub");
-  await page.press("#github-login", "Enter");
-  await awaitReady(page);
-  assert.equal(await page.locator("#account-status").textContent(), "Signed in as candidate");
-  assert.equal(await page.evaluate(() => window.lobbyRequests.filter(({ path }) => path === "/api/login").length), 2);
-});
-
-lobbyTest("a legacy page map timeout leaves local history usable", async (page) => {
-  session = { signedIn: false, loginRequired: true };
-  await page.addInitScript(() => {
-    localStorage.setItem("codetrial_history", JSON.stringify([{
-      problemId: "two-sum",
-      date: "2026-01-01T00:00:00Z",
-      report: { decision: "HIRE" },
-    }]));
-    const fetch = window.fetch.bind(window);
-    window.fetch = (path, options) => {
-      if (path !== "/problem-pages.json") return fetch(path, options);
-      window.mapRequested = true;
-      return new Promise(() => {});
-    };
-    const setTimeout = window.setTimeout.bind(window);
-    window.mapDeadlines = [];
-    window.setTimeout = (callback, delay, ...args) => {
-      if (delay !== 10_000) return setTimeout(callback, delay, ...args);
-      window.mapDeadlines.push({ delay, expire: () => callback(...args) });
-      return 0;
-    };
-  });
-  await page.goto(`${base}/`, { waitUntil: "domcontentloaded" });
-  await page.waitForFunction(() => window.mapRequested);
-  assert.deepEqual(await page.evaluate(() => window.mapDeadlines.map(({ delay }) => delay)), [10_000]);
-  assert.equal(await page.locator("#start").isDisabled(), true);
-  await page.evaluate(() => window.mapDeadlines[0].expire());
-  await awaitReady(page);
-  assert.equal(await page.locator("#start").isDisabled(), false);
-  assert.match(await page.locator("#history").textContent(), /saved on this device/);
-  assert.match(await page.locator("#progress-summary").textContent(), /1 of 1 attempts shown/);
-  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem("codetrial_history"))[0].problemId), "two-sum");
-});
-
-lobbyTest("a late account check cannot erase an uncertain login result", async (page) => {
-  session = { signedIn: false, loginRequired: true };
-  await lobby(page);
-  await page.evaluate(() => {
-    const fetch = window.fetch.bind(window);
-    window.loginAttempts = 0;
-    window.fetch = (path, options) => {
-      if (path === "/api/login") {
-        window.loginAttempts += 1;
-        return new Promise((resolve, reject) => {
-          window.rejectLogin = () => reject(new TypeError("Connection lost"));
-        });
-      }
-      if (path === "/api/session") {
-        return new Promise((resolve) => {
-          window.releaseAccount = () => resolve(new Response(JSON.stringify({ signedIn: false, loginRequired: true })));
-        });
-      }
-      return fetch(path, options);
-    };
-  });
-  try {
+lobbyTest(
+  "an account response body timeout offers a GET-only account retry",
+  async (page) => {
+    session = { signedIn: false, loginRequired: true };
+    await stallTimedRequest(page, {
+      url: "/api/session",
+      after: 1,
+      body: true,
+    });
+    await lobby(page);
     await page.fill("#github-login", "candidate");
     await page.press("#github-login", "Enter");
-    await page.waitForFunction(() => typeof window.rejectLogin === "function");
-    // A restored page checks the account while the earlier POST is unresolved.
-    await restore(page);
-    await page.waitForFunction(() => typeof window.releaseAccount === "function");
-    await page.evaluate(() => window.rejectLogin());
-    await settles(page, () => document.querySelector("#login-link").textContent === "Retry account check");
-    assert.equal(await page.locator("#login-link").textContent(), "Retry account check");
-    await page.evaluate(async () => {
-      window.releaseAccount();
-      await new Promise(requestAnimationFrame);
-    });
-    assert.equal(await page.locator("#account-status").textContent(), "Could not confirm the sign-in result. Retry the account check.");
-    assert.equal(await page.locator("#login-link").textContent(), "Retry account check");
-    assert.equal(await page.locator("#github-login").isHidden(), true);
+    await expireStalledRequest(page);
+    await settles(
+      page,
+      () =>
+        document.querySelector("#login-link").textContent ===
+        "Retry account check",
+    );
+    assert.match(
+      await page.locator("#account-status").textContent(),
+      /account could not be refreshed/,
+    );
     assert.equal(await page.locator("#start").isDisabled(), true);
-    assert.equal(await page.evaluate(() => window.loginAttempts), 1);
-  } finally {
-    await page.evaluate(() => {
-      window.rejectLogin?.();
-      window.releaseAccount?.();
+    assert.equal(await page.locator("#github-login").isHidden(), true);
+    assert.equal(await page.locator("#login-link").isDisabled(), false);
+    await page.click("#login-link");
+    await awaitReady(page);
+    assert.equal(
+      await page.locator("#account-status").textContent(),
+      "Signed in as candidate",
+    );
+    assert.deepEqual(
+      await page.evaluate(() =>
+        window.lobbyRequests
+          .filter(({ path }) => path === "/api/login")
+          .map(({ method }) => method),
+      ),
+      ["POST"],
+    );
+  },
+);
+
+lobbyTest(
+  "an account history body timeout clears stale progress and releases Start",
+  async (page) => {
+    session = { signedIn: false, loginRequired: true };
+    await stallTimedRequest(page, { url: "/api/reports", body: true });
+    await page.addInitScript((entry) => {
+      localStorage.setItem("codetrial_history", JSON.stringify([entry]));
+    }, focusedAttempt(EASY[0]).payload);
+    await lobby(page);
+    await page.check("#practice-focus-share-input");
+    await page.fill("#github-login", "candidate");
+    await page.press("#github-login", "Enter");
+    await expireStalledRequest(page);
+    await awaitReady(page);
+    assert.equal(
+      await page.locator("#account-status").textContent(),
+      "Signed in as candidate",
+    );
+    assert.equal(await page.locator("#start").isDisabled(), false);
+    assert.equal(await page.locator("#random-problem").isDisabled(), false);
+    assert.match(
+      await page.locator("#history").textContent(),
+      /Could not load saved account progress/,
+    );
+    assert.equal(await page.locator("#attempt-history").textContent(), "");
+    assert.equal(await page.locator("#practice-focus").isHidden(), true);
+    assert.equal(
+      await page.locator("#practice-focus-share-input").isChecked(),
+      false,
+    );
+  },
+);
+
+for (const trigger of ["header", "Start"]) {
+  lobbyTest(
+    `a ${trigger} login timeout checks the account before allowing another POST`,
+    async (page) => {
+      session = { signedIn: false, loginRequired: true };
+      await stallTimedRequest(page, { url: "/api/login" });
+      await lobby(page);
+      await page.click("details.problem-picker summary");
+      await page.click(`[data-problem="${MEDIUM[1]}"]`);
+      await page.click('[data-duration="60"]');
+      await page.fill("#github-login", "candidate");
+      if (trigger === "header") await page.press("#github-login", "Enter");
+      else await page.click("#start");
+      await expireStalledRequest(page);
+      await settles(
+        page,
+        () =>
+          document.querySelector("#login-link").textContent ===
+          "Retry account check",
+      );
+      assert.equal(
+        await page.locator("#account-status").textContent(),
+        "Could not confirm the sign-in result. Retry the account check.",
+      );
+      assert.equal(await page.locator("#github-login").isHidden(), true);
+      assert.equal(await page.locator("#login-link").isDisabled(), false);
+      assert.equal(await page.locator("#start").isDisabled(), true);
+      assert.equal(
+        new URL(page.url()).pathname,
+        "/",
+        "a login timeout navigated into the interview",
+      );
+      const selected = await snapshot(page);
+      assert.equal(selected.card, MEDIUM[1]);
+      assert.equal(selected.duration, "60");
+      await page.evaluate(() => document.querySelector("#start").click());
+      if (trigger === "header") {
+        // A malformed account response cannot establish that the POST failed.
+        await page.route(
+          `${base}/api/session`,
+          (route) => route.fulfill({ json: {} }),
+          { times: 1 },
+        );
+        await page.click("#login-link");
+        await settles(
+          page,
+          () => !document.querySelector("#login-link").disabled,
+        );
+        assert.equal(
+          await page.locator("#login-link").textContent(),
+          "Retry account check",
+        );
+        assert.equal(await page.locator("#start").isDisabled(), true);
+        session = { signedIn: true, user: { login: "candidate" } };
+      }
+      await page.click("#login-link");
+      await settles(page, () => !document.querySelector("#start").disabled);
+      assert.deepEqual(
+        await page.evaluate(() =>
+          window.lobbyRequests
+            .filter(({ path }) => path === "/api/login")
+            .map(({ method }) => method),
+        ),
+        ["POST"],
+      );
+      if (trigger === "header") {
+        assert.equal(
+          await page.locator("#account-status").textContent(),
+          "Signed in as candidate",
+        );
+        assert.equal(await page.locator("#login-link").isHidden(), true);
+      } else {
+        assert.match(
+          await page.locator("#account-status").textContent(),
+          /no signed-in session/i,
+        );
+        assert.equal(
+          await page.locator("#login-link").textContent(),
+          "Use GitHub",
+        );
+        assert.equal(await page.locator("#github-login").isVisible(), true);
+        await page.click("#login-link");
+        await awaitReady(page);
+        assert.equal(
+          await page.locator("#account-status").textContent(),
+          "Signed in as candidate",
+        );
+        assert.equal(
+          await page.evaluate(
+            () =>
+              window.lobbyRequests.filter(({ path }) => path === "/api/login")
+                .length,
+          ),
+          2,
+        );
+      }
+      assert.equal(
+        new URL(page.url()).pathname,
+        "/",
+        "an account retry navigated without another Start",
+      );
+      const recovered = await snapshot(page);
+      assert.equal(recovered.card, selected.card);
+      assert.equal(recovered.duration, selected.duration);
+      assert.equal(recovered.startDisabled, false);
+    },
+  );
+}
+
+lobbyTest(
+  "a rejected login whose error body times out remains safe to resubmit",
+  async (page) => {
+    session = { signedIn: false, loginRequired: true };
+    await stallTimedRequest(page, {
+      url: "/api/login",
+      body: true,
+      status: 500,
     });
-  }
-});
+    await lobby(page);
+    await page.fill("#github-login", "candidate");
+    await page.press("#github-login", "Enter");
+    await expireStalledRequest(page);
+    await settles(page, () => !document.querySelector("#login-link").disabled);
+    assert.equal(
+      await page.locator("#account-status").textContent(),
+      "Could not record GitHub username.",
+    );
+    assert.equal(await page.locator("#github-login").isVisible(), true);
+    assert.equal(await page.locator("#login-link").textContent(), "Use GitHub");
+    await page.press("#github-login", "Enter");
+    await awaitReady(page);
+    assert.equal(
+      await page.locator("#account-status").textContent(),
+      "Signed in as candidate",
+    );
+    assert.equal(
+      await page.evaluate(
+        () =>
+          window.lobbyRequests.filter(({ path }) => path === "/api/login")
+            .length,
+      ),
+      2,
+    );
+  },
+);
+
+lobbyTest(
+  "a legacy page map timeout leaves local history usable",
+  async (page) => {
+    session = { signedIn: false, loginRequired: true };
+    await page.addInitScript(() => {
+      localStorage.setItem(
+        "codetrial_history",
+        JSON.stringify([
+          {
+            problemId: "two-sum",
+            date: "2026-01-01T00:00:00Z",
+            report: { decision: "HIRE" },
+          },
+        ]),
+      );
+      const fetch = window.fetch.bind(window);
+      window.fetch = (path, options) => {
+        if (path !== "/problem-pages.json") return fetch(path, options);
+        window.mapRequested = true;
+        return new Promise(() => {});
+      };
+      const setTimeout = window.setTimeout.bind(window);
+      window.mapDeadlines = [];
+      window.setTimeout = (callback, delay, ...args) => {
+        if (delay !== 10_000) return setTimeout(callback, delay, ...args);
+        window.mapDeadlines.push({ delay, expire: () => callback(...args) });
+        return 0;
+      };
+    });
+    await page.goto(`${base}/`, { waitUntil: "domcontentloaded" });
+    await page.waitForFunction(() => window.mapRequested);
+    assert.deepEqual(
+      await page.evaluate(() => window.mapDeadlines.map(({ delay }) => delay)),
+      [10_000],
+    );
+    assert.equal(await page.locator("#start").isDisabled(), true);
+    await page.evaluate(() => window.mapDeadlines[0].expire());
+    await awaitReady(page);
+    assert.equal(await page.locator("#start").isDisabled(), false);
+    assert.match(
+      await page.locator("#history").textContent(),
+      /saved on this device/,
+    );
+    assert.match(
+      await page.locator("#progress-summary").textContent(),
+      /1 of 1 attempts shown/,
+    );
+    assert.equal(
+      await page.evaluate(
+        () =>
+          JSON.parse(localStorage.getItem("codetrial_history"))[0].problemId,
+      ),
+      "two-sum",
+    );
+  },
+);
+
+lobbyTest(
+  "a late account check cannot erase an uncertain login result",
+  async (page) => {
+    session = { signedIn: false, loginRequired: true };
+    await lobby(page);
+    await page.evaluate(() => {
+      const fetch = window.fetch.bind(window);
+      window.loginAttempts = 0;
+      window.fetch = (path, options) => {
+        if (path === "/api/login") {
+          window.loginAttempts += 1;
+          return new Promise((resolve, reject) => {
+            window.rejectLogin = () => reject(new TypeError("Connection lost"));
+          });
+        }
+        if (path === "/api/session") {
+          return new Promise((resolve) => {
+            window.releaseAccount = () =>
+              resolve(
+                new Response(
+                  JSON.stringify({ signedIn: false, loginRequired: true }),
+                ),
+              );
+          });
+        }
+        return fetch(path, options);
+      };
+    });
+    try {
+      await page.fill("#github-login", "candidate");
+      await page.press("#github-login", "Enter");
+      await page.waitForFunction(
+        () => typeof window.rejectLogin === "function",
+      );
+      // A restored page checks the account while the earlier POST is unresolved.
+      await restore(page);
+      await page.waitForFunction(
+        () => typeof window.releaseAccount === "function",
+      );
+      await page.evaluate(() => window.rejectLogin());
+      await settles(
+        page,
+        () =>
+          document.querySelector("#login-link").textContent ===
+          "Retry account check",
+      );
+      assert.equal(
+        await page.locator("#login-link").textContent(),
+        "Retry account check",
+      );
+      await page.evaluate(async () => {
+        window.releaseAccount();
+        await new Promise(requestAnimationFrame);
+      });
+      assert.equal(
+        await page.locator("#account-status").textContent(),
+        "Could not confirm the sign-in result. Retry the account check.",
+      );
+      assert.equal(
+        await page.locator("#login-link").textContent(),
+        "Retry account check",
+      );
+      assert.equal(await page.locator("#github-login").isHidden(), true);
+      assert.equal(await page.locator("#start").isDisabled(), true);
+      assert.equal(await page.evaluate(() => window.loginAttempts), 1);
+    } finally {
+      await page.evaluate(() => {
+        window.rejectLogin?.();
+        window.releaseAccount?.();
+      });
+    }
+  },
+);

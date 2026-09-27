@@ -41,7 +41,11 @@ function harness(t, fetchStub) {
   globalThis.clearInterval = (handle) => void cleared.push(handle);
   console.warn = () => {};
   const nodes = { recordingState: { hidden: true, textContent: "" } };
-  initRecording({ state: { interviewId: "interview/one" }, nodes, recordingEnabled: true });
+  initRecording({
+    state: { interviewId: "interview/one" },
+    nodes,
+    recordingEnabled: true,
+  });
   t.after(() => {
     setRecordingPoll(false);
     restoreFetch();
@@ -59,15 +63,25 @@ function harness(t, fetchStub) {
 /// whether that attempt started. A refused start is not a verdict: a start
 /// that worked and could not be read back looks identical from here.
 test("a start after a terminal answer polls again", async (t) => {
-  const { nodes, armed } = harness(t, async () => response(200, { state: "ready" }));
+  const { nodes, armed } = harness(t, async () =>
+    response(200, { state: "ready" }),
+  );
 
   await startRecording();
   assert.deepEqual(armed, [], "a recording already saved is not asked about");
 
-  globalThis.fetch = async () => response(503, { error: "temporarily unavailable" });
+  globalThis.fetch = async () =>
+    response(503, { error: "temporarily unavailable" });
   await startRecording();
-  assert.equal(nodes.recordingState.textContent, "Checking whether the recording started.");
-  assert.deepEqual(armed, [15_000], "the attempt that could not be read back must be polled for");
+  assert.equal(
+    nodes.recordingState.textContent,
+    "Checking whether the recording started.",
+  );
+  assert.deepEqual(
+    armed,
+    [15_000],
+    "the attempt that could not be read back must be polled for",
+  );
 });
 
 /// One live poll, whatever the overlap.
@@ -95,8 +109,15 @@ test("a stale start cannot rearm a terminal recording poll", async (t) => {
   releaseFirst();
   await first;
 
-  assert.deepEqual(armed, [], "an older nonterminal answer cannot restart polling");
-  assert.ok(cleared.includes(null), "the terminal answer stops the current poll");
+  assert.deepEqual(
+    armed,
+    [],
+    "an older nonterminal answer cannot restart polling",
+  );
+  assert.ok(
+    cleared.includes(null),
+    "the terminal answer stops the current poll",
+  );
 });
 
 /// One live poll, arming included.
@@ -107,7 +128,9 @@ test("a stale start cannot rearm a terminal recording poll", async (t) => {
 /// arming in one statement is what stops that from leaving an interval with
 /// nothing holding its handle.
 test("arming a poll clears the one already running", async (t) => {
-  const { armed, cleared } = harness(t, async () => response(503, { error: "unavailable" }));
+  const { armed, cleared } = harness(t, async () =>
+    response(503, { error: "unavailable" }),
+  );
 
   await startRecording();
   assert.deepEqual(armed, [15_000], "the first attempt polls");
@@ -115,7 +138,10 @@ test("arming a poll clears the one already running", async (t) => {
   await startRecording();
 
   assert.deepEqual(armed, [15_000, 15_000], "so does the second");
-  assert.ok(cleared.includes(1), "and the first attempt's interval must not be left running");
+  assert.ok(
+    cleared.includes(1),
+    "and the first attempt's interval must not be left running",
+  );
 });
 
 /// A poll belongs to the attempt that armed it.
@@ -142,7 +168,11 @@ test("a poll from a previous attempt cannot stop the current one", async (t) => 
   await startRecording();
   const stale = pollRecordingState();
   await startRecording();
-  assert.deepEqual(armed, [15_000, 15_000], "the newer attempt armed its own poll");
+  assert.deepEqual(
+    armed,
+    [15_000, 15_000],
+    "the newer attempt armed its own poll",
+  );
 
   releasePoll();
   await stale;
@@ -152,7 +182,10 @@ test("a poll from a previous attempt cannot stop the current one", async (t) => 
     "Recording is starting.",
     "a stale answer must not relabel the interview",
   );
-  assert.ok(!cleared.includes(2), "nor stop the poll the current attempt is relying on");
+  assert.ok(
+    !cleared.includes(2),
+    "nor stop the poll the current attempt is relying on",
+  );
 });
 
 /// The body is a second await, and the generation can move across it.
@@ -203,7 +236,9 @@ test("a poll answer parsed after a newer start is discarded", async (t) => {
 
 /// Gone, not ours, or signed out: none of them change by asking again.
 test("a status route that has nothing to say stops the poll", async (t) => {
-  const { nodes, cleared } = harness(t, async () => response(200, { state: "starting" }));
+  const { nodes, cleared } = harness(t, async () =>
+    response(200, { state: "starting" }),
+  );
 
   await startRecording();
   globalThis.fetch = async () => response(404);
@@ -215,7 +250,10 @@ test("a status route that has nothing to say stops the poll", async (t) => {
   );
   // The armed handle by name, not `cleared.length`: the clear is
   // unconditional, so a count is satisfied by clearing nothing.
-  assert.ok(cleared.includes(1), "the handle that was armed is the handle that is cleared");
+  assert.ok(
+    cleared.includes(1),
+    "the handle that was armed is the handle that is cleared",
+  );
 });
 
 /// Terminal on the answer's own terms, not on the status code.
@@ -223,10 +261,16 @@ test("a status route that has nothing to say stops the poll", async (t) => {
 /// `ready` arrives with a 200, so the route cannot be what stops the poll; the
 /// state in the body has to, through the verdict `showRecordingState` reports.
 test("a terminal state stops the poll and says so to its caller", async (t) => {
-  const { cleared } = harness(t, async () => response(200, { state: "starting" }));
+  const { cleared } = harness(t, async () =>
+    response(200, { state: "starting" }),
+  );
 
   await startRecording();
-  assert.equal(showRecordingState({ state: "ready" }), true, "a saved recording is terminal");
+  assert.equal(
+    showRecordingState({ state: "ready" }),
+    true,
+    "a saved recording is terminal",
+  );
   globalThis.fetch = async () => response(200, { state: "ready" });
   await pollRecordingState();
 
@@ -238,11 +282,17 @@ test("a terminal state stops the poll and says so to its caller", async (t) => {
 /// Clearing the interval and keeping the handle would let the next stop clear
 /// a timer id the platform has already reused.
 test("the poll drops the handle it cleared", async (t) => {
-  const { cleared } = harness(t, async () => response(200, { state: "starting" }));
+  const { cleared } = harness(t, async () =>
+    response(200, { state: "starting" }),
+  );
 
   await startRecording();
   setRecordingPoll(false);
   setRecordingPoll(false);
 
-  assert.deepEqual(cleared.slice(-2), [1, null], "cleared once, then there is nothing to clear");
+  assert.deepEqual(
+    cleared.slice(-2),
+    [1, null],
+    "cleared once, then there is nothing to clear",
+  );
 });

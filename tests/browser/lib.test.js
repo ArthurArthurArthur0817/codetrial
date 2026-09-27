@@ -42,11 +42,16 @@ import {
 
 test("provider degradation states distinguish availability and evaluation truth", () => {
   const expected = {
-    connecting: [false, false], live: [true, false], reconnecting: [true, false],
+    connecting: [false, false],
+    live: [true, false],
+    reconnecting: [true, false],
     interviewer_reconnecting: [true, false],
-    degraded: [false, true], report_generating: [true, false],
-    incomplete_report: [false, true], retry_ready: [false, true],
-    report_unreadable: [false, false], report_undrawable: [false, false],
+    degraded: [false, true],
+    report_generating: [true, false],
+    incomplete_report: [false, true],
+    retry_ready: [false, true],
+    report_unreadable: [false, false],
+    report_undrawable: [false, false],
   };
   for (const [kind, [personalized, retry]] of Object.entries(expected)) {
     const state = providerUiState(kind, "provider refused\nsecret");
@@ -55,11 +60,26 @@ test("provider degradation states distinguish availability and evaluation truth"
     assert.ok(state.label && state.message, kind);
     assert.doesNotMatch(state.message, /\n/);
   }
-  assert.match(providerUiState("degraded").message, /will not create a personalized evaluation/);
-  assert.doesNotMatch(providerUiState("degraded", "https:\/\/key:secret@example.test").message, /secret|example/);
-  assert.match(providerUiState("degraded", "429 Too Many Requests").message, /busy or rate limited/);
-  assert.match(providerUiState("incomplete_report").message, /No scores or verdict were created/);
-  assert.notEqual(providerUiState("live").message, providerUiState("reconnecting").message);
+  assert.match(
+    providerUiState("degraded").message,
+    /will not create a personalized evaluation/,
+  );
+  assert.doesNotMatch(
+    providerUiState("degraded", "https:\/\/key:secret@example.test").message,
+    /secret|example/,
+  );
+  assert.match(
+    providerUiState("degraded", "429 Too Many Requests").message,
+    /busy or rate limited/,
+  );
+  assert.match(
+    providerUiState("incomplete_report").message,
+    /No scores or verdict were created/,
+  );
+  assert.notEqual(
+    providerUiState("live").message,
+    providerUiState("reconnecting").message,
+  );
 });
 
 const indexPair = { checker: "indexPair" };
@@ -83,95 +103,354 @@ test("indexPair checker accepts any valid index pair, not just the expected one"
 test("indexPair checker rejects reused, out-of-range, and non-integer indices", () => {
   const testCase = { input: [[3, 3], 6], expected: [0, 1] };
 
-  assert.equal(checkAnswer(indexPair, testCase, [0, 1]), true, "duplicate values are solvable");
-  assert.equal(checkAnswer(indexPair, testCase, [0, 0]), false, "same element twice");
-  assert.equal(checkAnswer(indexPair, testCase, [0, 5]), false, "index past the end");
-  assert.equal(checkAnswer(indexPair, testCase, [0, -1]), false, "negative index");
-  assert.equal(checkAnswer(indexPair, testCase, [0, 1.5]), false, "non-integer index");
+  assert.equal(
+    checkAnswer(indexPair, testCase, [0, 1]),
+    true,
+    "duplicate values are solvable",
+  );
+  assert.equal(
+    checkAnswer(indexPair, testCase, [0, 0]),
+    false,
+    "same element twice",
+  );
+  assert.equal(
+    checkAnswer(indexPair, testCase, [0, 5]),
+    false,
+    "index past the end",
+  );
+  assert.equal(
+    checkAnswer(indexPair, testCase, [0, -1]),
+    false,
+    "negative index",
+  );
+  assert.equal(
+    checkAnswer(indexPair, testCase, [0, 1.5]),
+    false,
+    "non-integer index",
+  );
   assert.equal(checkAnswer(indexPair, testCase, [0]), false, "wrong arity");
   assert.equal(checkAnswer(indexPair, testCase, "01"), false, "not an array");
-  assert.equal(checkAnswer(indexPair, { input: [[1, 2], 9], expected: [] }, [0, 1]), false, "sum mismatch");
+  assert.equal(
+    checkAnswer(indexPair, { input: [[1, 2], 9], expected: [] }, [0, 1]),
+    false,
+    "sum mismatch",
+  );
 });
 
 test("palindrome checker accepts any equal-length palindromic substring", () => {
   const testCase = { input: ["cbbd"], expected: "bb" };
 
   assert.equal(checkAnswer(palindrome, testCase, "bb"), true);
-  assert.equal(checkAnswer(palindrome, { input: ["aba"], expected: "aba" }, "aba"), true);
-  assert.equal(checkAnswer(palindrome, testCase, "cb"), false, "not a palindrome");
-  assert.equal(checkAnswer(palindrome, testCase, "bbbb"), false, "wrong length");
-  assert.equal(checkAnswer(palindrome, testCase, "xx"), false, "not a substring of the input");
+  assert.equal(
+    checkAnswer(palindrome, { input: ["aba"], expected: "aba" }, "aba"),
+    true,
+  );
+  assert.equal(
+    checkAnswer(palindrome, testCase, "cb"),
+    false,
+    "not a palindrome",
+  );
+  assert.equal(
+    checkAnswer(palindrome, testCase, "bbbb"),
+    false,
+    "wrong length",
+  );
+  assert.equal(
+    checkAnswer(palindrome, testCase, "xx"),
+    false,
+    "not a substring of the input",
+  );
   assert.equal(checkAnswer(palindrome, testCase, 42), false, "not a string");
 });
 
 test("default checker compares deeply and treats undefined as null", () => {
-  assert.equal(checkAnswer(exact, { input: [], expected: [1, [2, 3]] }, [1, [2, 3]]), true);
-  assert.equal(checkAnswer(exact, { input: [], expected: [1, 2] }, [1, 2, 3]), false);
-  assert.equal(checkAnswer(exact, { input: [], expected: null }, undefined), true);
+  assert.equal(
+    checkAnswer(exact, { input: [], expected: [1, [2, 3]] }, [1, [2, 3]]),
+    true,
+  );
+  assert.equal(
+    checkAnswer(exact, { input: [], expected: [1, 2] }, [1, 2, 3]),
+    false,
+  );
+  assert.equal(
+    checkAnswer(exact, { input: [], expected: null }, undefined),
+    true,
+  );
   assert.equal(normalize(undefined), null);
   assert.equal(deepEqual([undefined], [null]), true);
-  assert.equal(deepEqual({ a: 1 }, { a: 1 }), false, "objects are not compared structurally");
+  assert.equal(
+    deepEqual({ a: 1 }, { a: 1 }),
+    false,
+    "objects are not compared structurally",
+  );
 });
 
 test("approxNumber checker accepts small floating point drift", () => {
-  assert.equal(checkAnswer(approxNumber, { input: [], expected: 9.261 }, 9.261000001), true);
-  assert.equal(checkAnswer(approxNumber, { input: [], expected: 9.261 }, 9.27), false);
-  assert.equal(checkAnswer(approxNumber, { input: [], expected: 1 }, "1"), false);
+  assert.equal(
+    checkAnswer(approxNumber, { input: [], expected: 9.261 }, 9.261000001),
+    true,
+  );
+  assert.equal(
+    checkAnswer(approxNumber, { input: [], expected: 9.261 }, 9.27),
+    false,
+  );
+  assert.equal(
+    checkAnswer(approxNumber, { input: [], expected: 1 }, "1"),
+    false,
+  );
 });
 
 test("arrayBag checker ignores order but preserves multiplicity", () => {
   const spec = { checker: "arrayBag" };
 
-  assert.equal(checkAnswer(spec, { input: [], expected: [0, 1, 3, 0, 4] }, [4, 0, 3, 1, 0]), true);
-  assert.equal(checkAnswer(spec, { input: [], expected: ["ad", "ae", "af"] }, ["af", "ad", "ae"]), true);
-  assert.equal(checkAnswer(spec, { input: [], expected: ["aa", "aa"] }, ["aa"]), false);
+  assert.equal(
+    checkAnswer(
+      spec,
+      { input: [], expected: [0, 1, 3, 0, 4] },
+      [4, 0, 3, 1, 0],
+    ),
+    true,
+  );
+  assert.equal(
+    checkAnswer(spec, { input: [], expected: ["ad", "ae", "af"] }, [
+      "af",
+      "ad",
+      "ae",
+    ]),
+    true,
+  );
+  assert.equal(
+    checkAnswer(spec, { input: [], expected: ["aa", "aa"] }, ["aa"]),
+    false,
+  );
   assert.equal(checkAnswer(spec, { input: [], expected: [2, 2] }, [2]), false);
-  assert.equal(checkAnswer(spec, { input: [], expected: [2, 2] }, [2, 3]), false);
-  assert.equal(checkAnswer(spec, { input: [], expected: [0, 9] }, [9, 0]), true);
+  assert.equal(
+    checkAnswer(spec, { input: [], expected: [2, 2] }, [2, 3]),
+    false,
+  );
+  assert.equal(
+    checkAnswer(spec, { input: [], expected: [0, 9] }, [9, 0]),
+    true,
+  );
 });
 
 test("tripletSet checker ignores triplet and result order", () => {
-  const testCase = { input: [], expected: [[-1, -1, 2], [-1, 0, 1]] };
+  const testCase = {
+    input: [],
+    expected: [
+      [-1, -1, 2],
+      [-1, 0, 1],
+    ],
+  };
 
-  assert.equal(checkAnswer(tripletSet, testCase, [[1, -1, 0], [2, -1, -1]]), true);
-  assert.equal(checkAnswer(tripletSet, testCase, [[-1, 0, 1]]), false, "missing triplet");
-  assert.equal(checkAnswer(tripletSet, testCase, [[-1, 0, 1], [-1, -1, 3]]), false, "wrong sum");
-  assert.equal(checkAnswer(tripletSet, testCase, [[-1, 0]]), false, "wrong triplet size");
+  assert.equal(
+    checkAnswer(tripletSet, testCase, [
+      [1, -1, 0],
+      [2, -1, -1],
+    ]),
+    true,
+  );
+  assert.equal(
+    checkAnswer(tripletSet, testCase, [[-1, 0, 1]]),
+    false,
+    "missing triplet",
+  );
+  assert.equal(
+    checkAnswer(tripletSet, testCase, [
+      [-1, 0, 1],
+      [-1, -1, 3],
+    ]),
+    false,
+    "wrong sum",
+  );
+  assert.equal(
+    checkAnswer(tripletSet, testCase, [[-1, 0]]),
+    false,
+    "wrong triplet size",
+  );
 });
 
 test("integer row checkers handle nested backtracking outputs", () => {
-  assert.equal(checkAnswer(integerRows, { input: [], expected: [[1, 2], [2, 1]] }, [[2, 1], [1, 2]]), true);
-  assert.equal(checkAnswer(integerRows, { input: [], expected: [[1, 2]] }, [[2, 1]]), false, "permutation row order matters");
-  assert.equal(checkAnswer(integerCombinations, { input: [], expected: [[2, 2, 3], [7]] }, [[7], [3, 2, 2]]), true);
-  assert.equal(checkAnswer(integerCombinations, { input: [], expected: [[1, 1]] }, [[1]]), false, "row multiplicity matters");
+  assert.equal(
+    checkAnswer(
+      integerRows,
+      {
+        input: [],
+        expected: [
+          [1, 2],
+          [2, 1],
+        ],
+      },
+      [
+        [2, 1],
+        [1, 2],
+      ],
+    ),
+    true,
+  );
+  assert.equal(
+    checkAnswer(integerRows, { input: [], expected: [[1, 2]] }, [[2, 1]]),
+    false,
+    "permutation row order matters",
+  );
+  assert.equal(
+    checkAnswer(
+      integerCombinations,
+      { input: [], expected: [[2, 2, 3], [7]] },
+      [[7], [3, 2, 2]],
+    ),
+    true,
+  );
+  assert.equal(
+    checkAnswer(integerCombinations, { input: [], expected: [[1, 1]] }, [[1]]),
+    false,
+    "row multiplicity matters",
+  );
 });
 
 test("unorderedGroups checker ignores group and word order", () => {
-  const testCase = { input: [], expected: [["eat", "tea", "ate"], ["tan", "nat"], ["bat"]] };
+  const testCase = {
+    input: [],
+    expected: [["eat", "tea", "ate"], ["tan", "nat"], ["bat"]],
+  };
 
-  assert.equal(checkAnswer(unorderedGroups, testCase, [["bat"], ["nat", "tan"], ["ate", "eat", "tea"]]), true);
-  assert.equal(checkAnswer(unorderedGroups, testCase, [["bat"], ["nat"], ["ate", "eat", "tea"]]), false, "missing word");
-  assert.equal(checkAnswer(unorderedGroups, testCase, [["bat", "tab"], ["nat", "tan"], ["ate", "eat"]]), false, "wrong grouping");
-  assert.equal(checkAnswer(unorderedGroups, { input: [], expected: [["", ""]] }, [[""]]), false, "duplicate count matters");
+  assert.equal(
+    checkAnswer(unorderedGroups, testCase, [
+      ["bat"],
+      ["nat", "tan"],
+      ["ate", "eat", "tea"],
+    ]),
+    true,
+  );
+  assert.equal(
+    checkAnswer(unorderedGroups, testCase, [
+      ["bat"],
+      ["nat"],
+      ["ate", "eat", "tea"],
+    ]),
+    false,
+    "missing word",
+  );
+  assert.equal(
+    checkAnswer(unorderedGroups, testCase, [
+      ["bat", "tab"],
+      ["nat", "tan"],
+      ["ate", "eat"],
+    ]),
+    false,
+    "wrong grouping",
+  );
+  assert.equal(
+    checkAnswer(unorderedGroups, { input: [], expected: [["", ""]] }, [[""]]),
+    false,
+    "duplicate count matters",
+  );
 });
 
 test("balancedBst checker accepts any balanced BST with the same inorder values", () => {
-  assert.equal(checkAnswer(balancedBst, { input: [[1, 3]], expected: [3, 1] }, [1, null, 3]), true);
-  assert.equal(checkAnswer(balancedBst, { input: [[1, 2, 3, 4]], expected: [] }, [2, 1, 3, null, null, null, 4]), true);
-  assert.equal(checkAnswer(balancedBst, { input: [[1, 2, 3, 4]], expected: [] }, [1, null, 2, null, 3, null, 4]), false);
-  assert.equal(checkAnswer(balancedBst, { input: [[1, 2, 3]], expected: [] }, [2, 3, 1]), false);
+  assert.equal(
+    checkAnswer(balancedBst, { input: [[1, 3]], expected: [3, 1] }, [
+      1,
+      null,
+      3,
+    ]),
+    true,
+  );
+  assert.equal(
+    checkAnswer(balancedBst, { input: [[1, 2, 3, 4]], expected: [] }, [
+      2,
+      1,
+      3,
+      null,
+      null,
+      null,
+      4,
+    ]),
+    true,
+  );
+  assert.equal(
+    checkAnswer(balancedBst, { input: [[1, 2, 3, 4]], expected: [] }, [
+      1,
+      null,
+      2,
+      null,
+      3,
+      null,
+      4,
+    ]),
+    false,
+  );
+  assert.equal(
+    checkAnswer(balancedBst, { input: [[1, 2, 3]], expected: [] }, [2, 3, 1]),
+    false,
+  );
 });
 
 test("dependencyOrder checker accepts any valid course order", () => {
-  const testCase = { input: [4, [[1, 0], [2, 0], [3, 1], [3, 2]]], expected: [0, 1, 2, 3] };
+  const testCase = {
+    input: [
+      4,
+      [
+        [1, 0],
+        [2, 0],
+        [3, 1],
+        [3, 2],
+      ],
+    ],
+    expected: [0, 1, 2, 3],
+  };
 
   assert.equal(checkAnswer(dependencyOrder, testCase, [0, 2, 1, 3]), true);
   assert.equal(checkAnswer(dependencyOrder, testCase, [0, 1, 2, 3]), true);
-  assert.equal(checkAnswer(dependencyOrder, testCase, [0, 1, 3, 2]), false, "course before prerequisite");
-  assert.equal(checkAnswer(dependencyOrder, testCase, [0, 1, 1, 3]), false, "duplicate course");
-  assert.equal(checkAnswer(dependencyOrder, testCase, [0, 1, 3]), false, "missing course");
-  assert.equal(checkAnswer(dependencyOrder, { input: [2, [[1, 0], [0, 1]]], expected: [] }, []), true);
-  assert.equal(checkAnswer(dependencyOrder, { input: [2, [[1, 0], [0, 1]]], expected: [] }, [0, 1]), false);
+  assert.equal(
+    checkAnswer(dependencyOrder, testCase, [0, 1, 3, 2]),
+    false,
+    "course before prerequisite",
+  );
+  assert.equal(
+    checkAnswer(dependencyOrder, testCase, [0, 1, 1, 3]),
+    false,
+    "duplicate course",
+  );
+  assert.equal(
+    checkAnswer(dependencyOrder, testCase, [0, 1, 3]),
+    false,
+    "missing course",
+  );
+  assert.equal(
+    checkAnswer(
+      dependencyOrder,
+      {
+        input: [
+          2,
+          [
+            [1, 0],
+            [0, 1],
+          ],
+        ],
+        expected: [],
+      },
+      [],
+    ),
+    true,
+  );
+  assert.equal(
+    checkAnswer(
+      dependencyOrder,
+      {
+        input: [
+          2,
+          [
+            [1, 0],
+            [0, 1],
+          ],
+        ],
+        expected: [],
+      },
+      [0, 1],
+    ),
+    false,
+  );
 });
 
 test("renderValue serializes and truncates long output", () => {
@@ -185,7 +464,11 @@ test("renderValue serializes and truncates long output", () => {
 
   const cyclic = {};
   cyclic.self = cyclic;
-  assert.equal(renderValue(cyclic), "[object Object]", "falls back instead of throwing");
+  assert.equal(
+    renderValue(cyclic),
+    "[object Object]",
+    "falls back instead of throwing",
+  );
 });
 
 test("testPayload keeps the agent wire contract and caps failures at four", () => {
@@ -196,7 +479,13 @@ test("testPayload keeps the agent wire contract and caps failures at four", () =
     setupError: "",
     cases: [
       { label: "ok", pass: true },
-      ...Array.from({ length: 6 }, (_, index) => ({ label: `mine-${index}`, candidate: true, pass: null, input: `[${index}]`, got: `[${index}]` })),
+      ...Array.from({ length: 6 }, (_, index) => ({
+        label: `mine-${index}`,
+        candidate: true,
+        pass: null,
+        input: `[${index}]`,
+        got: `[${index}]`,
+      })),
       ...Array.from({ length: 6 }, (_, index) => ({
         label: `bad-${index}`,
         pass: false,
@@ -221,22 +510,44 @@ test("testPayload keeps the agent wire contract and caps failures at four", () =
     "setupError",
     "total",
   ]);
-  assert.equal(payload.setupError, null, "empty setup error normalizes to null");
+  assert.equal(
+    payload.setupError,
+    null,
+    "empty setup error normalizes to null",
+  );
   assert.equal(payload.diagnostic, null);
-  assert.equal(payload.code, null, "a summary without the executed code sends none");
+  assert.equal(
+    payload.code,
+    null,
+    "a summary without the executed code sends none",
+  );
   assert.equal(payload.runnerUnavailable, false);
-  assert.equal(testPayload({ ...summary, code: "x = 1", runnerUnavailable: true }).code, "x = 1");
-  assert.equal(testPayload({ ...summary, runnerUnavailable: true }).runnerUnavailable, true);
+  assert.equal(
+    testPayload({ ...summary, code: "x = 1", runnerUnavailable: true }).code,
+    "x = 1",
+  );
+  assert.equal(
+    testPayload({ ...summary, runnerUnavailable: true }).runnerUnavailable,
+    true,
+  );
   assert.equal(payload.failures.length, 4);
-  assert.deepEqual(Object.keys(payload.failures[0]).sort(), ["error", "expected", "got", "label"]);
+  assert.deepEqual(Object.keys(payload.failures[0]).sort(), [
+    "error",
+    "expected",
+    "got",
+    "label",
+  ]);
   assert.equal(payload.failures[0].error, null);
-  assert.deepEqual(payload.candidateCases, Array.from({ length: 5 }, (_, index) => ({
-    label: `mine-${index}`,
-    input: `[${index}]`,
-    expected: null,
-    got: `[${index}]`,
-    error: null,
-  })));
+  assert.deepEqual(
+    payload.candidateCases,
+    Array.from({ length: 5 }, (_, index) => ({
+      label: `mine-${index}`,
+      input: `[${index}]`,
+      expected: null,
+      got: `[${index}]`,
+      error: null,
+    })),
+  );
 });
 
 test("data-channel payloads keep the keys the Rust agent decodes", () => {
@@ -272,14 +583,17 @@ test("integrity events are canonical hashed chain payloads", async () => {
     durationMs: 0,
     detail: "ok",
   });
-  const second = await integrityEventPayload({
-    type: "SCREEN_SHARE_STOPPED",
-    at: "2026-08-15T00:00:05.000Z",
-    severity: "high",
-    source: "screen",
-    durationMs: 5000,
-    sourceEventIds: ["1", "2"],
-  }, first);
+  const second = await integrityEventPayload(
+    {
+      type: "SCREEN_SHARE_STOPPED",
+      at: "2026-08-15T00:00:05.000Z",
+      severity: "high",
+      source: "screen",
+      durationMs: 5000,
+      sourceEventIds: ["1", "2"],
+    },
+    first,
+  );
 
   assert.equal(topics.integrity, "integrity");
   assert.equal(first.seq, 1);
@@ -323,7 +637,12 @@ test("a camera label is carried as detail without outgrowing the hashed bound", 
   // A well-formed pair is one element from `Array.from`; a lone surrogate is a
   // one-unit element in the surrogate range, which is what a UTF-16 cut leaves.
   assert.ok(
-    !Array.from(event.detail).some((c) => c.length === 1 && c.charCodeAt(0) >= 0xd800 && c.charCodeAt(0) <= 0xdfff),
+    !Array.from(event.detail).some(
+      (c) =>
+        c.length === 1 &&
+        c.charCodeAt(0) >= 0xd800 &&
+        c.charCodeAt(0) <= 0xdfff,
+    ),
     "truncation split a surrogate pair",
   );
   assert.ok(event.detail.startsWith("camera=αβγδε"), event.detail);
@@ -336,7 +655,10 @@ test("a device label cannot reorder or hide the report it is printed in", async 
   // src/agent/integrity.rs refuses the identical set: a character kept here and
   // dropped there is a hash the agent cannot reproduce, which stops the chain.
   const hostile = "camera=\u202Egnitautis\u200B\u00AD\u2066\uFEFF end";
-  const event = await integrityEventPayload({ type: "MEDIA_PREFLIGHT_PASSED", detail: hostile });
+  const event = await integrityEventPayload({
+    type: "MEDIA_PREFLIGHT_PASSED",
+    detail: hostile,
+  });
   assert.equal(event.detail, "camera=gnitautis end");
 
   // Localized labels survive. Stripping them would leave the evidence
@@ -350,7 +672,10 @@ test("a device label cannot reorder or hide the report it is printed in", async 
   // The zero-width non-joiner is orthographic here, not decoration, which is
   // why the U+200B run is not a solid range on either side.
   const persian = "camera=\u0645\u06CC\u200C\u0631\u0648\u062F";
-  const kept = await integrityEventPayload({ type: "MEDIA_PREFLIGHT_PASSED", detail: persian });
+  const kept = await integrityEventPayload({
+    type: "MEDIA_PREFLIGHT_PASSED",
+    detail: persian,
+  });
   assert.equal(kept.detail, persian);
 });
 
@@ -359,15 +684,19 @@ test("every Unicode bidi control is stripped, not the ones we thought of", async
   // U+061C ARABIC LETTER MARK was missed, so assert the property rather than
   // the list: the next code point nobody thinks of fails here.
   const BIDI_CONTROL = [
-    0x061c, 0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e,
-    0x2066, 0x2067, 0x2068, 0x2069,
+    0x061c, 0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066,
+    0x2067, 0x2068, 0x2069,
   ];
   for (const codePoint of BIDI_CONTROL) {
     const event = await integrityEventPayload({
       type: "MEDIA_PREFLIGHT_PASSED",
       detail: `a${String.fromCodePoint(codePoint)}b`,
     });
-    assert.equal(event.detail, "ab", `U+${codePoint.toString(16).toUpperCase()} reached the report`);
+    assert.equal(
+      event.detail,
+      "ab",
+      `U+${codePoint.toString(16).toUpperCase()} reached the report`,
+    );
   }
 });
 
@@ -379,10 +708,15 @@ test("a stored report cannot smuggle a reordering character past the render", ()
   const clean = sanitizeReport({
     problemId: "two-sum",
     summary: "looked\u202Efine",
-    integrityEvents: [{
-      type: "CAMERA_STOPPED", at: "00:01", severity: "high",
-      source: "camera", detail: "camera=\u202Egnitautis\u200B",
-    }],
+    integrityEvents: [
+      {
+        type: "CAMERA_STOPPED",
+        at: "00:01",
+        severity: "high",
+        source: "camera",
+        detail: "camera=\u202Egnitautis\u200B",
+      },
+    ],
   });
   assert.equal(clean.integrityEvents[0].detail, "camera=gnitautis");
   assert.equal(clean.summary, "lookedfine");
@@ -392,15 +726,27 @@ test("only the agent may deliver a report, and only on the report topic", () => 
   const agentByKind = { kind: "AGENT" };
   const agentByPermission = { permissions: { agent: true } };
   const agentByIdentity = { identity: "interviewer-interview-abc" };
-  const candidate = { kind: "STANDARD", identity: "candidate-abc", permissions: { agent: false } };
+  const candidate = {
+    kind: "STANDARD",
+    identity: "candidate-abc",
+    permissions: { agent: false },
+  };
 
   for (const agent of [agentByKind, agentByPermission, agentByIdentity]) {
     assert.equal(acceptsReport(topics.report, agent), true);
   }
   // Every participant holds canPublishData, so a peer must not be able to
   // drive the report UI.
-  assert.equal(acceptsReport(topics.report, candidate), false, "candidate cannot publish a report");
-  assert.equal(acceptsReport(topics.report, undefined), false, "unknown sender cannot publish a report");
+  assert.equal(
+    acceptsReport(topics.report, candidate),
+    false,
+    "candidate cannot publish a report",
+  );
+  assert.equal(
+    acceptsReport(topics.report, undefined),
+    false,
+    "unknown sender cannot publish a report",
+  );
   assert.equal(acceptsReport(topics.code, agentByKind), false, "wrong topic");
 });
 
@@ -409,9 +755,20 @@ test("the interviewer is whoever the page pinned, or else the first agent", () =
   const jim = { kind: "AGENT", identity: "interviewer-abc" };
   const other = { kind: "AGENT", identity: "interviewer-xyz" };
 
-  assert.equal(roomInterviewer([candidate, jim], ""), jim, "first sight, before an identity is pinned");
-  assert.equal(roomInterviewer([candidate, other, jim], "interviewer-abc"), jim);
-  assert.equal(roomInterviewer([candidate, other], "interviewer-abc"), undefined, "a different agent is not this interview's");
+  assert.equal(
+    roomInterviewer([candidate, jim], ""),
+    jim,
+    "first sight, before an identity is pinned",
+  );
+  assert.equal(
+    roomInterviewer([candidate, other, jim], "interviewer-abc"),
+    jim,
+  );
+  assert.equal(
+    roomInterviewer([candidate, other], "interviewer-abc"),
+    undefined,
+    "a different agent is not this interview's",
+  );
   assert.equal(roomInterviewer([candidate], "interviewer-abc"), undefined);
   assert.equal(roomInterviewer([], ""), undefined, "no room lists nobody");
 });
@@ -420,10 +777,17 @@ test("the interviewer is whoever the page pinned, or else the first agent", () =
 // question each asks, not the wording around it.
 test("ending the interview waits for a report only while an interviewer is in the room", () => {
   const end = functionBody(read("web/interview.js"), "endInterview");
-  assert.match(end, /const reportComing = Boolean\(roomInterviewer\(roomParticipants\(\), state\.agentIdentity\)\)/);
+  assert.match(
+    end,
+    /const reportComing = Boolean\(roomInterviewer\(roomParticipants\(\), state\.agentIdentity\)\)/,
+  );
   assert.match(end, /nodes\.forceReport\.hidden = reportComing;/);
   assert.match(end, /if \(!reportComing\) setTimeout\(showReport, /);
-  assert.doesNotMatch(end, /if \(!?state\.room\)/, "a room outlives the interviewer that left it");
+  assert.doesNotMatch(
+    end,
+    /if \(!?state\.room\)/,
+    "a room outlives the interviewer that left it",
+  );
 });
 
 test("a report that cannot be shown puts the ways out back at once", () => {
@@ -441,12 +805,21 @@ test("a report that cannot be shown puts the ways out back at once", () => {
   }
   // Which of the two failures it is explaining, and whether the exit it offers
   // is the one that just failed.
-  assert.match(recovery, /providerUiState\(offlineSummary \? "report_unreadable" : "report_undrawable"\)/);
+  assert.match(
+    recovery,
+    /providerUiState\(offlineSummary \? "report_unreadable" : "report_undrawable"\)/,
+  );
   assert.match(recovery, /nodes\.forceReport\.hidden = !offlineSummary;/);
-  assert.match(functionBody(page, "showReport"), /reportUnreadable: state\.reportUnreadable/);
+  assert.match(
+    functionBody(page, "showReport"),
+    /reportUnreadable: state\.reportUnreadable/,
+  );
 
   const receive = functionBody(page, "receiveReport");
-  assert.ok(receive.indexOf("rendered = true;") > receive.indexOf("renderReport();"), "marked only once the report is on screen");
+  assert.ok(
+    receive.indexOf("rendered = true;") > receive.indexOf("renderReport();"),
+    "marked only once the report is on screen",
+  );
   // A report the candidate is already reading is never taken back: only the
   // save status throws past that point, and this recovery would replace the
   // report with an overlay saying it could not be shown.
@@ -454,25 +827,45 @@ test("a report that cannot be shown puts the ways out back at once", () => {
   // exit only from a failure that happened before that ran. Offered after one
   // from inside it, the click reproduces the throw and the guard around the
   // second attempt can do no more than say so again.
-  assert.match(receive, /reportRenderFailed\(error, \{ offlineSummary: !renderAttempted \}\)/);
+  assert.match(
+    receive,
+    /reportRenderFailed\(error, \{ offlineSummary: !renderAttempted \}\)/,
+  );
   const attempted = receive.indexOf("renderAttempted = true;");
-  assert.notEqual(attempted, -1, "which failure it was is decided at the render");
-  assert.ok(attempted < receive.indexOf("renderReport();"), "and marked before it runs");
+  assert.notEqual(
+    attempted,
+    -1,
+    "which failure it was is decided at the render",
+  );
+  assert.ok(
+    attempted < receive.indexOf("renderReport();"),
+    "and marked before it runs",
+  );
 
   const caught = receive.slice(receive.indexOf("} catch (error) {"));
   assert.match(caught, /if \(rendered\) \{/);
   const returns = caught.indexOf("return;");
   assert.notEqual(returns, -1, "an already drawn report ends the catch early");
-  assert.ok(returns < caught.indexOf("reportRenderFailed("), "and ends it before the recovery runs");
+  assert.ok(
+    returns < caught.indexOf("reportRenderFailed("),
+    "and ends it before the recovery runs",
+  );
 });
 
 test("a report that fails to draw still ends the session it belonged to", () => {
   const page = read("web/interview.js");
-  const caught = functionBody(page, "receiveReport").slice(functionBody(page, "receiveReport").indexOf("} catch (error) {"));
+  const caught = functionBody(page, "receiveReport").slice(
+    functionBody(page, "receiveReport").indexOf("} catch (error) {"),
+  );
   // Only the success path released these, so a throw ahead of the render left
   // the microphone, the camera and the integrity heartbeat running behind an
   // overlay saying the report could not be shown.
-  for (const line of ["stopAvatar();", "stopLocalMedia();", "state.room = null;", "state.connected = false;"]) {
+  for (const line of [
+    "stopAvatar();",
+    "stopLocalMedia();",
+    "state.room = null;",
+    "state.connected = false;",
+  ]) {
     assert.ok(caught.includes(line), line);
   }
   // The interviewer's own ending is recorded behind the parse that threw, so
@@ -490,8 +883,14 @@ test("the offline summary is not offered as the exit from its own failure", () =
   // report with no overlay and nothing to press.
   const guarded = show.indexOf("try {");
   assert.notEqual(guarded, -1, "the offline render is guarded too");
-  assert.ok(guarded < show.indexOf("renderReport();"), "and guarded before it runs, not after");
-  assert.match(show, /reportRenderFailed\(error, \{ offlineSummary: false \}\)/);
+  assert.ok(
+    guarded < show.indexOf("renderReport();"),
+    "and guarded before it runs, not after",
+  );
+  assert.match(
+    show,
+    /reportRenderFailed\(error, \{ offlineSummary: false \}\)/,
+  );
 });
 
 test("an interviewer that leaves mid-wait ends the wait it left behind", () => {
@@ -500,9 +899,17 @@ test("an interviewer that leaves mid-wait ends the wait it left behind", () => {
   // room right after publishing one, and issue 77 is the case where it leaves
   // without publishing at all.
   const waiting = update.indexOf('state.phase === "ending"');
-  assert.notEqual(waiting, -1, "a candidate already waiting is the case this closes");
+  assert.notEqual(
+    waiting,
+    -1,
+    "a candidate already waiting is the case this closes",
+  );
   const closing = update.slice(waiting);
-  for (const line of ["stopEndingEscape();", "nodes.leaveRoom.hidden = false;", "nodes.forceReport.hidden = false;"]) {
+  for (const line of [
+    "stopEndingEscape();",
+    "nodes.leaveRoom.hidden = false;",
+    "nodes.forceReport.hidden = false;",
+  ]) {
     assert.ok(closing.includes(line), line);
   }
   // Not at once, though: the agent publishes and then leaves, so the moment it
@@ -511,10 +918,19 @@ test("an interviewer that leaves mid-wait ends the wait it left behind", () => {
   // unscored one and disconnects the room that was about to deliver it.
   const armed = closing.indexOf("setTimeout(");
   assert.notEqual(armed, -1, "the exits wait out a report already in flight");
-  assert.ok(closing.includes("REPORT_DELIVERY_GRACE_MS"), "and wait exactly that long");
-  assert.ok(armed < closing.indexOf("nodes.forceReport.hidden = false;"), "the offline exit is inside the wait");
+  assert.ok(
+    closing.includes("REPORT_DELIVERY_GRACE_MS"),
+    "and wait exactly that long",
+  );
+  assert.ok(
+    armed < closing.indexOf("nodes.forceReport.hidden = false;"),
+    "the offline exit is inside the wait",
+  );
   // What lands in the grace has already spoken for itself.
-  assert.match(closing, /state\.phase !== "ending" \|\| state\.reportUnreadable/);
+  assert.match(
+    closing,
+    /state\.phase !== "ending" \|\| state\.reportUnreadable/,
+  );
 });
 
 test("a report that arrives takes back the overlay's promises of one", () => {
@@ -523,16 +939,23 @@ test("a report that arrives takes back the overlay's promises of one", () => {
   // "ending", which the recovery above restores: left armed, they overwrite
   // what went wrong with "preparing your report" and then with an offer to
   // retry a provider that did its part.
-  assert.match(functionBody(page, "endInterview"), /endingEscape = \[setTimeout\(/);
+  assert.match(
+    functionBody(page, "endInterview"),
+    /endingEscape = \[setTimeout\(/,
+  );
   const receive = functionBody(page, "receiveReport");
   assert.ok(
-    receive.includes("stopEndingEscape();") && receive.indexOf("stopEndingEscape();") < receive.indexOf("try {"),
+    receive.includes("stopEndingEscape();") &&
+      receive.indexOf("stopEndingEscape();") < receive.indexOf("try {"),
     "the wait ends when the packet lands, before anything can throw",
   );
 });
 
 test("escapeHtml neutralizes every markup character", () => {
-  assert.equal(escapeHtml(`<img src=x onerror="a">&'`), "&lt;img src=x onerror=&quot;a&quot;&gt;&amp;&#39;");
+  assert.equal(
+    escapeHtml(`<img src=x onerror="a">&'`),
+    "&lt;img src=x onerror=&quot;a&quot;&gt;&amp;&#39;",
+  );
 });
 
 test("sanitizeReport clamps scores and strips markup from a hostile report", () => {
@@ -541,7 +964,10 @@ test("sanitizeReport clamps scores and strips markup from a hostile report", () 
     communicationScore: 5000,
     decision: "MAYBE",
     summary: { toString: () => "not a string" },
-    codingFeedback: { strengths: ["a", "b", "c", "d", "e"], improvements: "nope" },
+    codingFeedback: {
+      strengths: ["a", "b", "c", "d", "e"],
+      improvements: "nope",
+    },
     communicationFeedback: null,
     integrityEvents: [
       {
@@ -560,27 +986,52 @@ test("sanitizeReport clamps scores and strips markup from a hostile report", () 
     hintsUsed: -3,
   });
 
-  assert.equal(report.codingScore, 0, "non-numeric score collapses to 0, never markup");
+  assert.equal(
+    report.codingScore,
+    0,
+    "non-numeric score collapses to 0, never markup",
+  );
   assert.equal(report.communicationScore, 100);
   assert.equal(report.decision, "NO_HIRE");
   assert.equal(report.summary, "");
   assert.deepEqual(report.codingFeedback.strengths, ["a", "b", "c", "d"]);
   assert.deepEqual(report.codingFeedback.improvements, []);
-  assert.deepEqual(report.communicationFeedback, { strengths: [], improvements: [] });
+  assert.deepEqual(report.communicationFeedback, {
+    strengths: [],
+    improvements: [],
+  });
   assert.equal(report.integrityEvents[0].type, "<script>");
   assert.equal(report.integrityEvents[0].detail, "<b>stopped</b>");
   assert.deepEqual(report.integrityEvents[0].sourceEventIds, ["1"]);
   assert.equal(report.hintsUsed, 0);
-  assert.equal(sanitizeReport({ hintsUsed: JSON.parse("1e999") }).hintsUsed, 0, "non-finite counts collapse to 0, like scores");
-  assert.equal(sanitizeReport({ hintsUsed: 500 }).hintsUsed, 99, "absurd counts are clamped");
+  assert.equal(
+    sanitizeReport({ hintsUsed: JSON.parse("1e999") }).hintsUsed,
+    0,
+    "non-finite counts collapse to 0, like scores",
+  );
+  assert.equal(
+    sanitizeReport({ hintsUsed: 500 }).hintsUsed,
+    99,
+    "absurd counts are clamped",
+  );
 
   // A closed set. The page turns this into a replay row and stores it, so a
   // value from an agent that ends sessions some way this build does not know
   // about reads as "cannot say" rather than as a decision nobody made.
   assert.equal(sanitizeReport({ endReason: "time_up" }).endReason, "time_up");
-  assert.equal(sanitizeReport({ endReason: "interview_complete" }).endReason, "interview_complete");
-  assert.equal(sanitizeReport({ endReason: "abandoned_by_llm" }).endReason, null);
-  assert.equal(sanitizeReport({}).endReason, null, "a report from before the field carries none");
+  assert.equal(
+    sanitizeReport({ endReason: "interview_complete" }).endReason,
+    "interview_complete",
+  );
+  assert.equal(
+    sanitizeReport({ endReason: "abandoned_by_llm" }).endReason,
+    null,
+  );
+  assert.equal(
+    sanitizeReport({}).endReason,
+    null,
+    "a report from before the field carries none",
+  );
 });
 
 // `/api/reports` answers an oversized body with a 413 the UI has nothing to do
@@ -593,7 +1044,10 @@ test("sanitizeReport clamps scores and strips markup from a hostile report", () 
 // points are the unit the bounds are counted in, so that is the worst case.
 test("sanitizeReport bounds text so the largest possible report still fits", () => {
   const long = "\u{1F3A5}".repeat(50_000);
-  const full = { strengths: [long, long, long, long], improvements: [long, long, long, long] };
+  const full = {
+    strengths: [long, long, long, long],
+    improvements: [long, long, long, long],
+  };
   const report = sanitizeReport({
     summary: long,
     codingFeedback: full,
@@ -617,7 +1071,10 @@ test("sanitizeReport bounds text so the largest possible report still fits", () 
   // 27: `MAX_INTEGRITY_EVENTS` in src/agent.rs caps the evidence at 25, and the
   // report packet merges the first and last heartbeat in beside it.
   assert.equal(report.integrityEvents.length, 27);
-  assert.ok(new TextEncoder().encode(JSON.stringify(report)).length < 64 * 1024, "MAX_REPORT_BYTES in src/web/mod.rs");
+  assert.ok(
+    new TextEncoder().encode(JSON.stringify(report)).length < 64 * 1024,
+    "MAX_REPORT_BYTES in src/web/mod.rs",
+  );
 });
 
 // A report with nothing in it is stored in localStorage and POSTed to
@@ -634,14 +1091,26 @@ test("sanitizeReport keeps an unevaluated session unevaluated", () => {
   });
 
   assert.equal(report.incomplete, true);
-  assert.equal(report.decision, undefined, "no verdict may be invented on the way out of storage");
+  assert.equal(
+    report.decision,
+    undefined,
+    "no verdict may be invented on the way out of storage",
+  );
   assert.equal(report.codingScore, undefined);
   assert.equal(report.communicationScore, undefined);
-  assert.ok(report.summary.includes(diagnostic), "the agent's bounded diagnostic survives browser sanitizing");
+  assert.ok(
+    report.summary.includes(diagnostic),
+    "the agent's bounded diagnostic survives browser sanitizing",
+  );
   assert.match(report.summary, /produced no evaluation/);
 
   // And a scored report is untouched by the new branch.
-  const scored = sanitizeReport({ codingScore: 82, communicationScore: 74, decision: "HIRE", hintsUsed: 1 });
+  const scored = sanitizeReport({
+    codingScore: 82,
+    communicationScore: 74,
+    decision: "HIRE",
+    hintsUsed: 1,
+  });
   assert.equal(scored.incomplete, undefined);
   assert.equal(scored.decision, "HIRE");
 });
@@ -658,8 +1127,24 @@ test("sanitizeReport preserves a well-formed agent report", () => {
     decision: "HIRE",
     summary: "You solved it.",
     codingFeedback: { strengths: ["clear"], improvements: ["edge cases"] },
-    communicationFeedback: { strengths: ["narrated"], improvements: ["slow down"] },
-    integrityEvents: [{ type: "SESSION_START", at: "now", severity: "info", source: "media", durationMs: 0, seq: 1, prevHash: "", hash: "a".repeat(64), detail: null, sourceEventIds: [] }],
+    communicationFeedback: {
+      strengths: ["narrated"],
+      improvements: ["slow down"],
+    },
+    integrityEvents: [
+      {
+        type: "SESSION_START",
+        at: "now",
+        severity: "info",
+        source: "media",
+        durationMs: 0,
+        seq: 1,
+        prevHash: "",
+        hash: "a".repeat(64),
+        detail: null,
+        sourceEventIds: [],
+      },
+    ],
     integrityChainSeq: 412,
     integrityDropped: 380,
     hintsUsed: 2,
@@ -676,8 +1161,24 @@ test("sanitizeReport preserves a well-formed agent report", () => {
     decision: "HIRE",
     summary: "You solved it.",
     codingFeedback: { strengths: ["clear"], improvements: ["edge cases"] },
-    communicationFeedback: { strengths: ["narrated"], improvements: ["slow down"] },
-    integrityEvents: [{ type: "SESSION_START", at: "now", severity: "info", source: "media", durationMs: 0, seq: 1, prevHash: "", hash: "a".repeat(64), detail: null, sourceEventIds: [] }],
+    communicationFeedback: {
+      strengths: ["narrated"],
+      improvements: ["slow down"],
+    },
+    integrityEvents: [
+      {
+        type: "SESSION_START",
+        at: "now",
+        severity: "info",
+        source: "media",
+        durationMs: 0,
+        seq: 1,
+        prevHash: "",
+        hash: "a".repeat(64),
+        detail: null,
+        sourceEventIds: [],
+      },
+    ],
     // The event list is one row and the chain reached 412, which is the whole
     // point of carrying these: the list is a subsequence and says so.
     integrityChainSeq: 412,
@@ -699,7 +1200,12 @@ test("a scored summary reaches the candidate whole", () => {
   // other branch, asserted where that branch is tested.
   const prose = "You explained the invariant clearly. ".repeat(12).trim();
   assert.equal(
-    sanitizeReport({ codingScore: 82, communicationScore: 74, decision: "HIRE", summary: prose }).summary,
+    sanitizeReport({
+      codingScore: 82,
+      communicationScore: 74,
+      decision: "HIRE",
+      summary: prose,
+    }).summary,
     prose,
   );
 });
@@ -710,7 +1216,11 @@ test("report contract migration preserves legacy and rejects unknown provenance"
   assert.equal(legacy.summary, "old report");
 
   const active = ACTIVE_CONTRACT;
-  assert.deepEqual(sanitizeReport({ incomplete: true, interviewContract: active }).interviewContract, active);
+  assert.deepEqual(
+    sanitizeReport({ incomplete: true, interviewContract: active })
+      .interviewContract,
+    active,
+  );
   const activeScored = sanitizeReport({
     codingScore: 71,
     communicationScore: 61,
@@ -722,21 +1232,44 @@ test("report contract migration preserves legacy and rejects unknown provenance"
 
   // Bundle 5 shares the rubric and the schema, so its scores survive the bump
   // and the report still names the bundle that produced it.
-  const previous = { ...active, bundleVersion: 5, livePromptVersion: 1, reportPromptVersion: 4, reportSchemaVersion: 1 };
-  const kept = sanitizeReport({ codingScore: 70, communicationScore: 60, decision: "NO_HIRE", interviewContract: previous });
+  const previous = {
+    ...active,
+    bundleVersion: 5,
+    livePromptVersion: 1,
+    reportPromptVersion: 4,
+    reportSchemaVersion: 1,
+  };
+  const kept = sanitizeReport({
+    codingScore: 70,
+    communicationScore: 60,
+    decision: "NO_HIRE",
+    interviewContract: previous,
+  });
   assert.deepEqual(kept.interviewContract, previous);
   assert.equal(kept.codingScore, 70);
-  assert.doesNotMatch(kept.summary, /unsupported or malformed interview contract/);
+  assert.doesNotMatch(
+    kept.summary,
+    /unsupported or malformed interview contract/,
+  );
 
   for (const interviewContract of [
-    { ...active, bundleVersion: 3, livePromptVersion: 1, reportPromptVersion: 3 },
+    {
+      ...active,
+      bundleVersion: 3,
+      livePromptVersion: 1,
+      reportPromptVersion: 3,
+    },
     { ...previous, rubricVersion: 2 },
     { ...active, reportSchemaVersion: 3 },
     { ...active, rubricVersion: "1" },
     { ...active, extra: 1 },
     null,
   ]) {
-    const report = sanitizeReport({ codingScore: 99, decision: "HIRE", interviewContract });
+    const report = sanitizeReport({
+      codingScore: 99,
+      decision: "HIRE",
+      interviewContract,
+    });
     assert.equal(report.incomplete, true);
     assert.match(report.summary, /unsupported or malformed interview contract/);
     assert.equal("codingScore" in report, false);
@@ -758,7 +1291,9 @@ test("sanitizeReport keeps the stamped fields on a normal report", () => {
     topics: ["Array", "Hash Table"],
     practiceLevel: "staff",
   });
-  assert.deepEqual(report.debrief.hints, [{ text: "What would you remember?", given: true }]);
+  assert.deepEqual(report.debrief.hints, [
+    { text: "What would you remember?", given: true },
+  ]);
   assert.deepEqual(report.topics, ["Array", "Hash Table"]);
   assert.equal(report.practiceLevel, "staff");
 });
@@ -766,7 +1301,11 @@ test("sanitizeReport keeps the stamped fields on a normal report", () => {
 test("sanitizeReport keeps the stamped fields on an incomplete report", () => {
   const report = sanitizeReport({
     incomplete: true,
-    debrief: { scenarioContract: "Return one matching pair.", hints: [], followUps: [] },
+    debrief: {
+      scenarioContract: "Return one matching pair.",
+      hints: [],
+      followUps: [],
+    },
     topics: ["Array"],
     practiceLevel: null,
   });
@@ -799,14 +1338,20 @@ test("a prompt-only bump is still scored", () => {
     livePromptVersion: ACTIVE_CONTRACT.livePromptVersion - 1,
     reportPromptVersion: ACTIVE_CONTRACT.reportPromptVersion - 1,
   };
-  const report = sanitizeReport({ codingScore: 70, interviewContract: previousPrompts });
+  const report = sanitizeReport({
+    codingScore: 70,
+    interviewContract: previousPrompts,
+  });
   assert.equal(report.codingScore, 70);
 });
 
 test("a rubric bump is not scored under the old rubric", () => {
   const report = sanitizeReport({
     codingScore: 70,
-    interviewContract: { ...ACTIVE_CONTRACT, rubricVersion: ACTIVE_CONTRACT.rubricVersion + 1 },
+    interviewContract: {
+      ...ACTIVE_CONTRACT,
+      rubricVersion: ACTIVE_CONTRACT.rubricVersion + 1,
+    },
   });
   assert.equal(report.incomplete, true);
 });
@@ -814,7 +1359,10 @@ test("a rubric bump is not scored under the old rubric", () => {
 test("a future bundle is not scored", () => {
   const report = sanitizeReport({
     codingScore: 70,
-    interviewContract: { ...ACTIVE_CONTRACT, bundleVersion: ACTIVE_CONTRACT.bundleVersion + 1 },
+    interviewContract: {
+      ...ACTIVE_CONTRACT,
+      bundleVersion: ACTIVE_CONTRACT.bundleVersion + 1,
+    },
   });
   assert.equal(report.incomplete, true);
 });
@@ -828,33 +1376,75 @@ test("a bundle below the floor is not scored", () => {
 });
 
 test("round summaries require plan-consistent kinds budgets and statuses", () => {
-  const coding = sanitizeReport({ interviewLoop: "coding_only", rounds: [
-    { kind: "coding", budgetMin: 45, status: "complete" },
-    { kind: "behavioral", budgetMin: 0, status: "not_configured" },
-  ] });
+  const coding = sanitizeReport({
+    interviewLoop: "coding_only",
+    rounds: [
+      { kind: "coding", budgetMin: 45, status: "complete" },
+      { kind: "behavioral", budgetMin: 0, status: "not_configured" },
+    ],
+  });
   assert.equal(coding.interviewLoop, "coding_only");
   assert.equal(coding.rounds[0].status, "complete");
-  const combined = sanitizeReport({ rounds: [
-    { kind: "coding", budgetMin: 37, status: "incomplete" },
-    { kind: "behavioral", budgetMin: 8, status: "skipped" },
-  ] });
+  const combined = sanitizeReport({
+    rounds: [
+      { kind: "coding", budgetMin: 37, status: "incomplete" },
+      { kind: "behavioral", budgetMin: 8, status: "skipped" },
+    ],
+  });
   assert.equal(combined.rounds[1].status, "skipped");
   for (const rounds of [
-    [{ kind: "behavioral", budgetMin: 8, status: "started" }, { kind: "coding", budgetMin: 37, status: "complete" }],
-    [{ kind: "coding", budgetMin: 37, status: "started" }, { kind: "behavioral", budgetMin: 8, status: "complete" }],
-    [{ kind: "coding", budgetMin: 37, status: "complete" }, { kind: "behavioral", budgetMin: 7, status: "complete" }],
-  ]) assert.deepEqual(sanitizeReport({ rounds }).rounds, []);
+    [
+      { kind: "behavioral", budgetMin: 8, status: "started" },
+      { kind: "coding", budgetMin: 37, status: "complete" },
+    ],
+    [
+      { kind: "coding", budgetMin: 37, status: "started" },
+      { kind: "behavioral", budgetMin: 8, status: "complete" },
+    ],
+    [
+      { kind: "coding", budgetMin: 37, status: "complete" },
+      { kind: "behavioral", budgetMin: 7, status: "complete" },
+    ],
+  ])
+    assert.deepEqual(sanitizeReport({ rounds }).rounds, []);
 });
 
 test("framework assessment requires ten unique scores or explicit gaps", () => {
-  const phases = ["Repeat", "Example", "Algorithm", "Coding", "Test", "Optimizations", "Situation", "Task", "Action", "Result"];
+  const phases = [
+    "Repeat",
+    "Example",
+    "Algorithm",
+    "Coding",
+    "Test",
+    "Optimizations",
+    "Situation",
+    "Task",
+    "Action",
+    "Result",
+  ];
   const base = {
     codingFeedback: { improvements: ["Explain complexity"] },
     communicationFeedback: { improvements: [] },
-    improvementPlan: [{ phase: "Algorithm", weakness: "Explain complexity", impact: "high", frequency: 1, drill: "Narrate", durationMin: 5, successCriterion: "Justify bounds", selfReview: ["time"] }],
+    improvementPlan: [
+      {
+        phase: "Algorithm",
+        weakness: "Explain complexity",
+        impact: "high",
+        frequency: 1,
+        drill: "Narrate",
+        durationMin: 5,
+        successCriterion: "Justify bounds",
+        selfReview: ["time"],
+      },
+    ],
     frameworkAssessment: {
       rubricVersion: 1,
-      phases: phases.map((phase) => ({ phase, score: phase === "Algorithm" ? 72 : null, weaknessTags: phase === "Algorithm" ? ["Explain complexity", "invented"] : [] })),
+      phases: phases.map((phase) => ({
+        phase,
+        score: phase === "Algorithm" ? 72 : null,
+        weaknessTags:
+          phase === "Algorithm" ? ["Explain complexity", "invented"] : [],
+      })),
     },
   };
   const assessment = sanitizeReport(base).frameworkAssessment;
@@ -873,21 +1463,71 @@ test("framework assessment requires ten unique scores or explicit gaps", () => {
 test("framework evidence preserves valid kinds and drops hostile or contradictory rows", () => {
   const report = sanitizeReport({
     frameworkEvidence: [
-      { atMs: 9000, phase: "algorithm", source: "candidate_speech", kind: "observed", confidence: 90, summary: "Explained invariant", frameworkVersion: 1, future: "ignored" },
-      { atMs: 4000, phase: "test", source: "test_event", kind: "inferred", confidence: 70, summary: "Predicted a boundary", frameworkVersion: 1 },
-      { atMs: 12000, phase: "result", source: "session_timing", kind: "skipped", confidence: 100, summary: "Cutoff prevented assessment", frameworkVersion: 1 },
-      { atMs: 1, phase: "<script>", source: "candidate_speech", kind: "observed", confidence: 100, summary: "bad", frameworkVersion: 1 },
-      { atMs: 2, phase: "action", source: "session_timing", kind: "observed", confidence: 100, summary: "contradiction", frameworkVersion: 1 },
+      {
+        atMs: 9000,
+        phase: "algorithm",
+        source: "candidate_speech",
+        kind: "observed",
+        confidence: 90,
+        summary: "Explained invariant",
+        frameworkVersion: 1,
+        future: "ignored",
+      },
+      {
+        atMs: 4000,
+        phase: "test",
+        source: "test_event",
+        kind: "inferred",
+        confidence: 70,
+        summary: "Predicted a boundary",
+        frameworkVersion: 1,
+      },
+      {
+        atMs: 12000,
+        phase: "result",
+        source: "session_timing",
+        kind: "skipped",
+        confidence: 100,
+        summary: "Cutoff prevented assessment",
+        frameworkVersion: 1,
+      },
+      {
+        atMs: 1,
+        phase: "<script>",
+        source: "candidate_speech",
+        kind: "observed",
+        confidence: 100,
+        summary: "bad",
+        frameworkVersion: 1,
+      },
+      {
+        atMs: 2,
+        phase: "action",
+        source: "session_timing",
+        kind: "observed",
+        confidence: 100,
+        summary: "contradiction",
+        frameworkVersion: 1,
+      },
     ],
   });
-  assert.deepEqual(report.frameworkEvidence.map((item) => item.kind), ["inferred", "observed", "skipped"]);
-  assert.equal(report.frameworkEvidence[1].future, "ignored", "unknown fields round-trip but are never rendered");
+  assert.deepEqual(
+    report.frameworkEvidence.map((item) => item.kind),
+    ["inferred", "observed", "skipped"],
+  );
+  assert.equal(
+    report.frameworkEvidence[1].future,
+    "ignored",
+    "unknown fields round-trip but are never rendered",
+  );
 
-  const protoField = sanitizeReport(JSON.parse(`{"frameworkEvidence":[{
+  const protoField = sanitizeReport(
+    JSON.parse(`{"frameworkEvidence":[{
     "atMs":1000,"phase":"algorithm","source":"candidate_speech","kind":"observed",
     "confidence":90,"summary":"Explained invariant","frameworkVersion":1,
     "__proto__":"newer report field"
-  }]}`)).frameworkEvidence[0];
+  }]}`),
+  ).frameworkEvidence[0];
   assert.equal(Object.hasOwn(protoField, "__proto__"), true);
   assert.equal(protoField.__proto__, "newer report field");
 
@@ -895,22 +1535,49 @@ test("framework evidence preserves valid kinds and drops hostile or contradictor
   // The account sync refuses an oversized report outright rather than
   // trimming it, so one unbounded field here costs the whole account copy.
   const huge = sanitizeReport({
-    frameworkEvidence: [{
-      atMs: 1000, phase: "algorithm", source: "candidate_speech", kind: "observed",
-      confidence: 90, summary: "Explained invariant", frameworkVersion: 1,
-      future: "x".repeat(4096),
-    }],
+    frameworkEvidence: [
+      {
+        atMs: 1000,
+        phase: "algorithm",
+        source: "candidate_speech",
+        kind: "observed",
+        confidence: 90,
+        summary: "Explained invariant",
+        frameworkVersion: 1,
+        future: "x".repeat(4096),
+      },
+    ],
   });
-  assert.equal(huge.frameworkEvidence.length, 1, "the row itself is still kept");
-  assert.equal(huge.frameworkEvidence[0].future, undefined, "the payload is not");
+  assert.equal(
+    huge.frameworkEvidence.length,
+    1,
+    "the row itself is still kept",
+  );
+  assert.equal(
+    huge.frameworkEvidence[0].future,
+    undefined,
+    "the payload is not",
+  );
   assert.equal(huge.frameworkEvidence[0].summary, "Explained invariant");
   assert.deepEqual(sanitizeReport({}).frameworkEvidence, []);
 });
 
 test("invalid framework rows cannot crowd valid evidence out of the cap", () => {
   const hostile = Array.from({ length: 64 }, () => ({ phase: "hostile" }));
-  const valid = { atMs: 1, phase: "repeat", source: "candidate_speech", kind: "observed", confidence: 80, summary: "Restated the problem", frameworkVersion: 1 };
-  assert.deepEqual(sanitizeReport({ frameworkEvidence: [...hostile, valid] }).frameworkEvidence, [valid]);
+  const valid = {
+    atMs: 1,
+    phase: "repeat",
+    source: "candidate_speech",
+    kind: "observed",
+    confidence: 80,
+    summary: "Restated the problem",
+    frameworkVersion: 1,
+  };
+  assert.deepEqual(
+    sanitizeReport({ frameworkEvidence: [...hostile, valid] })
+      .frameworkEvidence,
+    [valid],
+  );
 });
 
 test("improvement plan drops unrelated and hostile items and ranks valid drills", () => {
@@ -918,14 +1585,62 @@ test("improvement plan drops unrelated and hostile items and ranks valid drills"
     codingFeedback: { improvements: ["Explain complexity", "Test boundaries"] },
     communicationFeedback: { improvements: ["Name your action"] },
     improvementPlan: [
-      { phase: "Test", weakness: "Test boundaries", impact: "low", frequency: 2, drill: "Build a test table", durationMin: 99, successCriterion: "Cover four classes", selfReview: ["boundary"] },
-      { phase: "Algorithm", weakness: "Explain complexity", impact: "high", frequency: 3, drill: "Narrate complexity", durationMin: 10, successCriterion: "Justify both bounds", selfReview: ["time", "space"] },
-      { phase: "Action", weakness: "Name your action", impact: "medium", frequency: 1, drill: "Rewrite my contribution", durationMin: 5, successCriterion: "Name my decision", selfReview: ["Uses I"] },
-      { phase: "Action", weakness: "unrelated", impact: "high", frequency: 9, drill: "bad", durationMin: 5, successCriterion: "bad", selfReview: ["bad"] },
-      { phase: "<script>", weakness: "Name your action", impact: "high", frequency: 1, drill: "bad", durationMin: 5, successCriterion: "bad", selfReview: ["bad"] },
+      {
+        phase: "Test",
+        weakness: "Test boundaries",
+        impact: "low",
+        frequency: 2,
+        drill: "Build a test table",
+        durationMin: 99,
+        successCriterion: "Cover four classes",
+        selfReview: ["boundary"],
+      },
+      {
+        phase: "Algorithm",
+        weakness: "Explain complexity",
+        impact: "high",
+        frequency: 3,
+        drill: "Narrate complexity",
+        durationMin: 10,
+        successCriterion: "Justify both bounds",
+        selfReview: ["time", "space"],
+      },
+      {
+        phase: "Action",
+        weakness: "Name your action",
+        impact: "medium",
+        frequency: 1,
+        drill: "Rewrite my contribution",
+        durationMin: 5,
+        successCriterion: "Name my decision",
+        selfReview: ["Uses I"],
+      },
+      {
+        phase: "Action",
+        weakness: "unrelated",
+        impact: "high",
+        frequency: 9,
+        drill: "bad",
+        durationMin: 5,
+        successCriterion: "bad",
+        selfReview: ["bad"],
+      },
+      {
+        phase: "<script>",
+        weakness: "Name your action",
+        impact: "high",
+        frequency: 1,
+        drill: "bad",
+        durationMin: 5,
+        successCriterion: "bad",
+        selfReview: ["bad"],
+      },
     ],
   });
-  assert.deepEqual(report.improvementPlan.map((item) => item.phase), ["Algorithm", "Action", "Test"]);
+  assert.deepEqual(
+    report.improvementPlan.map((item) => item.phase),
+    ["Algorithm", "Action", "Test"],
+  );
   assert.equal(report.improvementPlan[2].durationMin, 30);
 });
 
@@ -933,7 +1648,18 @@ test("a partial improvement plan is rejected instead of hiding an emitted weakne
   const report = sanitizeReport({
     codingFeedback: { improvements: ["Explain complexity", "Test boundaries"] },
     communicationFeedback: { improvements: [] },
-    improvementPlan: [{ phase: "Algorithm", weakness: "Explain complexity", impact: "high", frequency: 1, drill: "Narrate", durationMin: 5, successCriterion: "Justify bounds", selfReview: ["time"] }],
+    improvementPlan: [
+      {
+        phase: "Algorithm",
+        weakness: "Explain complexity",
+        impact: "high",
+        frequency: 1,
+        drill: "Narrate",
+        durationMin: 5,
+        successCriterion: "Justify bounds",
+        selfReview: ["time"],
+      },
+    ],
   });
   assert.deepEqual(report.improvementPlan, []);
 });
@@ -953,9 +1679,15 @@ test("report mode is kept only where a report actually recorded one", () => {
   // and the viewer shows it. Nothing produces one now, so a report without one
   // must not have a mode invented for it: the header would announce a
   // distinction that no longer exists.
-  assert.equal(sanitizeReport({ incomplete: true, mode: "practice" }).mode, "practice");
+  assert.equal(
+    sanitizeReport({ incomplete: true, mode: "practice" }).mode,
+    "practice",
+  );
   assert.equal(sanitizeReport({ incomplete: true }).mode, undefined);
-  assert.equal(sanitizeReport({ incomplete: true, mode: "<script>" }).mode, "scored");
+  assert.equal(
+    sanitizeReport({ incomplete: true, mode: "<script>" }).mode,
+    "scored",
+  );
 });
 
 // The interview clock. Both assertions here are about a value that jumps: the
@@ -995,7 +1727,12 @@ test("the time warning threshold is a level, so no tick can miss it", () => {
 // on the screen. It shipped wrong once, keyed off whether the socket was still
 // open, and rendered a green HIRE badge for a network failure.
 test("a session that reached an interviewer is never scored by the browser", () => {
-  const scored = { joinedRoom: false, passed: 10, total: 10, candidateTurns: 4 };
+  const scored = {
+    joinedRoom: false,
+    passed: 10,
+    total: 10,
+    candidateTurns: 4,
+  };
 
   // Same passing session, but an interviewer was there: no score, no decision,
   // and it says so rather than showing a blank card.
@@ -1008,14 +1745,19 @@ test("a session that reached an interviewer is never scored by the browser", () 
   // `joinedRoom` outranks everything, including a session that produced
   // nothing: the interviewer was there, so the interviewer grades it.
   assert.match(
-    sessionReport({ joinedRoom: true, passed: 0, total: 0, candidateTurns: 0 }).summary,
+    sessionReport({ joinedRoom: true, passed: 0, total: 0, candidateTurns: 0 })
+      .summary,
     /interviewer never returned a report/,
   );
 
   // A report that arrived and could not be drawn is not a report that never
   // came, and this is the sentence a candidate quotes when asking for the
   // session to be looked at.
-  const unreadable = sessionReport({ ...scored, joinedRoom: true, reportUnreadable: true });
+  const unreadable = sessionReport({
+    ...scored,
+    joinedRoom: true,
+    reportUnreadable: true,
+  });
   assert.equal(unreadable.incomplete, true);
   assert.equal(unreadable.decision, undefined);
   assert.doesNotMatch(unreadable.summary, /never returned a report/);
@@ -1032,24 +1774,51 @@ test("a session that reached an interviewer is never scored by the browser", () 
 test("offline practice reports local activity without fabricated evaluation", () => {
   // Nothing ran and nobody spoke: there is no evidence to score, so this is
   // reported as no evaluation rather than as a 40.
-  const empty = sessionReport({ joinedRoom: false, passed: 0, total: 0, candidateTurns: 0 });
+  const empty = sessionReport({
+    joinedRoom: false,
+    passed: 0,
+    total: 0,
+    candidateTurns: 0,
+  });
   assert.equal(empty.incomplete, true);
   assert.match(empty.summary, /No interviewer joined/);
 
   for (const report of [
-    sessionReport({ joinedRoom: false, passed: 0, total: 0, candidateTurns: 1 }),
-    sessionReport({ joinedRoom: false, passed: 2, total: 3, candidateTurns: 0 }),
+    sessionReport({
+      joinedRoom: false,
+      passed: 0,
+      total: 0,
+      candidateTurns: 1,
+    }),
+    sessionReport({
+      joinedRoom: false,
+      passed: 2,
+      total: 3,
+      candidateTurns: 0,
+    }),
   ]) {
     assert.equal(report.incomplete, true);
-    for (const key of ["codingScore", "communicationScore", "decision", "codingFeedback", "communicationFeedback", "frameworkAssessment"]) {
-      assert.equal(report[key], undefined, `${key} must not be fabricated offline`);
+    for (const key of [
+      "codingScore",
+      "communicationScore",
+      "decision",
+      "codingFeedback",
+      "communicationFeedback",
+      "frameworkAssessment",
+    ]) {
+      assert.equal(
+        report[key],
+        undefined,
+        `${key} must not be fabricated offline`,
+      );
     }
   }
 });
 
 test("the caption window opens at a sentence boundary, never mid-word", () => {
   const budget = 40;
-  const said = "I am Jim. We will do Two Sum today. Which language would you like?";
+  const said =
+    "I am Jim. We will do Two Sum today. Which language would you like?";
 
   assert.equal(captionWindow("I am Jim.", budget), "I am Jim.");
   assert.equal(captionWindow(said, budget), "Which language would you like?");
@@ -1064,8 +1833,14 @@ test("the caption window opens at a sentence boundary, never mid-word", () => {
     // trailing space must not read as the window having invented one.
     const grown = said.slice(0, end).trimEnd();
     const window = captionWindow(grown, budget);
-    assert.ok(window.length <= budget, `${window.length} > ${budget}: ${window}`);
-    assert.ok(!window.startsWith("..."), `slid by character at ${end}: ${window}`);
+    assert.ok(
+      window.length <= budget,
+      `${window.length} > ${budget}: ${window}`,
+    );
+    assert.ok(
+      !window.startsWith("..."),
+      `slid by character at ${end}: ${window}`,
+    );
     assert.ok(grown.endsWith(window), `not a suffix at ${end}: ${window}`);
     const before = grown[grown.length - window.length - 1];
     assert.ok(
@@ -1101,7 +1876,10 @@ test("the caption window opens at a sentence boundary, never mid-word", () => {
   // never sees this.
   for (const finished of [`${"x".repeat(50)}. `, `${"x".repeat(50)}...`]) {
     const window = captionWindow(finished, budget);
-    assert.ok(window.trim().length > 0, `blanked the bar on ${JSON.stringify(finished)}`);
+    assert.ok(
+      window.trim().length > 0,
+      `blanked the bar on ${JSON.stringify(finished)}`,
+    );
     assert.ok(window.length <= budget, `${window.length} > ${budget}`);
   }
 });
@@ -1111,40 +1889,74 @@ test("the two frameworks stay apart and tick only what the interviewer banked", 
   // REACTO, and the four behavioral steps are not theirs to think about yet.
   const coding = frameworkChecklist("coding", ["repeat", "algorithm"]);
   assert.equal(coding.name, "REACTO");
-  assert.deepEqual(coding.steps.map((step) => step.id), ["repeat", "example", "algorithm", "coding", "test", "optimizations"]);
-  assert.deepEqual(coding.steps.filter((step) => step.done).map((step) => step.id), ["repeat", "algorithm"]);
+  assert.deepEqual(
+    coding.steps.map((step) => step.id),
+    ["repeat", "example", "algorithm", "coding", "test", "optimizations"],
+  );
+  assert.deepEqual(
+    coding.steps.filter((step) => step.done).map((step) => step.id),
+    ["repeat", "algorithm"],
+  );
 
   const behavioral = frameworkChecklist("behavioral", ["situation", "result"]);
   assert.equal(behavioral.name, "STAR");
-  assert.deepEqual(behavioral.steps.map((step) => step.id), ["situation", "task", "action", "result"]);
-  assert.deepEqual(behavioral.steps.filter((step) => step.done).map((step) => step.id), ["situation", "result"]);
+  assert.deepEqual(
+    behavioral.steps.map((step) => step.id),
+    ["situation", "task", "action", "result"],
+  );
+  assert.deepEqual(
+    behavioral.steps.filter((step) => step.done).map((step) => step.id),
+    ["situation", "result"],
+  );
 
   // The packet is untrusted like every other. An unknown phase is a version
   // skew or someone else's idea of a step, and neither belongs on screen.
-  const hostile = frameworkChecklist("coding", ["repeat", "situation", "<script>", 7, null]);
-  assert.deepEqual(hostile.steps.filter((step) => step.done).map((step) => step.id), ["repeat"]);
+  const hostile = frameworkChecklist("coding", [
+    "repeat",
+    "situation",
+    "<script>",
+    7,
+    null,
+  ]);
+  assert.deepEqual(
+    hostile.steps.filter((step) => step.done).map((step) => step.id),
+    ["repeat"],
+  );
 
   // An unknown round falls back rather than rendering an empty list, because a
   // checklist with no steps reads as an interview with nothing to do.
   assert.equal(frameworkChecklist("nonsense", []).name, "REACTO");
-  assert.deepEqual(frameworkChecklist("coding", "not-a-list").steps.filter((step) => step.done), []);
+  assert.deepEqual(
+    frameworkChecklist("coding", "not-a-list").steps.filter(
+      (step) => step.done,
+    ),
+    [],
+  );
 
   // Every step explains itself. The card is read once, while waiting, so a
   // label with no clause behind it is a step the candidate cannot act on.
   for (const framework of Object.values(FRAMEWORKS)) {
     for (const step of framework.steps) {
-      assert.ok(step.hint && step.hint.length > 10, `${step.id} has no usable explanation`);
+      assert.ok(
+        step.hint && step.hint.length > 10,
+        `${step.id} has no usable explanation`,
+      );
     }
   }
 
   // Each framework says which exercise it is for, so a table of one can stand
   // without borrowing context from a table of the other.
   for (const framework of Object.values(FRAMEWORKS)) {
-    assert.ok(framework.scenario && framework.scenario.length > 20, `${framework.name} does not say what it scores`);
+    assert.ok(
+      framework.scenario && framework.scenario.length > 20,
+      `${framework.name} does not say what it scores`,
+    );
   }
 
   // No id appears in both, or a tick in one round would light up the other.
-  const ids = Object.values(FRAMEWORKS).flatMap((framework) => framework.steps.map((step) => step.id));
+  const ids = Object.values(FRAMEWORKS).flatMap((framework) =>
+    framework.steps.map((step) => step.id),
+  );
   assert.equal(new Set(ids).size, ids.length);
 });
 
@@ -1170,13 +1982,20 @@ test("the two frameworks stay apart and tick only what the interviewer banked", 
 const avatar = (at, state, responseWindow) => ({
   kind: "avatar",
   at,
-  payload: { state, ...(responseWindow === undefined ? {} : { responseWindow }) },
+  payload: {
+    state,
+    ...(responseWindow === undefined ? {} : { responseWindow }),
+  },
 });
 const life = (at, state) => ({ kind: "lifecycle", at, payload: { state } });
 const said = (at, speaker, text, responseWindow) => ({
   kind: "transcript",
   at,
-  payload: { speaker, text, ...(responseWindow === undefined ? {} : { responseWindow }) },
+  payload: {
+    speaker,
+    text,
+    ...(responseWindow === undefined ? {} : { responseWindow }),
+  },
 });
 
 test("a response window pairs listening with the next close", () => {
@@ -1191,7 +2010,10 @@ test("a response window pairs listening with the next close", () => {
   assert.equal(windows.length, 1);
   assert.equal(windows[0].at, 2000);
   assert.equal(windows[0].duration, 4500);
-  assert.deepEqual(windows[0].turn, { at: 6000, text: "I would use a hash map" });
+  assert.deepEqual(windows[0].turn, {
+    at: 6000,
+    text: "I would use a hash map",
+  });
   // The position of the row that opened it, so the page can put the window
   // beside the moment it happened over without re-deriving the order from `at`.
   assert.equal(windows[0].index, 2);
@@ -1309,11 +2131,18 @@ test("a re-prompt closes the unanswered window and opens its own", () => {
     avatar(3000, "thinking"),
     avatar(4000, "listening"),
   ]);
-  assert.equal(stray.length, 1, "a listening after a thinking follows no question");
+  assert.equal(
+    stray.length,
+    1,
+    "a listening after a thinking follows no question",
+  );
   assert.equal(stray[0].duration, 1000);
 
   // An `avatar` state nothing here pairs on neither opens nor closes anything.
-  assert.deepEqual(responseWindows([avatar(0, "initializing"), avatar(1, "speaking")]), []);
+  assert.deepEqual(
+    responseWindows([avatar(0, "initializing"), avatar(1, "speaking")]),
+    [],
+  );
 });
 
 test("a thinking before its listening measures nothing rather than a negative", () => {
@@ -1330,8 +2159,11 @@ test("a thinking before its listening measures nothing rather than a negative", 
 
   // Zero is a measurement and stays one.
   assert.equal(
-    responseWindows([avatar(0, "speaking"), avatar(9000, "listening"), avatar(9000, "thinking")])[0]
-      .duration,
+    responseWindows([
+      avatar(0, "speaking"),
+      avatar(9000, "listening"),
+      avatar(9000, "thinking"),
+    ])[0].duration,
     0,
   );
 
@@ -1351,14 +2183,23 @@ test("a replay body that is not a list is an empty replay, not a throw", () => {
   // sentence ready to explain itself.
   for (const nonsense of [undefined, null, "events", 5, {}, { events: [] }]) {
     assert.deepEqual(responseWindows(nonsense), [], JSON.stringify(nonsense));
-    assert.deepEqual(replayTimeline(nonsense), { moments: [], windows: [], timeline: [] });
+    assert.deepEqual(replayTimeline(nonsense), {
+      moments: [],
+      windows: [],
+      timeline: [],
+    });
   }
 
   // A transcript with nothing in it is not a turn. Our own producer guards on
   // `text.trim()` and cannot emit one, which is exactly why nothing downstream
   // would notice if a later one did: the window would silently lose the note
   // saying it holds no transcript.
-  for (const empty of [{}, { speaker: "you" }, { speaker: "you", text: "   " }, { speaker: "you", text: { a: 1 } }]) {
+  for (const empty of [
+    {},
+    { speaker: "you" },
+    { speaker: "you", text: "   " },
+    { speaker: "you", text: { a: 1 } },
+  ]) {
     const windows = responseWindows([
       avatar(0, "speaking"),
       avatar(100, "listening"),
@@ -1370,7 +2211,12 @@ test("a replay body that is not a list is an empty replay, not a throw", () => {
 
   // A null element is skipped rather than read.
   assert.equal(
-    responseWindows([null, avatar(0, "speaking"), avatar(1, "listening"), undefined]).length,
+    responseWindows([
+      null,
+      avatar(0, "speaking"),
+      avatar(1, "listening"),
+      undefined,
+    ]).length,
     1,
   );
 });
@@ -1381,7 +2227,11 @@ test("the replay timeline interleaves windows with the moments without joining t
   // prefix, so a window mixed into that array would shift every index and then
   // be scanned over as neither an editor nor a test snapshot.
   const editor = (at, code) => ({ kind: "editor", at, payload: { code } });
-  const tests = (at, passed) => ({ kind: "tests", at, payload: { passed, total: 5 } });
+  const tests = (at, passed) => ({
+    kind: "tests",
+    at,
+    payload: { passed, total: 5 },
+  });
   const events = [
     avatar(-100, "speaking"),
     avatar(0, "listening"),
@@ -1431,7 +2281,13 @@ test("the contract this build scores is the shape sanitizeReport accepts", () =>
   // rather than asserts.
   assert.deepEqual(
     Object.keys(ACTIVE_CONTRACT).sort(),
-    ["bundleVersion", "livePromptVersion", "reportPromptVersion", "reportSchemaVersion", "rubricVersion"],
+    [
+      "bundleVersion",
+      "livePromptVersion",
+      "reportPromptVersion",
+      "reportSchemaVersion",
+      "rubricVersion",
+    ],
     "five versions, and a sixth added without a migration fails here",
   );
   // The bounds `reportContract` enforces on a report's own bundle. A build
@@ -1459,11 +2315,19 @@ test("the window label says only what its words table gives it", () => {
   const table = read("web/replay.js");
   const keys = [
     ...table
-      .slice(table.indexOf("const WINDOW_WORDS = {"), table.indexOf("\n};", table.indexOf("const WINDOW_WORDS = {")))
+      .slice(
+        table.indexOf("const WINDOW_WORDS = {"),
+        table.indexOf("\n};", table.indexOf("const WINDOW_WORDS = {")),
+      )
       .matchAll(/^\s{2}(\w+):/gm),
   ].map((match) => match[1]);
-  assert.ok(keys.length >= 5, `only ${keys.length} words found in WINDOW_WORDS`);
-  const sentinels = Object.fromEntries(keys.map((key, index) => [key, `Q${index}q`]));
+  assert.ok(
+    keys.length >= 5,
+    `only ${keys.length} words found in WINDOW_WORDS`,
+  );
+  const sentinels = Object.fromEntries(
+    keys.map((key, index) => [key, `Q${index}q`]),
+  );
   // Every field of a window crossed with every other, rather than the cells
   // somebody thought of. Enumerating by hand missed the no-duration-with-a-turn
   // cell once, and then missed `at` entirely: every span was `at: 0`, so a
@@ -1485,7 +2349,8 @@ test("the window label says only what its words table gives it", () => {
   for (const span of spans) {
     const parts = responseWindowLabel(span, sentinels);
     let rest = parts.join("|");
-    for (const value of Object.values(sentinels)) rest = rest.split(value).join("");
+    for (const value of Object.values(sentinels))
+      rest = rest.split(value).join("");
     // What survives is a clock reading and the separators between it, which is
     // the only thing in the label that is not a word somebody chose. Stricter
     // than "no letters", and implying it.
@@ -1507,7 +2372,12 @@ test("the window label says only what its words table gives it", () => {
   // unclosed one carries invisible, which is the same "no fixture sets it" hole
   // one layer up.
   const shapes = [
-    [avatar(0, "speaking"), avatar(1000, "listening"), said(2000, "you", "x"), avatar(3000, "speaking")],
+    [
+      avatar(0, "speaking"),
+      avatar(1000, "listening"),
+      said(2000, "you", "x"),
+      avatar(3000, "speaking"),
+    ],
     [avatar(0, "speaking"), avatar(1000, "listening")],
     [
       avatar(0, "speaking"),
@@ -1515,18 +2385,29 @@ test("the window label says only what its words table gives it", () => {
       avatar(1000, "listening"),
       avatar(9000, "speaking"),
     ],
-    [avatar(0, "speaking"), avatar(9000, "listening"), avatar(1000, "speaking")],
+    [
+      avatar(0, "speaking"),
+      avatar(9000, "listening"),
+      avatar(1000, "speaking"),
+    ],
   ];
   const real = shapes.flatMap((rows) => responseWindows(rows));
-  assert.ok(real.length >= shapes.length, "every shape produced a window to read keys off");
+  assert.ok(
+    real.length >= shapes.length,
+    "every shape produced a window to read keys off",
+  );
   assert.deepEqual(
     [...new Set(real.flatMap((span) => Object.keys(span)))].sort(),
     ["at", "duration", "index", "matched", "paused", "turn"],
     "a field added to a window is one the sentinels above never set and never see",
   );
   assert.deepEqual(
-    Object.keys(spans[0]).sort().filter((key) => key !== "index"),
-    Object.keys(real[0]).sort().filter((key) => key !== "index"),
+    Object.keys(spans[0])
+      .sort()
+      .filter((key) => key !== "index"),
+    Object.keys(real[0])
+      .sort()
+      .filter((key) => key !== "index"),
     "and the sentinel spans carry every field a real one does",
   );
 
@@ -1536,16 +2417,36 @@ test("the window label says only what its words table gives it", () => {
   // silently missing the one caveat it needed.
   const label = (span) => responseWindowLabel(span, sentinels);
   const turn = { at: 1, text: "a hash map" };
-  assert.deepEqual(label({ at: 1, duration: 4200, turn }), [sentinels.label, `4.2${sentinels.seconds}`]);
-  assert.deepEqual(label({ at: 1, duration: 0, turn }), [sentinels.label, `0.0${sentinels.seconds}`]);
+  assert.deepEqual(label({ at: 1, duration: 4200, turn }), [
+    sentinels.label,
+    `4.2${sentinels.seconds}`,
+  ]);
+  assert.deepEqual(label({ at: 1, duration: 0, turn }), [
+    sentinels.label,
+    `0.0${sentinels.seconds}`,
+  ]);
   assert.deepEqual(
     label({ at: 1, duration: null, turn: null, matched: true }),
     [sentinels.label, sentinels.unmeasured, sentinels.noTurn],
   );
-  assert.deepEqual(label({ at: 1, duration: null, turn }), [sentinels.label, sentinels.unmeasured]);
+  assert.deepEqual(label({ at: 1, duration: null, turn }), [
+    sentinels.label,
+    sentinels.unmeasured,
+  ]);
   assert.deepEqual(
-    label({ at: 1, duration: 300_000, turn: null, paused: true, matched: true }),
-    [sentinels.label, `300.0${sentinels.seconds}`, sentinels.paused, sentinels.noTurn],
+    label({
+      at: 1,
+      duration: 300_000,
+      turn: null,
+      paused: true,
+      matched: true,
+    }),
+    [
+      sentinels.label,
+      `300.0${sentinels.seconds}`,
+      sentinels.paused,
+      sentinels.noTurn,
+    ],
     "a paused window says so before it says nothing was recorded",
   );
 
@@ -1582,7 +2483,11 @@ test("a turn recorded after the interviewer moved on still closes its window", (
     avatar(4500, "speaking"),
   ]);
   assert.equal(windows.length, 1);
-  assert.equal(windows[0].duration, 3000, "the duration is still the two avatar rows");
+  assert.equal(
+    windows[0].duration,
+    3000,
+    "the duration is still the two avatar rows",
+  );
   assert.equal(windows[0].turn.text, "a hash map");
 
   // That a turn cannot reach back past a question the interviewer has since
@@ -1605,7 +2510,11 @@ test("a turn recorded after the interviewer moved on still closes its window", (
     avatar(1000, "thinking"),
     said(2000, "you", "goodbye"),
   ]);
-  assert.equal(legacy[0].turn, null, "a markerless row after the close is ambiguous");
+  assert.equal(
+    legacy[0].turn,
+    null,
+    "a markerless row after the close is ambiguous",
+  );
 });
 
 test("a delayed turn is matched by when its stream started", () => {
@@ -1622,7 +2531,11 @@ test("a delayed turn is matched by when its stream started", () => {
     ["the first answer", null],
   );
 
-  events[4] = { kind: "transcript", at: 7000, payload: { speaker: "you", text: "legacy" } };
+  events[4] = {
+    kind: "transcript",
+    at: 7000,
+    payload: { speaker: "you", text: "legacy" },
+  };
   assert.deepEqual(
     responseWindows(events).map((span) => span.turn?.text ?? null),
     [null, null],
@@ -1667,7 +2580,9 @@ test("windows are computed from the two states the server actually publishes", (
   // Anchored loosely enough to catch a third state however it is declared: a
   // pattern that only matched the exact current spelling would fail open on a
   // `pub const`, which is the direction a pin must never fail.
-  const declared = [...livekit.matchAll(/const\s+(AGENT_STATE_\w+)\s*:\s*&str\s*=\s*"(\w+)"/g)];
+  const declared = [
+    ...livekit.matchAll(/const\s+(AGENT_STATE_\w+)\s*:\s*&str\s*=\s*"(\w+)"/g),
+  ];
   const published = new Set(declared.map((match) => match[2]));
   assert.deepEqual(published, new Set(["listening", "speaking"]));
   // And nothing publishes a state that is not one of those constants. Matched
@@ -1675,15 +2590,19 @@ test("windows are computed from the two states the server actually publishes", (
   // and this file already contains one wrapped that way: a pattern requiring the
   // close paren on the same line matched no wrapped call at all, so a fourth
   // state added in the shape the formatter produces failed this open.
-  const publishes = [...livekit.matchAll(/(?<!fn )set_agent_state\(([^{};]*?)\)\s*\.await/g)].map(
-    (match) =>
-      match[1]
-        .split(",")
-        .map((argument) => argument.trim())
-        .filter(Boolean)
-        .at(-1),
+  const publishes = [
+    ...livekit.matchAll(/(?<!fn )set_agent_state\(([^{};]*?)\)\s*\.await/g),
+  ].map((match) =>
+    match[1]
+      .split(",")
+      .map((argument) => argument.trim())
+      .filter(Boolean)
+      .at(-1),
   );
-  assert.ok(publishes.length >= declared.length, `only ${publishes.length} publishes found`);
+  assert.ok(
+    publishes.length >= declared.length,
+    `only ${publishes.length} publishes found`,
+  );
   assert.deepEqual(
     new Set(publishes),
     new Set(declared.map((match) => match[1])),
@@ -1696,11 +2615,17 @@ test("windows are computed from the two states the server actually publishes", (
     );
   }
   assert.ok(
-    !recorded.some((event) => !published.has(event.payload?.state ?? "listening")),
+    !recorded.some(
+      (event) => !published.has(event.payload?.state ?? "listening"),
+    ),
     "and only states the server sends, which is the property this test exists for",
   );
   assert.deepEqual(
-    responseWindows(recorded).map((span) => [span.at, span.duration, span.turn?.text ?? null]),
+    responseWindows(recorded).map((span) => [
+      span.at,
+      span.duration,
+      span.turn?.text ?? null,
+    ]),
     [
       [20_000, 27_000, "linear"],
       [60_000, 12_000, "a hash map"],
@@ -1737,15 +2662,27 @@ test("no window opens before the interviewer has been heard speaking", () => {
     said(64_000, "you", "a hash map"),
     avatar(65_000, "thinking"),
   ]);
-  assert.equal(greeting.length, 1, "the connect-time listening is not a question ending");
+  assert.equal(
+    greeting.length,
+    1,
+    "the connect-time listening is not a question ending",
+  );
   assert.equal(greeting[0].at, 60_000);
-  assert.equal(greeting[0].duration, 5000, "and the greeting is not part of the answer");
+  assert.equal(
+    greeting[0].duration,
+    5000,
+    "and the greeting is not part of the answer",
+  );
 
   // An interviewer that never speaks leaves nothing to measure a gap after,
   // however many states it publishes.
   assert.deepEqual(responseWindows([avatar(0, "listening")]), []);
   assert.deepEqual(
-    responseWindows([avatar(0, "listening"), avatar(1, "thinking"), avatar(2, "listening")]),
+    responseWindows([
+      avatar(0, "listening"),
+      avatar(1, "thinking"),
+      avatar(2, "listening"),
+    ]),
     [],
   );
 
@@ -1802,7 +2739,11 @@ test("a window the interview was paused during says so", () => {
   ]);
   assert.equal(during.length, 1);
   assert.equal(during[0].paused, true);
-  assert.equal(during[0].duration, 200_900, "the duration is not shortened, it is explained");
+  assert.equal(
+    during[0].duration,
+    200_900,
+    "the duration is not shortened, it is explained",
+  );
 
   // Paused while the interviewer is mid-turn: src/livekit.rs publishes
   // `listening`, so the window this opens is the break itself. The two rows are
@@ -1812,9 +2753,17 @@ test("a window the interview was paused during says so", () => {
     [life(1000, "paused"), avatar(1100, "listening")],
     [avatar(1000, "listening"), life(1100, "paused")],
   ]) {
-    const windows = responseWindows([avatar(0, "speaking"), ...order, avatar(300_000, "speaking")]);
+    const windows = responseWindows([
+      avatar(0, "speaking"),
+      ...order,
+      avatar(300_000, "speaking"),
+    ]);
     assert.equal(windows.length, 1);
-    assert.equal(windows[0].paused, true, JSON.stringify(order.map((row) => row.kind)));
+    assert.equal(
+      windows[0].paused,
+      true,
+      JSON.stringify(order.map((row) => row.kind)),
+    );
   }
 
   // A window after the resume is not marked, or every window after the first
@@ -1897,7 +2846,10 @@ test("each provider outage names its own cause", () => {
   for (const [detail, pattern] of [
     ["429 Too Many Requests", /busy or rate limited/],
     ["RESOURCE_EXHAUSTED: quota exceeded", /no available session capacity/],
-    ["insufficient connection minutes remaining", /no available session capacity/],
+    [
+      "insufficient connection minutes remaining",
+      /no available session capacity/,
+    ],
     ["failed to publish microphone track", /microphone could not be connected/],
     ["ECONNREFUSED", /could not be reached/],
   ]) {
@@ -1909,7 +2861,10 @@ test("each provider outage names its own cause", () => {
   // Ordered, and the order is a claim: rate limiting is reported ahead of quota
   // because a detail naming both is a busy provider, not an exhausted account.
   assert.match(reason("429: quota exceeded"), /busy or rate limited/);
-  assert.match(reason("quota exceeded while publishing microphone"), /no available session capacity/);
+  assert.match(
+    reason("quota exceeded while publishing microphone"),
+    /no available session capacity/,
+  );
   // Matched case-insensitively, because the provider's wording is not ours.
   assert.match(reason("QUOTA EXCEEDED"), /no available session capacity/);
 });
@@ -1918,21 +2873,33 @@ test("each provider outage names its own cause", () => {
 // the allowlist is what stops a report styling itself. Every fixture in the
 // suite used "high" or "info", so the allowlist could have been deleted.
 test("a severity the report card cannot style is read as info", () => {
-  const severities = (events) => sanitizeReport({ decision: "HIRE", integrityEvents: events }).integrityEvents
-    .map((event) => event.severity);
-  assert.deepEqual(severities([
-    { type: "A", severity: "info" }, { type: "B", severity: "warning" },
-    { type: "C", severity: "high" }, { type: "D", severity: "critical" },
-  ]), ["info", "warning", "high", "critical"], "all four styleable severities survive");
+  const severities = (events) =>
+    sanitizeReport({
+      decision: "HIRE",
+      integrityEvents: events,
+    }).integrityEvents.map((event) => event.severity);
+  assert.deepEqual(
+    severities([
+      { type: "A", severity: "info" },
+      { type: "B", severity: "warning" },
+      { type: "C", severity: "high" },
+      { type: "D", severity: "critical" },
+    ]),
+    ["info", "warning", "high", "critical"],
+    "all four styleable severities survive",
+  );
 
-  assert.deepEqual(severities([
-    { type: "A", severity: "catastrophic" },
-    { type: "B", severity: "critical\" onload=\"alert(1)" },
-    { type: "C", severity: "INFO" },
-    { type: "D", severity: 3 },
-    { type: "E", severity: null },
-    { type: "F" },
-  ]), ["info", "info", "info", "info", "info", "info"]);
+  assert.deepEqual(
+    severities([
+      { type: "A", severity: "catastrophic" },
+      { type: "B", severity: 'critical" onload="alert(1)' },
+      { type: "C", severity: "INFO" },
+      { type: "D", severity: 3 },
+      { type: "E", severity: null },
+      { type: "F" },
+    ]),
+    ["info", "info", "info", "info", "info", "info"],
+  );
 });
 
 // The two clamps beside it, on the same row. `durationMs` is rendered as a
@@ -1943,14 +2910,26 @@ test("an integrity row cannot carry an unbounded duration or sequence", () => {
     integrityEvents: [{ type: "A", durationMs: 999_999_999_999, seq: -5 }],
   }).integrityEvents;
   assert.equal(row.durationMs, 86_400_000, "a day is the ceiling");
-  assert.equal(row.seq, 0, "a negative sequence is not a position in the chain");
+  assert.equal(
+    row.seq,
+    0,
+    "a negative sequence is not a position in the chain",
+  );
 
   const [negative] = sanitizeReport({
     decision: "HIRE",
     integrityEvents: [{ type: "A", durationMs: -1, seq: 4.9 }],
   }).integrityEvents;
-  assert.equal(negative.durationMs, 0, "an event cannot have lasted less than no time");
-  assert.equal(negative.seq, 4, "a fractional sequence is truncated, not rounded up");
+  assert.equal(
+    negative.durationMs,
+    0,
+    "an event cannot have lasted less than no time",
+  );
+  assert.equal(
+    negative.seq,
+    4,
+    "a fractional sequence is truncated, not rounded up",
+  );
 });
 
 // The cap on the list itself. The existing test for it supplies 64 invalid rows
@@ -1958,10 +2937,20 @@ test("an integrity row cannot carry an unbounded duration or sequence", () => {
 // runs -- so the slice has never actually trimmed anything.
 test("more integrity rows than the report holds are trimmed to the cap", () => {
   const many = Array.from({ length: MAX_INTEGRITY_ROWS + 20 }, (_, index) => ({
-    type: "CAMERA_STOPPED", at: "00:01", severity: "high", source: "camera", seq: index,
+    type: "CAMERA_STOPPED",
+    at: "00:01",
+    severity: "high",
+    source: "camera",
+    seq: index,
   }));
-  const kept = sanitizeReport({ decision: "HIRE", integrityEvents: many }).integrityEvents;
+  const kept = sanitizeReport({
+    decision: "HIRE",
+    integrityEvents: many,
+  }).integrityEvents;
   assert.equal(kept.length, MAX_INTEGRITY_ROWS);
   // The head is kept, not the tail: the chain is read from its start.
-  assert.deepEqual(kept.map((event) => event.seq), [...Array(MAX_INTEGRITY_ROWS).keys()]);
+  assert.deepEqual(
+    kept.map((event) => event.seq),
+    [...Array(MAX_INTEGRITY_ROWS).keys()],
+  );
 });

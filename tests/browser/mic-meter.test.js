@@ -9,7 +9,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { MIC_CONFIRM_FRAMES, preflightReadiness } from "../../web/audio-check.js";
+import {
+  MIC_CONFIRM_FRAMES,
+  preflightReadiness,
+} from "../../web/audio-check.js";
 import { createMicMeter } from "../../web/mic-meter.js";
 
 /// A pool with one audio track, whose readiness a test can change.
@@ -80,10 +83,18 @@ test("forgetting a microphone drops what it proved and silences its meter", () =
 
   meter.forget();
 
-  assert.equal(meter.peak(), 0, "nothing a departed microphone proved carries over");
+  assert.equal(
+    meter.peak(),
+    0,
+    "nothing a departed microphone proved carries over",
+  );
   // The generation bump, observed rather than counted: the meter still running
   // over the old track must not report another level.
-  assert.equal(abandoned.shouldStop(), true, "the meter over the old track must stop");
+  assert.equal(
+    abandoned.shouldStop(),
+    true,
+    "the meter over the old track must stop",
+  );
 });
 
 test("a replacement microphone is proven on its own frames", () => {
@@ -104,7 +115,11 @@ test("a replacement microphone is proven on its own frames", () => {
   assert.equal(meter.peak(), 0, "the new device has proven nothing yet");
   loudEnough(started);
   assert.ok(meter.peak() > 0, "and proves itself on its own frames");
-  assert.equal(started.latest().shouldStop(), false, "the current meter keeps running");
+  assert.equal(
+    started.latest().shouldStop(),
+    false,
+    "the current meter keeps running",
+  );
 });
 
 /// Timers a test can run by hand.
@@ -147,9 +162,17 @@ test("a meter that fails forgets the peak and asks again", (t) => {
   loudEnough(started);
   started.latest().onError("device lost");
 
-  assert.equal(meter.peak(), 0, "a device that went away has proven nothing about its replacement");
+  assert.equal(
+    meter.peak(),
+    0,
+    "a device that went away has proven nothing about its replacement",
+  );
   assert.deepEqual(failures, ["device lost"]);
-  assert.equal(timers.scheduled(), 1, "the gate has no bypass, so the meter must ask again");
+  assert.equal(
+    timers.scheduled(),
+    1,
+    "the gate has no bypass, so the meter must ask again",
+  );
   timers.run();
   assert.equal(started.started.length, 2, "and asking again starts a meter");
 });
@@ -173,7 +196,11 @@ test("a meter forgotten while it was failing does not restart itself", (t) => {
   started.latest().onError("device lost");
   timers.run();
 
-  assert.equal(started.started.length, 1, "a forgotten meter must not restart itself");
+  assert.equal(
+    started.started.length,
+    1,
+    "a forgotten meter must not restart itself",
+  );
 });
 
 /// The bug this exists for: a candidate proves their microphone, unplugs it,
@@ -209,7 +236,11 @@ test("an ended microphone closes the gate even when a peak was proven", () => {
     faceCheck: { ready: true, error: null },
   });
 
-  assert.equal(state.steps.mic, false, "an unplugged microphone is not a proven one");
+  assert.equal(
+    state.steps.mic,
+    false,
+    "an unplugged microphone is not a proven one",
+  );
   assert.equal(state.ready, false, "and the gate does not open on it");
   assert.ok(pool.retried, "the pool is asked for a replacement");
 });
@@ -229,7 +260,14 @@ test("a dead device of either kind reopens the request the pool makes", () => {
       micPeak: () => 1,
       faceCheck: { ready: true, error: null },
     });
-    assert.equal(pool.dropped.length, 1, `an ended ${dead} track must be dropped`);
-    assert.ok(pool.retried, `and the pool asked for a replacement ${dead} device`);
+    assert.equal(
+      pool.dropped.length,
+      1,
+      `an ended ${dead} track must be dropped`,
+    );
+    assert.ok(
+      pool.retried,
+      `and the pool asked for a replacement ${dead} device`,
+    );
   }
 });

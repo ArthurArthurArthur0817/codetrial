@@ -11,7 +11,8 @@ import {
   normalizeFaceResults,
 } from "../../web/face-presence.js";
 
-const vendorFile = (file) => new URL(`../../web/vendor/face-detection/${file}`, import.meta.url);
+const vendorFile = (file) =>
+  new URL(`../../web/vendor/face-detection/${file}`, import.meta.url);
 
 /// `SHA256SUMS` is the manifest `make verify-vendor` already checks the
 /// directory against, so it is the one list of vendored names. Restating them
@@ -29,12 +30,22 @@ const vendoredFiles = readFileSync(vendorFile("SHA256SUMS"), "utf8")
 /// happened: the files were renamed, and the two hand-written translation
 /// tables that made the rename work were both missing the `.wasm` entries.
 test("every asset MediaPipe asks for is vendored under that exact name", () => {
-  assert.ok(vendoredFiles.length >= 7, "the manifest should list the vendored assets");
+  assert.ok(
+    vendoredFiles.length >= 7,
+    "the manifest should list the vendored assets",
+  );
   for (const file of vendoredFiles) {
     // MediaPipe's own name, so no translation table stands between the two.
-    assert.match(file, /^face_detection/, `${file} is not named the way MediaPipe asks for it`);
+    assert.match(
+      file,
+      /^face_detection/,
+      `${file} is not named the way MediaPipe asks for it`,
+    );
     assert.equal(faceAssetUrl(file), `/vendor/face-detection/${file}`);
-    assert.ok(existsSync(vendorFile(file)), `${file} is not vendored under that name`);
+    assert.ok(
+      existsSync(vendorFile(file)),
+      `${file} is not vendored under that name`,
+    );
   }
 });
 
@@ -90,7 +101,9 @@ test("face detector wrapper loads, configures, and normalizes results", async ()
 });
 
 test("face detector unavailable skips instead of blocking", async () => {
-  const detector = await createFacePresenceDetector({ loadScript: async () => {} });
+  const detector = await createFacePresenceDetector({
+    loadScript: async () => {},
+  });
 
   assert.equal(detector.available, false);
 });
@@ -110,7 +123,11 @@ test("face detector uses native FaceDetector when available", async () => {
   });
 
   assert.equal(detector.available, true);
-  assert.deepEqual(await detector.detect({}), { available: true, count: 2, confidence: 1 });
+  assert.deepEqual(await detector.detect({}), {
+    available: true,
+    count: 2,
+    confidence: 1,
+  });
 });
 
 test("a detection that throws reports unavailable, not zero faces", async () => {
@@ -123,7 +140,10 @@ test("a detection that throws reports unavailable, not zero faces", async () => 
     }
   }
 
-  const detector = await createFacePresenceDetector({ Detector, loadScript: async () => {} });
+  const detector = await createFacePresenceDetector({
+    Detector,
+    loadScript: async () => {},
+  });
 
   // Zero faces would put the tracker fifteen seconds away from ending a valid
   // interview over a failure that says nothing about the candidate.
@@ -137,23 +157,50 @@ test("face tracker thresholds missing, severe, and multiple-face anomalies", () 
   });
 
   assert.equal(tracker.update({ count: 0, confidence: 0 }, 0), null);
-  assert.equal(tracker.update({ count: 0, confidence: 0 }, FACE_ANOMALY_THRESHOLD_MS - 1), null);
-  assert.equal(tracker.update({ count: 0, confidence: 0 }, FACE_ANOMALY_THRESHOLD_MS).type, "FACE_MISSING");
+  assert.equal(
+    tracker.update({ count: 0, confidence: 0 }, FACE_ANOMALY_THRESHOLD_MS - 1),
+    null,
+  );
+  assert.equal(
+    tracker.update({ count: 0, confidence: 0 }, FACE_ANOMALY_THRESHOLD_MS).type,
+    "FACE_MISSING",
+  );
   assert.equal(tracker.update({ count: 0, confidence: 0 }, 14999), null);
-  assert.equal(tracker.update({ count: 0, confidence: 0 }, 15000).type, "FACE_MISSING_SEVERE");
-  assert.equal(tracker.update({ count: 1, confidence: 0.9 }, 16000).type, "FACE_DETECTED");
+  assert.equal(
+    tracker.update({ count: 0, confidence: 0 }, 15000).type,
+    "FACE_MISSING_SEVERE",
+  );
+  assert.equal(
+    tracker.update({ count: 1, confidence: 0.9 }, 16000).type,
+    "FACE_DETECTED",
+  );
   assert.equal(tracker.update({ count: 0, confidence: 0 }, 17000), null);
-  assert.equal(tracker.update({ count: 0, confidence: 0 }, 19000).type, "FACE_MISSING");
+  assert.equal(
+    tracker.update({ count: 0, confidence: 0 }, 19000).type,
+    "FACE_MISSING",
+  );
   assert.equal(tracker.update({ count: 2, confidence: 0.8 }, 20000), null);
-  assert.equal(tracker.update({ count: 2, confidence: 0.8 }, 22000).type, "MULTIPLE_FACES");
-  assert.equal(tracker.update({ count: 1, confidence: 0.7 }, 22001).type, "FACE_DETECTED");
+  assert.equal(
+    tracker.update({ count: 2, confidence: 0.8 }, 22000).type,
+    "MULTIPLE_FACES",
+  );
+  assert.equal(
+    tracker.update({ count: 1, confidence: 0.7 }, 22001).type,
+    "FACE_DETECTED",
+  );
 });
 
 test("detector flicker does not restart the severe clock", () => {
-  const tracker = createFacePresenceTracker({ thresholdMs: 2000, severeThresholdMs: 15000 });
+  const tracker = createFacePresenceTracker({
+    thresholdMs: 2000,
+    severeThresholdMs: 15000,
+  });
 
   assert.equal(tracker.update({ count: 0, confidence: 0 }, 0), null);
-  assert.equal(tracker.update({ count: 0, confidence: 0 }, 2000).type, "FACE_MISSING");
+  assert.equal(
+    tracker.update({ count: 0, confidence: 0 }, 2000).type,
+    "FACE_MISSING",
+  );
   // An empty chair in front of a poster registers one face now and then. Timing
   // the absence off the debounce clock let each of these push the severe
   // threshold out, so an absence long enough to matter never reached it.
@@ -170,15 +217,24 @@ test("detector flicker does not restart the severe clock", () => {
 });
 
 test("a gap in sampling is not an absence", () => {
-  const tracker = createFacePresenceTracker({ thresholdMs: 2000, severeThresholdMs: 15000 });
+  const tracker = createFacePresenceTracker({
+    thresholdMs: 2000,
+    severeThresholdMs: 15000,
+  });
 
   assert.equal(tracker.update({ count: 0, confidence: 0 }, 0), null);
-  assert.equal(tracker.update({ count: 0, confidence: 0 }, 2000).type, "FACE_MISSING");
+  assert.equal(
+    tracker.update({ count: 0, confidence: 0 }, 2000).type,
+    "FACE_MISSING",
+  );
   // The caller resets when frames stop arriving. Without it the first frame
   // after a suspended lid or a throttled tab is already past the threshold.
   tracker.reset();
   assert.equal(tracker.update({ count: 0, confidence: 0 }, 600000), null);
-  assert.equal(tracker.update({ count: 0, confidence: 0 }, 602000).type, "FACE_MISSING");
+  assert.equal(
+    tracker.update({ count: 0, confidence: 0 }, 602000).type,
+    "FACE_MISSING",
+  );
 });
 
 test("face normalization handles empty and multi-face results", () => {
@@ -196,23 +252,38 @@ test("a gap in sampling is not an absence", () => {
   // An unavailable sample carries count 0. Reading that as "no face" left the
   // Start button disabled while the candidate sat in front of a working camera,
   // reading "stay in front of the camera", with nothing they could do about it.
-  assert.deepEqual(facePresenceVerdict({ available: false, count: 0 }), { ready: true, error: null });
-  assert.deepEqual(facePresenceVerdict(undefined), { ready: true, error: null });
+  assert.deepEqual(facePresenceVerdict({ available: false, count: 0 }), {
+    ready: true,
+    error: null,
+  });
+  assert.deepEqual(facePresenceVerdict(undefined), {
+    ready: true,
+    error: null,
+  });
 });
 
 test("exactly one face passes the preflight", () => {
-  assert.deepEqual(facePresenceVerdict({ available: true, count: 1 }), { ready: true, error: null });
+  assert.deepEqual(facePresenceVerdict({ available: true, count: 1 }), {
+    ready: true,
+    error: null,
+  });
 });
 
 test("an empty frame is not ready, and says nothing the candidate cannot act on", () => {
   // No error: "nobody is in frame yet" is the ordinary state before someone
   // sits down, not a failure to report.
-  assert.deepEqual(facePresenceVerdict({ available: true, count: 0 }), { ready: false, error: null });
+  assert.deepEqual(facePresenceVerdict({ available: true, count: 0 }), {
+    ready: false,
+    error: null,
+  });
 });
 
 test("more than one face is an error the candidate can act on", () => {
   const two = facePresenceVerdict({ available: true, count: 2 });
   assert.equal(two.ready, false);
   assert.match(two.error, /multiple faces/);
-  assert.equal(facePresenceVerdict({ available: true, count: 9 }).error, two.error);
+  assert.equal(
+    facePresenceVerdict({ available: true, count: 9 }).error,
+    two.error,
+  );
 });

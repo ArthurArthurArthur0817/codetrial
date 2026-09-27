@@ -50,7 +50,12 @@ test("recording-template dom ids", () => {
   // Queried, for the nodes this file writes to. The problem, code, test and
   // timer panels are in the page and stay empty until the replay bootstrap
   // fills them, and a lookup for a node nothing writes would read as wiring.
-  for (const id of ["stage", "candidate-video", "jim-state", "recording-ready"]) {
+  for (const id of [
+    "stage",
+    "candidate-video",
+    "jim-state",
+    "recording-ready",
+  ]) {
     assert.ok(
       code.includes(`querySelector("#${id}")`),
       `#${id} is in the page but nothing in the script reads it`,
@@ -155,7 +160,9 @@ test("recording-template readiness", () => {
     "and a camera that left before readiness must not still count as one",
   );
   assert.ok(
-    /cameraAttached = false;\s*[\s\S]{0,400}?refreshCandidate\(room\);/.test(gone),
+    /cameraAttached = false;\s*[\s\S]{0,400}?refreshCandidate\(room\);/.test(
+      gone,
+    ),
     "then ask again: a republished camera is already on that element and the old track's detach clears it",
   );
 });
@@ -175,7 +182,9 @@ test("recording-bootstrap snapshot-first", () => {
   // second is the first with a way to get it wrong.
   const poll = withoutComments(functionBody(script, "schedulePoll"));
   assert.ok(poll.includes("if (replayClosed) return;"));
-  assert.ok(poll.includes("setTimeout(() => void pumpReplay().then(schedulePoll)"));
+  assert.ok(
+    poll.includes("setTimeout(() => void pumpReplay().then(schedulePoll)"),
+  );
   assert.ok(!/setInterval/.test(code), "no interval can outpace a slow answer");
 
   const pump = withoutComments(functionBody(script, "pumpReplay"));
@@ -184,7 +193,7 @@ test("recording-bootstrap snapshot-first", () => {
     "the first call asks for a snapshot and every later one asks for what came after",
   );
   assert.ok(
-    pump.includes("headers: { authorization: token || \"\" }"),
+    pump.includes('headers: { authorization: token || "" }'),
     "the room token is the credential; this page has no cookie to send",
   );
   assert.ok(
@@ -259,7 +268,9 @@ test("recording-bootstrap ordering", () => {
     "and a body this page did not expect cannot end the polling by throwing",
   );
   assert.ok(
-    pump.includes('if (!Array.isArray(body?.events) || typeof body?.seq !== "number")'),
+    pump.includes(
+      'if (!Array.isArray(body?.events) || typeof body?.seq !== "number")',
+    ),
     "a 200 without the two fields this route always sends came from something else",
   );
   assert.ok(
@@ -269,7 +280,10 @@ test("recording-bootstrap ordering", () => {
 
   const apply = withoutComments(functionBody(script, "applyReplayEvent"));
   for (const kind of ["stage", "editor", "tests", "avatar"]) {
-    assert.ok(apply.includes(`case "${kind}":`), `the layout renders ${kind} events`);
+    assert.ok(
+      apply.includes(`case "${kind}":`),
+      `the layout renders ${kind} events`,
+    );
   }
   assert.ok(
     apply.includes("default:"),
@@ -295,11 +309,15 @@ test("recording-bootstrap ordering", () => {
 test("replay-producer envelope", () => {
   const record = withoutComments(functionBody(interview, "recordReplay"));
   assert.ok(
-    record.includes("if (!recordingEnabled || !state.interviewId || replayClosed) return;"),
+    record.includes(
+      "if (!recordingEnabled || !state.interviewId || replayClosed) return;",
+    ),
     "a server that records nothing, an interview that does not exist yet, and a replay the server has stopped accepting",
   );
   assert.ok(
-    record.includes("const event = { v: replayVersion, kind, at: Date.now(), payload };"),
+    record.includes(
+      "const event = { v: replayVersion, kind, at: Date.now(), payload };",
+    ),
     "one envelope, written once",
   );
   assert.ok(
@@ -314,10 +332,14 @@ test("replay-producer envelope", () => {
   // The batch send lives in `sendQueuedBatch`; `flushReplay` is the queue in
   // front of it that keeps two POSTs from committing out of order.
   const flush = withoutComments(functionBody(interview, "sendQueuedBatch"));
-  assert.ok(flush.includes("const batch = takeBatch();"), "one batch, taken in one place");
+  assert.ok(
+    flush.includes("const batch = takeBatch();"),
+    "one batch, taken in one place",
+  );
   const take = withoutComments(functionBody(interview, "takeBatch"));
   assert.ok(
-    take.includes("count < REPLAY_MAX_BATCH") && take.includes("REPLAY_KEEPALIVE_MAX_BYTES"),
+    take.includes("count < REPLAY_MAX_BATCH") &&
+      take.includes("REPLAY_KEEPALIVE_MAX_BYTES"),
     "batched to the server's own limit and to what one keepalive post may carry",
   );
   const chain = withoutComments(functionBody(interview, "flushReplay"));
@@ -326,7 +348,8 @@ test("replay-producer envelope", () => {
     "flushes are serialized, or the replay is ordered by whichever request finished first",
   );
   assert.ok(
-    flush.includes("if (response.status === 404) {") && flush.includes("closeReplay();"),
+    flush.includes("if (response.status === 404) {") &&
+      flush.includes("closeReplay();"),
     "consent withdrawn: the server will refuse everything after this",
   );
   assert.ok(
@@ -334,7 +357,8 @@ test("replay-producer envelope", () => {
     "and quota, which is the only 413 that is about the interview rather than the batch",
   );
   assert.ok(
-    !/status === 413\s*\|\|/.test(flush) && !/\|\|\s*response\.status === 413/.test(flush),
+    !/status === 413\s*\|\|/.test(flush) &&
+      !/\|\|\s*response\.status === 413/.test(flush),
     "a `replay_batch_too_large` must not close the feed: one oversized paste would end the replay",
   );
   const close = withoutComments(functionBody(interview, "closeReplay"));
@@ -343,7 +367,9 @@ test("replay-producer envelope", () => {
     close.includes("replayQueue = [];"),
     "and what is queued is dropped, not flushed: it is from before the decision that says not to store it",
   );
-  const withdraw = withoutComments(functionBody(interview, "withdrawRecordingConsent"));
+  const withdraw = withoutComments(
+    functionBody(interview, "withdrawRecordingConsent"),
+  );
   assert.ok(
     withdraw.includes("closeReplay();"),
     "a candidate who has just said stop keeps sending nothing while the answer comes back",
@@ -357,17 +383,25 @@ test("replay-producer envelope", () => {
 test("replay-producer transcript", () => {
   const body = withoutComments(functionBody(interview, "consumeTranscript"));
   assert.ok(
-    body.includes('recordReplay("transcript", { speaker, text: text.trim(), responseWindow });'),
+    body.includes(
+      'recordReplay("transcript", { speaker, text: text.trim(), responseWindow });',
+    ),
     "the transcript is recorded with the window active when its stream started",
   );
   const emits = body.match(/recordReplay\("transcript"/g) || [];
-  assert.equal(emits.length, 1, "one emit, so a second inside the chunk loop cannot hide behind this one");
+  assert.equal(
+    emits.length,
+    1,
+    "one emit, so a second inside the chunk loop cannot hide behind this one",
+  );
   assert.ok(
-    body.indexOf('recordReplay("transcript"') > body.indexOf("if (text.trim())"),
+    body.indexOf('recordReplay("transcript"') >
+      body.indexOf("if (text.trim())"),
     "once per turn, after the stream, not once per chunk",
   );
   assert.ok(
-    body.indexOf("for await (const chunk of reader)") < body.indexOf("if (text.trim())"),
+    body.indexOf("for await (const chunk of reader)") <
+      body.indexOf("if (text.trim())"),
     "and the chunk loop is over by then",
   );
 });
@@ -376,9 +410,13 @@ test("replay-producer editor", () => {
   // Where the debounced edit is sent. A queued language switch is flushed on its
   // own path, which records nothing to the editor stream: a tab arriving with
   // its starter is not something the candidate typed.
-  const body = withoutComments(functionBody(interview, "flushPendingEditorPublish"));
+  const body = withoutComments(
+    functionBody(interview, "flushPendingEditorPublish"),
+  );
   assert.ok(
-    body.includes('recordReplay("editor", { code: currentCode(), language: state.language });'),
+    body.includes(
+      'recordReplay("editor", { code: currentCode(), language: state.language });',
+    ),
     "the editor is recorded where the debounced publish already happens",
   );
   // And that is where the debounce ends when nothing overtakes it. A timer with
@@ -391,14 +429,19 @@ test("replay-producer editor", () => {
   // And where the end cancels it: the end payload carries that edit to the
   // agent, and nothing but this carries it to the replay.
   const ending = withoutComments(functionBody(interview, "endInterview"));
-  const saved = ending.indexOf('recordReplay("editor", { code: currentCode(), language: state.language });');
+  const saved = ending.indexOf(
+    'recordReplay("editor", { code: currentCode(), language: state.language });',
+  );
   assert.ok(saved >= 0, "an edit the end cancels is still recorded");
   assert.ok(
-    ending.slice(0, saved).includes("if (codePublishTimer && !pendingLanguagePublish) {"),
+    ending
+      .slice(0, saved)
+      .includes("if (codePublishTimer && !pendingLanguagePublish) {"),
     "only when an edit, not a switch, was queued",
   );
   assert.ok(
-    saved < ending.indexOf('recordReplay("lifecycle"') && saved < ending.indexOf("clearTimeout(codePublishTimer);"),
+    saved < ending.indexOf('recordReplay("lifecycle"') &&
+      saved < ending.indexOf("clearTimeout(codePublishTimer);"),
     "before the end is recorded and before the timer that says an edit was queued is gone",
   );
   assert.equal(
@@ -416,7 +459,8 @@ test("replay-producer tests", () => {
     "and the failures are derived rather than assumed present on the summary",
   );
   assert.ok(
-    body.indexOf('recordReplay("tests"') > body.indexOf("renderResults(summary)"),
+    body.indexOf('recordReplay("tests"') >
+      body.indexOf("renderResults(summary)"),
     "after the results are known",
   );
 });
@@ -424,7 +468,8 @@ test("replay-producer tests", () => {
 test("replay-producer stage", () => {
   const payload = withoutComments(functionBody(interview, "stagePayload"));
   assert.ok(
-    payload.includes("title: nodes.title.textContent") && payload.includes("meta: nodes.meta.textContent"),
+    payload.includes("title: nodes.title.textContent") &&
+      payload.includes("meta: nodes.meta.textContent"),
     "the replay copies the displayed heading, which is the scenario and never the published problem",
   );
   const stage = withoutComments(functionBody(interview, "recordStage"));
@@ -433,14 +478,19 @@ test("replay-producer stage", () => {
     "the problem heading is sent, not assembled twice",
   );
   const problem = withoutComments(functionBody(interview, "renderProblem"));
-  assert.ok(problem.includes("recordStage();"), "sent when the problem is rendered");
+  assert.ok(
+    problem.includes("recordStage();"),
+    "sent when the problem is rendered",
+  );
   const connect = withoutComments(functionBody(interview, "connect"));
   assert.ok(
     connect.includes("recordStage();"),
     "and again once the interview exists: the lobby render had nothing to attach it to",
   );
   assert.ok(
-    connect.includes('recordReplay("editor", { code: currentCode(), language: state.language });'),
+    connect.includes(
+      'recordReplay("editor", { code: currentCode(), language: state.language });',
+    ),
     "with the starter code, so a candidate who never types is not recorded beside an empty editor",
   );
 
@@ -458,7 +508,9 @@ test("replay-producer stage", () => {
   // snapshot kind: the newest one supersedes the rest, so a tick that sent only
   // the seconds would blank the problem title for a late replay reader.
   assert.ok(
-    stageTick.includes('recordReplay("stage", stagePayload({ remainingSeconds }));'),
+    stageTick.includes(
+      'recordReplay("stage", stagePayload({ remainingSeconds }));',
+    ),
     "every stage event carries the heading, or the newest one erases it",
   );
   assert.ok(
@@ -489,30 +541,47 @@ test("replay transcripts capture only the open response window", () => {
   replayFeed.recordAvatarState("listening");
   assert.equal(replayFeed.responseWindowIndex(), 0);
   replayFeed.recordAvatarState("listening");
-  assert.equal(replayFeed.responseWindowIndex(), 0, "a repeated state opens no window");
+  assert.equal(
+    replayFeed.responseWindowIndex(),
+    0,
+    "a repeated state opens no window",
+  );
   replayFeed.recordAvatarState("speaking");
-  assert.equal(replayFeed.responseWindowIndex(), null, "interviewer speech closes the window");
+  assert.equal(
+    replayFeed.responseWindowIndex(),
+    null,
+    "interviewer speech closes the window",
+  );
   replayFeed.recordAvatarState("listening");
   assert.equal(replayFeed.responseWindowIndex(), 1);
   replayFeed.recordAvatarState("thinking");
   assert.equal(replayFeed.responseWindowIndex(), null);
   replayFeed.recordAvatarState("listening");
-  assert.equal(replayFeed.responseWindowIndex(), null, "listening after thinking opens no window");
+  assert.equal(
+    replayFeed.responseWindowIndex(),
+    null,
+    "listening after thinking opens no window",
+  );
 });
 
 test("replay-producer lifecycle", () => {
   assert.ok(
-    interview.includes('recordReplay("lifecycle", { state: "started", interviewLoop, codingMinutes, behavioralMinutes });'),
+    interview.includes(
+      'recordReplay("lifecycle", { state: "started", interviewLoop, codingMinutes, behavioralMinutes });',
+    ),
     "a template that joins late has to know the interview was already running",
   );
   const ending = withoutComments(functionBody(interview, "endInterview"));
-  assert.ok(ending.includes('recordReplay("lifecycle", { state: "ended", reason });'));
+  assert.ok(
+    ending.includes('recordReplay("lifecycle", { state: "ended", reason });'),
+  );
   assert.ok(
     ending.includes("void flushReplay();"),
     "sent rather than queued: the page is about to stop flushing timers",
   );
   assert.ok(
-    ending.indexOf('recordReplay("lifecycle"') < ending.indexOf("void flushReplay();"),
+    ending.indexOf('recordReplay("lifecycle"') <
+      ending.indexOf("void flushReplay();"),
     "and queued before it is flushed, or the last event never leaves",
   );
 });

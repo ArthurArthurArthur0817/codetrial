@@ -16,7 +16,8 @@ import { functionBody, read } from "./source.js";
 
 const page = read("web/replay.html");
 const script = read("web/replay.js");
-const withoutComments = (source) => source.replace(/^\s*\/\/.*$/gm, "").replace(/^\s*\/\/\/.*$/gm, "");
+const withoutComments = (source) =>
+  source.replace(/^\s*\/\/.*$/gm, "").replace(/^\s*\/\/\/.*$/gm, "");
 const code = withoutComments(script);
 
 test("replay page dom ids", () => {
@@ -52,9 +53,21 @@ test("replay page dom ids", () => {
 test("replay missing drive file", () => {
   // "No video" is a state, not an error. Every state the server can report has
   // a sentence, and none of them is a link.
-  const words = code.slice(code.indexOf("const MEDIA_WORDS"), code.indexOf("let cursor"));
-  for (const state of ["ready", "recording", "transferring", "failed", "deleted"]) {
-    assert.ok(words.includes(`${state}:`), `the page has to say something about ${state}`);
+  const words = code.slice(
+    code.indexOf("const MEDIA_WORDS"),
+    code.indexOf("let cursor"),
+  );
+  for (const state of [
+    "ready",
+    "recording",
+    "transferring",
+    "failed",
+    "deleted",
+  ]) {
+    assert.ok(
+      words.includes(`${state}:`),
+      `the page has to say something about ${state}`,
+    );
   }
   assert.ok(
     /There is no video for this interview\./.test(words),
@@ -65,13 +78,15 @@ test("replay missing drive file", () => {
     "the page holds no URL to media, because the server never gives it one",
   );
   assert.ok(
-    !/drive\.google|storage\.googleapis|gcsObject|driveFileId|drivePermissionId/.test(script),
+    !/drive\.google|storage\.googleapis|gcsObject|driveFileId|drivePermissionId/.test(
+      script,
+    ),
     "and it does not know the words for one either",
   );
 
   const select = withoutComments(functionBody(script, "select"));
   assert.ok(
-    select.includes('MEDIA_WORDS[recording.state] ||'),
+    select.includes("MEDIA_WORDS[recording.state] ||"),
     "the sentence comes from the state the server reported",
   );
   assert.ok(
@@ -81,9 +96,15 @@ test("replay missing drive file", () => {
 });
 
 test("replay expired", () => {
-  const gone = code.slice(code.indexOf("const GONE_WORDS"), code.indexOf("export function momentTime"));
+  const gone = code.slice(
+    code.indexOf("const GONE_WORDS"),
+    code.indexOf("export function momentTime"),
+  );
   assert.ok(gone.includes("replay_expired:"), "past its retention deadline");
-  assert.ok(gone.includes("recording_deleted:"), "and taken away are different things");
+  assert.ok(
+    gone.includes("recording_deleted:"),
+    "and taken away are different things",
+  );
 
   const select = withoutComments(functionBody(script, "select"));
   assert.ok(
@@ -177,7 +198,11 @@ test("a rate-limited replay batch is kept, not dropped", () => {
   const feed = withoutComments(read("web/replay-feed.js"));
   const send = functionBody(feed, "sendQueuedBatch");
   assert.match(send, /=== 429/, "429 has to be handled at all");
-  assert.match(send, /429[\s\S]*replayQueue\.unshift\(\.\.\.batch\)/, "and handled by keeping it");
+  assert.match(
+    send,
+    /429[\s\S]*replayQueue\.unshift\(\.\.\.batch\)/,
+    "and handled by keeping it",
+  );
 
   // Keeping it is only half the answer. Putting the batch back leaves the
   // queue at the size that makes recordReplay flush on sight, so a limit
@@ -213,12 +238,20 @@ test("a rate-limited replay batch is kept, not dropped", () => {
 /// a `///` paragraph explaining the copy is not part of the copy.
 function literals(source) {
   const bare = source.replace(/^\s*\/\/.*$/gm, "");
-  const requote = (text) => `"${text.replace(/\\(['`])/g, "$1").replace(/"/g, '\\"')}"`;
+  const requote = (text) =>
+    `"${text.replace(/\\(['`])/g, "$1").replace(/"/g, '\\"')}"`;
   return [
     ...[...bare.matchAll(/"(?:[^"\\\n]|\\.)*"/g)].map((match) => match[0]),
-    ...[...bare.matchAll(/'(?:[^'\\\n]|\\.)*'/g)].map((match) => requote(match[0].slice(1, -1))),
+    ...[...bare.matchAll(/'(?:[^'\\\n]|\\.)*'/g)].map((match) =>
+      requote(match[0].slice(1, -1)),
+    ),
     ...[...bare.matchAll(/`(?:[^`\\]|\\.)*`/g)].map((match) =>
-      requote(match[0].slice(1, -1).replace(/\$\{[^}]*\}/g, "").replace(/\n/g, " ")),
+      requote(
+        match[0]
+          .slice(1, -1)
+          .replace(/\$\{[^}]*\}/g, "")
+          .replace(/\n/g, " "),
+      ),
     ),
   ].map((text) => JSON.parse(text));
 }
@@ -231,11 +264,17 @@ test("the response window panel says what the number is worth, in words a test c
   // by a failure rather than by nobody.
 
   // Half of it is the paragraph, which is static because it needs no state.
-  const note = page.slice(page.indexOf('id="replay-window-note"'), page.indexOf("</p>", page.indexOf('id="replay-window-note"')));
-  const prose = note.slice(note.indexOf(">") + 1).replace(/\s+/g, " ").trim();
+  const note = page.slice(
+    page.indexOf('id="replay-window-note"'),
+    page.indexOf("</p>", page.indexOf('id="replay-window-note"')),
+  );
+  const prose = note
+    .slice(note.indexOf(">") + 1)
+    .replace(/\s+/g, " ")
+    .trim();
   assert.equal(
     prose,
-      "A response window is the time between the interviewer finishing a turn and the interviewer " +
+    "A response window is the time between the interviewer finishing a turn and the interviewer " +
       "speaking again. It is measured from the clock of the browser that recorded the interview, which " +
       "can jump forward as well as back, and it includes the time CodeTrial itself took to prepare the " +
       "reply, which is not the same on every turn. The interviewer speaks again on its own after about " +
@@ -255,28 +294,79 @@ test("the response window panel says what the number is worth, in words a test c
   );
   // Each thing that has to reach the reader, named so a rewrite that drops one
   // fails rather than reading fine.
-  assert.match(prose, /time between the interviewer finishing a turn/, "what it measures");
+  assert.match(
+    prose,
+    /time between the interviewer finishing a turn/,
+    "what it measures",
+  );
   assert.match(
     prose,
     /a recording made before that says so on every window it cannot place/,
     "that an older recording withholds the attribution rather than denying it",
   );
-  assert.match(prose, /speaks again on its own after about twenty-five seconds/, "what bounds it");
-  assert.match(prose, /a long window means they were busy/, "so a long one is not the shape to look for");
-  assert.match(prose, /run of short windows holding no transcript/, "and this one is");
-  assert.match(prose, /clock of the browser that recorded the interview/, "whose clock measured it");
-  assert.match(prose, /jump forward as well as back/, "in both directions, so a long reading is not a measurement either");
-  assert.match(prose, /published no state at all/, "a window can open without a question having ended");
-  assert.match(prose, /follows the interviewer's own prompts and reactions/, "and most often does");
-  assert.match(prose, /not a finding about anybody/, "and it is not an accusation");
-  assert.match(prose, /includes the time CodeTrial itself took/, "whose latency is inside the number");
-  assert.match(prose, /a candidate interrupting/, "a window is not always a question ending");
+  assert.match(
+    prose,
+    /speaks again on its own after about twenty-five seconds/,
+    "what bounds it",
+  );
+  assert.match(
+    prose,
+    /a long window means they were busy/,
+    "so a long one is not the shape to look for",
+  );
+  assert.match(
+    prose,
+    /run of short windows holding no transcript/,
+    "and this one is",
+  );
+  assert.match(
+    prose,
+    /clock of the browser that recorded the interview/,
+    "whose clock measured it",
+  );
+  assert.match(
+    prose,
+    /jump forward as well as back/,
+    "in both directions, so a long reading is not a measurement either",
+  );
+  assert.match(
+    prose,
+    /published no state at all/,
+    "a window can open without a question having ended",
+  );
+  assert.match(
+    prose,
+    /follows the interviewer's own prompts and reactions/,
+    "and most often does",
+  );
+  assert.match(
+    prose,
+    /not a finding about anybody/,
+    "and it is not an accusation",
+  );
+  assert.match(
+    prose,
+    /includes the time CodeTrial itself took/,
+    "whose latency is inside the number",
+  );
+  assert.match(
+    prose,
+    /a candidate interrupting/,
+    "a window is not always a question ending",
+  );
   // Every consequence of a lost batch, named rather than summarised. A merged
   // window reads as a long one, a missing window is a question the panel never
   // lists, a lost transcript row makes an answered question look unanswered, and
   // losing the interviewer's first row empties the panel entirely.
-  assert.match(prose, /missing, doubled, shown with no candidate transcript, wrongly marked as paused, or added after the interview ended/);
-  assert.match(prose, /the candidate pausing the interview/, "the one cause a window can name");
+  assert.match(
+    prose,
+    /missing, doubled, shown with no candidate transcript, wrongly marked as paused, or added after the interview ended/,
+  );
+  assert.match(
+    prose,
+    /the candidate pausing the interview/,
+    "the one cause a window can name",
+  );
 
   // And nothing else on the page speaks. Pinning the paragraph by its id guards
   // the paragraph, and pinning one `<section>` guards one section: a sibling
@@ -300,9 +390,11 @@ test("the response window panel says what the number is worth, in words a test c
   // list would not hold. Both quote styles: HTML takes either, and an earlier
   // version of this took one.
   assert.deepEqual(
-    [...page.matchAll(/\s(?:title|aria-label|alt|placeholder)\s*=\s*("[^"]*"|'[^']*')/g)].map(
-      (match) => match[1].slice(1, -1),
-    ),
+    [
+      ...page.matchAll(
+        /\s(?:title|aria-label|alt|placeholder)\s*=\s*("[^"]*"|'[^']*')/g,
+      ),
+    ].map((match) => match[1].slice(1, -1)),
     [],
     "this page says nothing through an attribute",
   );
@@ -312,7 +404,11 @@ test("the response window panel says what the number is worth, in words a test c
   // would: it starts at `<head>` and strips tags, so the rules land in it as
   // text. This fails first and with a better name, which is why it is here and
   // not left to that.
-  assert.doesNotMatch(page, /<style/i, "this page has no stylesheet of its own");
+  assert.doesNotMatch(
+    page,
+    /<style/i,
+    "this page has no stylesheet of its own",
+  );
 
   assert.deepEqual(
     spoken,
@@ -365,28 +461,62 @@ test("the response window panel says what the number is worth, in words a test c
     new Set(literals(script)),
     new Set([
       // Wiring: selectors, module paths, tags, classes, dataset and event names.
-      "", "/lib.js", "/render.js", "/api/reports", "button", "div", "li", "click", "current",
-      "[data-moment]", "replay-item", "replay-line",
-      "replay-moment", "replay-window", "#replay-code", "#replay-empty", "#replay-list",
-      "#replay-media", "#replay-moment-label", "#replay-more", "#replay-report",
-      "#replay-status", "#replay-tests", "#replay-timeline", "#replay-title",
-      "#replay-transcript", "#replay-window-note",
+      "",
+      "/lib.js",
+      "/render.js",
+      "/api/reports",
+      "button",
+      "div",
+      "li",
+      "click",
+      "current",
+      "[data-moment]",
+      "replay-item",
+      "replay-line",
+      "replay-moment",
+      "replay-window",
+      "#replay-code",
+      "#replay-empty",
+      "#replay-list",
+      "#replay-media",
+      "#replay-moment-label",
+      "#replay-more",
+      "#replay-report",
+      "#replay-status",
+      "#replay-tests",
+      "#replay-timeline",
+      "#replay-title",
+      "#replay-transcript",
+      "#replay-window-note",
       // Replay event kinds and the speaker a missing one reads as.
-      "stage", "transcript", "editor", "tests", "candidate",
+      "stage",
+      "transcript",
+      "editor",
+      "tests",
+      "candidate",
       // What the page says about the media, per state.
       "The video was shared with your verified email address. It is deleted 24 hours after the interview.",
-      "This interview is still being recorded.", "The recording is being finished.",
+      "This interview is still being recorded.",
+      "The recording is being finished.",
       "The recording is being delivered to your email address.",
-      "There is no video for this interview.", "The video has been deleted.",
+      "There is no video for this interview.",
+      "The video has been deleted.",
       "This recording is past its 24 hours and has been deleted.",
-      "This recording has been deleted.", "This recording is not available on this account.",
+      "This recording has been deleted.",
+      "This recording is not available on this account.",
       " The replay below stops before the end of the interview.",
       // What it says when a read failed, which is not the same as nothing
       // recorded.
-      "Could not load the replay for this interview.", "Could not load the report.",
-      "Could not read your recordings.", "No report was saved for this interview.",
-      "Sign in to see your recordings.", "No test run before this point.",
-      "Recording", "Deleted", "Not available", "Code",
+      "Could not load the replay for this interview.",
+      "Could not load the report.",
+      "Could not read your recordings.",
+      "No report was saved for this interview.",
+      "Sign in to see your recordings.",
+      "No test run before this point.",
+      "Recording",
+      "Deleted",
+      "Not available",
+      "Code",
       // And the window panel, spread from the set pinned above rather than
       // retyped: the narrower assertion catches a word relocated out of
       // `WINDOW_WORDS`, and this one catches a word added anywhere, so they are
@@ -396,8 +526,14 @@ test("the response window panel says what the number is worth, in words a test c
       // page calls and the separators it joins values with. The events request
       // is here in the shape it is sent, which is the other half of the done
       // condition for this feature.
-      "/api/recordings", "/api/recordings/", "/api/recordings//events?avatar=history",
-      "?before=", " ·  · ", " : ", "Code · ", "/ passing",
+      "/api/recordings",
+      "/api/recordings/",
+      "/api/recordings//events?avatar=history",
+      "?before=",
+      " ·  · ",
+      " : ",
+      "Code · ",
+      "/ passing",
     ]),
     "a string this page can say that is not in this list is one nobody chose",
   );
@@ -469,5 +605,7 @@ test("the replay page asks for the avatar history and renders it beside the mome
     /nodes\.windowNote\.hidden = windows\.length === 0;/,
     "and a replay with windows shows it",
   );
-  assert.ok(page.includes('id="replay-window-note" class="muted small" hidden'));
+  assert.ok(
+    page.includes('id="replay-window-note" class="muted small" hidden'),
+  );
 });

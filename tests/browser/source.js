@@ -62,7 +62,10 @@ export function initialisedModules() {
   return firstPartyScripts()
     .map((name) => `web/${name}`)
     .filter((path) => {
-      const exported = captures(read(path), /^export function (init[A-Z]\w*)\(/gm);
+      const exported = captures(
+        read(path),
+        /^export function (init[A-Z]\w*)\(/gm,
+      );
       return exported.some((name) => called.has(name));
     });
 }
@@ -106,7 +109,9 @@ export function livekitSource() {
 /// cannot find, so a renamed function fails the test that pins it instead of
 /// silently asserting against an empty string.
 export function functionBody(source, name) {
-  const start = source.search(new RegExp(`^(?:export )?(?:async )?function ${name}\\(`, "m"));
+  const start = source.search(
+    new RegExp(`^(?:export )?(?:async )?function ${name}\\(`, "m"),
+  );
   if (start === -1) throw new Error(`no function named ${name}`);
   const end = source.indexOf("\n}\n", start);
   return source.slice(start, end === -1 ? source.length : end);
@@ -157,9 +162,12 @@ export async function launchChromium() {
     // `cause` rather than the message alone: when CI does break, the frame that
     // names what went wrong is the launcher's, not this one's.
     if (process.env.CI) {
-      throw new Error("CI has no usable Chromium, so the browser suite would test nothing", {
-        cause: error,
-      });
+      throw new Error(
+        "CI has no usable Chromium, so the browser suite would test nothing",
+        {
+          cause: error,
+        },
+      );
     }
     return null;
   }
@@ -211,12 +219,19 @@ export async function startStaticServer({ handle, runtimeConfig } = {}) {
       return;
     }
     const file = join(web, url.pathname === "/" ? "index.html" : url.pathname);
-    if (!file.startsWith(web + sep) || !existsSync(file) || statSync(file).isDirectory()) {
+    if (
+      !file.startsWith(web + sep) ||
+      !existsSync(file) ||
+      statSync(file).isDirectory()
+    ) {
       response.statusCode = 404;
       response.end("not found");
       return;
     }
-    response.setHeader("content-type", STATIC_CONTENT_TYPES[extname(file)] ?? "application/json");
+    response.setHeader(
+      "content-type",
+      STATIC_CONTENT_TYPES[extname(file)] ?? "application/json",
+    );
     response.end(readFileSync(file));
   });
   await new Promise((listening) => server.listen(0, "127.0.0.1", listening));

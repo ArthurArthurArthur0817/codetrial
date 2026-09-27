@@ -19,20 +19,49 @@ test("integrity worker exposes the cascade schedule", () => {
 test("screen analysis is throttled to one diff per second", () => {
   const state = createAnalysisState();
 
-  assert.deepEqual(applyFrame(state, { source: "screen", at: 0, transport: "VideoFrame" })[0].analyses, ["screen_diff"]);
-  assert.deepEqual(applyFrame(state, { source: "screen", at: 999, transport: "VideoFrame" }), []);
-  assert.deepEqual(applyFrame(state, { source: "screen", at: 1000, transport: "VideoFrame" })[0].analyses, ["screen_diff"]);
+  assert.deepEqual(
+    applyFrame(state, { source: "screen", at: 0, transport: "VideoFrame" })[0]
+      .analyses,
+    ["screen_diff"],
+  );
+  assert.deepEqual(
+    applyFrame(state, { source: "screen", at: 999, transport: "VideoFrame" }),
+    [],
+  );
+  assert.deepEqual(
+    applyFrame(state, {
+      source: "screen",
+      at: 1000,
+      transport: "VideoFrame",
+    })[0].analyses,
+    ["screen_diff"],
+  );
 });
 
 test("camera analysis aggregates frames while respecting each interval", () => {
   const state = createAnalysisState();
 
-  assert.deepEqual(applyFrame(state, { source: "camera", at: 0, transport: "ImageBitmap" })[0].analyses, ["face_detect", "tracking"]);
-  assert.deepEqual(applyFrame(state, { source: "camera", at: 50, transport: "ImageBitmap" }), []);
-  const tracking = applyFrame(state, { source: "camera", at: 100, transport: "ImageBitmap" })[0];
+  assert.deepEqual(
+    applyFrame(state, { source: "camera", at: 0, transport: "ImageBitmap" })[0]
+      .analyses,
+    ["face_detect", "tracking"],
+  );
+  assert.deepEqual(
+    applyFrame(state, { source: "camera", at: 50, transport: "ImageBitmap" }),
+    [],
+  );
+  const tracking = applyFrame(state, {
+    source: "camera",
+    at: 100,
+    transport: "ImageBitmap",
+  })[0];
   assert.deepEqual(tracking.analyses, ["tracking"]);
   assert.equal(tracking.frameCount, 2);
-  const faceAndTracking = applyFrame(state, { source: "camera", at: 300, transport: "ImageBitmap" })[0];
+  const faceAndTracking = applyFrame(state, {
+    source: "camera",
+    at: 300,
+    transport: "ImageBitmap",
+  })[0];
   assert.deepEqual(faceAndTracking.analyses, ["face_detect", "tracking"]);
 });
 
@@ -44,7 +73,10 @@ test("worker detail is compact and contains no frame payload", () => {
     transport: "canvas",
   });
 
-  assert.equal(detail, "source=screen;analysis=screen_diff;frames=3;transport=canvas");
+  assert.equal(
+    detail,
+    "source=screen;analysis=screen_diff;frames=3;transport=canvas",
+  );
 });
 
 test("frame dimensions and counts survive aggregation whatever the transport", () => {
@@ -71,10 +103,18 @@ test("frame dimensions and counts survive aggregation whatever the transport", (
 test("a frame the schedule cannot place produces no analysis", () => {
   const state = createAnalysisState();
   for (const source of ["clipboard", "", null, undefined]) {
-    assert.deepEqual(applyFrame(state, { source, at: 0 }), [], `source ${JSON.stringify(source)}`);
+    assert.deepEqual(
+      applyFrame(state, { source, at: 0 }),
+      [],
+      `source ${JSON.stringify(source)}`,
+    );
   }
   for (const at of [undefined, null, NaN, Infinity, -Infinity, "0"]) {
-    assert.deepEqual(applyFrame(state, { source: "screen", at }), [], `at ${String(at)}`);
+    assert.deepEqual(
+      applyFrame(state, { source: "screen", at }),
+      [],
+      `at ${String(at)}`,
+    );
   }
   assert.deepEqual(applyFrame(state, null), []);
   assert.deepEqual(applyFrame(state, undefined), []);
@@ -83,22 +123,39 @@ test("a frame the schedule cannot place produces no analysis", () => {
   // the pending tally would inflate the next real analysis's frameCount with
   // frames the worker never looked at.
   const [output] = applyFrame(state, { source: "screen", at: 0 });
-  assert.equal(output.frameCount, 1, "only the frame that was accepted is counted");
+  assert.equal(
+    output.frameCount,
+    1,
+    "only the frame that was accepted is counted",
+  );
 });
 
 // What the worker reports when the main thread sends a frame with no shape
 // attached. These defaults are what a reviewer reads off the event, so a
 // missing one renders "transport=undefined" in the integrity detail line.
 test("a frame carrying no shape is reported with defaults, not undefined", () => {
-  const [output] = applyFrame(createAnalysisState(), { source: "screen", at: 0 });
+  const [output] = applyFrame(createAnalysisState(), {
+    source: "screen",
+    at: 0,
+  });
   assert.equal(output.transport, "metadata");
   assert.equal(output.width, 0);
   assert.equal(output.height, 0);
   assert.match(analysisDetail(output), /transport=metadata$/);
   // Zero is a shape the browser really reports for a track that has not sized
   // itself yet, and it must survive as 0 rather than becoming something else.
-  const [zero] = applyFrame(createAnalysisState(), { source: "screen", at: 0, width: 0, height: 0, transport: "" });
-  assert.equal(zero.transport, "metadata", "an empty transport is no transport");
+  const [zero] = applyFrame(createAnalysisState(), {
+    source: "screen",
+    at: 0,
+    width: 0,
+    height: 0,
+    transport: "",
+  });
+  assert.equal(
+    zero.transport,
+    "metadata",
+    "an empty transport is no transport",
+  );
   assert.equal(zero.width, 0);
 });
 
@@ -107,7 +164,10 @@ test("a frame carrying no shape is reported with defaults, not undefined", () =>
 // read as "long enough has passed".
 test("a clock that goes backwards does not open the next window early", () => {
   const state = createAnalysisState();
-  assert.deepEqual(applyFrame(state, { source: "screen", at: 10_000 })[0].analyses, ["screen_diff"]);
+  assert.deepEqual(
+    applyFrame(state, { source: "screen", at: 10_000 })[0].analyses,
+    ["screen_diff"],
+  );
   // Earlier than the last run: the difference is negative, so nothing fires.
   assert.deepEqual(applyFrame(state, { source: "screen", at: 9_000 }), []);
   assert.deepEqual(applyFrame(state, { source: "screen", at: 0 }), []);
@@ -118,7 +178,14 @@ test("a clock that goes backwards does not open the next window early", () => {
   // Three, and on this analysis rather than the next one: the two frames the
   // backwards clock suppressed were counted rather than dropped, and they are
   // reported by the analysis that reopens the window, along with its own.
-  assert.equal(reopened.frameCount, 3, "a suppressed frame is still a frame that arrived");
+  assert.equal(
+    reopened.frameCount,
+    3,
+    "a suppressed frame is still a frame that arrived",
+  );
   // Counted once, so the next window starts again from its own frame.
-  assert.equal(applyFrame(state, { source: "screen", at: 12_000 })[0].frameCount, 1);
+  assert.equal(
+    applyFrame(state, { source: "screen", at: 12_000 })[0].frameCount,
+    1,
+  );
 });
