@@ -35,7 +35,9 @@ puts a blank line before a comment inside a method chain and `cargo fmt` takes
 it straight back out, so `commentflow --check` alone can never be satisfied on
 Rust. `make indent` runs the same script with `--write`, so the fix for a
 failure is always that one command. Never pass `shfmt` a style flag; it reads
-`.editorconfig`.
+`.editorconfig`. Prettier, for HTML and JavaScript, sits beside the chain
+rather than in it: it shares no file with the others, so the check runs it in
+place with `--cache`, alongside the copy. Without `npm ci` it skips with a note.
 
 ## Drift is the usual failure
 

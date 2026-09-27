@@ -5,10 +5,10 @@ description: The CodeTrial conventions no gate enforces - the register a comment
 
 # CodeTrial conventions
 
-The gate settles formatting and correctness. `cargo fmt`, ESLint, `ruff` and
-`shellcheck` run in `scripts/test.sh`, so none of that is here. What is here is
-what a reviewer would otherwise have to say out loud, plus the rules the git
-hooks enforce, so an agent knows them before a hook refuses: the commit
+The gate settles formatting and correctness. `cargo fmt`, Prettier, ESLint,
+`ruff` and `shellcheck` run in `scripts/test.sh`, so none of that is here. What
+is here is what a reviewer would otherwise have to say out loud, plus the rules
+the git hooks enforce, so an agent knows them before a hook refuses: the commit
 message, the staged-content checks, and the branch a pull request is opened
 from. Install them with `make hooks`.
 

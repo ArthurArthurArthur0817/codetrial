@@ -47,11 +47,13 @@ shell=$(list '*.sh')
 # calibration harnesses, and leaving it out of the formatter while `ruff check`
 # reads it in the gate is a split nobody can keep track of.
 python=$(list 'scripts/*.py' 'tests/*.py')
+web=$(list '*.html' '*.js' '*.mjs' '*.cjs')
+prettier=node_modules/.bin/prettier
 
 have()
 {
     command -v "$1" > /dev/null 2>&1 && return 0
-    echo "${0##*/}: $1 not installed, skipping that lane" >&2
+    echo "${0##*/}: $1 not installed, skipping that lane${2:+ ($2)}" >&2
     return 1
 }
 
@@ -78,8 +80,24 @@ format()
     fi
 }
 
+# Prettier shares no file with the chain above, so it needs neither the order
+# nor the copy: the check reads the tree in place, which keeps the path stable
+# enough for --cache to skip files unchanged since the last run, and it runs
+# alongside the chain rather than after it. $1 is --write or --list-different.
+pretty()
+{
+    [ -n "$web" ] && have "$prettier" "run npm ci" || return 0
+    # The cache lives under target/ because `npm ci` empties node_modules.
+    # shellcheck disable=SC2086
+    "$prettier" --cache --cache-strategy content \
+        --cache-location target/prettier-cache "$1" $web
+}
+
 if [ "$mode" = apply ]; then
+    pretty --write > /dev/null &
     format
+    chain=$?
+    wait $! && [ "$chain" -eq 0 ]
     exit
 fi
 
@@ -94,13 +112,20 @@ files=$(printf '%s\n%s\n%s\n' "$rust" "$shell" "$python" | grep -v '^$')
 
 # One tar pipe rather than a mkdir and a cp per file: 81 files was 162 process
 # spawns and most of this gate's wall clock.
-printf '%s\n%s\n%s\n' "$files" Cargo.toml .editorconfig \
+printf '%s\n' "$files" Cargo.toml .editorconfig \
     | tar -cf - -T - \
     | (cd "$work" && tar -xf -) || exit 2
 
-(cd "$work" && format) || exit 2
+# A failed chain still waits for Prettier, so it does not outlive the script
+# writing into a directory the trap has already removed. Exit status 1 from
+# --list-different means drift, which the file list below reports.
+pretty --list-different > "$work/.prettier" &
+(cd "$work" && format)
+chain=$?
+wait $!
+[ $? -le 1 ] && [ "$chain" -eq 0 ] || exit 2
 
-drift=
+drift=$(cat "$work/.prettier")
 for file in $files; do
     cmp -s "$file" "$work/$file" || drift="$drift $file"
 done
