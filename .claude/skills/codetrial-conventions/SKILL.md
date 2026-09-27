@@ -1,15 +1,16 @@
 ---
 name: codetrial-conventions
-description: The CodeTrial conventions no gate enforces - the register a comment, a commit message and a PR reply are written in, the untracked working docs at the repo root, where multi-byte characters are allowed and where they are not, deleting a redundant surface instead of deprecating it, and the repository layout. Use when drafting a commit message or a PR description, adding a file or a public surface, removing a flag or a subcommand, or writing a comment longer than a line.
+description: The CodeTrial conventions no gate enforces - the register a comment, a commit message and a PR reply are written in, the untracked working docs at the repo root, where multi-byte characters are allowed and where they are not, deleting a redundant surface instead of deprecating it, and the repository layout. Use when drafting a commit message or a PR description, pushing a branch to open a pull request from, adding a file or a public surface, removing a flag or a subcommand, or writing a comment longer than a line.
 ---
 
 # CodeTrial conventions
 
 The gate settles formatting and correctness. `cargo fmt`, ESLint, `ruff` and
 `shellcheck` run in `scripts/test.sh`, so none of that is here. What is here is
-what a reviewer would otherwise have to say out loud, plus the two rules that
-are enforced by the git hooks rather than by CI: the commit message and the
-staged-content checks. Install them with `make hooks`.
+what a reviewer would otherwise have to say out loud, plus the rules the git
+hooks enforce, so an agent knows them before a hook refuses: the commit
+message, the staged-content checks, and the branch a pull request is opened
+from. Install them with `make hooks`.
 
 `README.md` is the tracked half and this file does not restate it. Where the
 two speak to the same thing, `README.md` wins.
@@ -83,6 +84,15 @@ fixtures in `tests/golden/` and the versions recorded in
 the CLI.
 
 ## Pull requests and review replies
+
+Open a pull request from a topic branch, never from `main`, and that includes
+the `main` of a fork. A pull request follows its head branch rather than a set
+of commits, so one opened from `main` takes in every later push there, and the
+next change cannot start until it merges. Branch from an up-to-date `main`, keep
+one change per branch, and update the pull request by pushing to that same
+branch, force-pushing after a rebase. The pre-push hook refuses new work on a
+fork's `main`, and CI fails a pull request opened from one; syncing a fork's
+`main` with upstream is still allowed.
 
 The commit body carries what and why. A review thread carries a correction, a
 measurement or nothing: no pasted agent walkthroughs, no severity tables, no

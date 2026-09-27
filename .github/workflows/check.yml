@@ -83,6 +83,23 @@ jobs:
     # has stopped making progress, which is all it is for.
     timeout-minutes: 45
     steps:
+      # A pull request follows its head branch, so one opened from a fork's
+      # main takes in every later push there, and the contributor cannot start
+      # a second change until it merges. The pre-push hook refuses that push;
+      # this refuses the pull request of a contributor who never installed the
+      # hooks. Ahead of the checkout, because it needs nothing from the tree.
+      # The branch name is read in the condition only and never reaches a
+      # shell, because a fork chooses it.
+      - name: Refuse a pull request from a fork's main
+        if: >-
+          github.event_name == 'pull_request'
+          && github.event.pull_request.head.repo.full_name != github.repository
+          && github.event.pull_request.head.ref == 'main'
+        run: |
+          echo "This pull request is opened from the main branch of a fork." >&2
+          echo "Push the commits to a topic branch and open a new pull request from it." >&2
+          exit 1
+
       # Full history, because the mutation step below diffs against the base
       # branch and a shallow clone has no merge base to diff from. 52 commits
       # and 26 MB: the fetch does not show up next to the cargo build.
@@ -102,8 +119,8 @@ jobs:
       # so a rule this log only started following recently would reject history
       # rather than the change in front of it.
       #
-      # First among the steps, because it costs a second and the rest of this
-      # job costs minutes.
+      # First among the steps that read the tree, because it costs a second and
+      # the rest of this job costs minutes.
       - name: Check the commit messages
         if: github.event_name == 'pull_request'
         env:
@@ -344,8 +361,15 @@ jobs:
   # One shard per 25 mutants, capped at four. The cap is not about arithmetic:
   # past that the setup cost of another runner stops paying for itself against
   # the mutants it would take.
+  #
+  # A pull request from a fork's main is refused in `check`, and this job does
+  # not wait on that one, so it repeats the condition rather than plan and fan
+  # out shards for a pull request that has already failed.
   plan-mutants:
-    if: github.event_name == 'pull_request'
+    if: >-
+      github.event_name == 'pull_request'
+      && (github.event.pull_request.head.repo.full_name == github.repository
+      || github.event.pull_request.head.ref != 'main')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:

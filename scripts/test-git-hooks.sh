@@ -216,6 +216,52 @@ git commit -q --allow-empty --no-verify -m "$bump"
 expect 1 "the same message from anyone else is" \
     sh -c 'git rev-parse HEAD | ./scripts/check-commit-log.sh'
 
+# The pushes above went to main of a remote that is not upstream and passed,
+# because until now this clone had no upstream remote to compare against. It
+# gets one here, never fetched: its tracking ref is written by hand, so no case
+# touches the network. An orphan branch keeps the commits above, whose messages
+# fail on purpose, out of these pushes.
+previous=$(git symbolic-ref --short HEAD)
+git switch -q --orphan pushed-from-main
+git commit -q --allow-empty -m "Start the fork" \
+    -m "Upstream has this commit, so a fork may sync it."
+git remote add upstream https://github.com/sysprog21/codetrial
+git update-ref refs/remotes/upstream/main HEAD
+git init -q --bare "$work/fork.git"
+git remote add fork "$work/fork.git"
+expect 0 "a fork's main synced with upstream" git push -q fork HEAD:refs/heads/main
+git commit -q --allow-empty -m "Change something upstream lacks" \
+    -m "The pull request for this belongs on a topic branch."
+expect 1 "new work on a fork's main" git push -q fork HEAD:refs/heads/main
+expect 0 "the same work on a topic branch" git push -q fork HEAD:refs/heads/topic
+
+# Upstream's own main takes new work, which is how it gets merged. Through the
+# hook with the arguments git would pass, because the push itself would leave
+# this machine.
+#
+# Invoked through `expect`, for the same reason `message` carries the directive.
+# shellcheck disable=SC2317,SC2329
+push_main()
+{
+    printf 'refs/heads/main %s refs/heads/main %040d\n' "$(git rev-parse HEAD)" 0 \
+        | "$hooks/pre-push" "$1" "$2"
+}
+expect 0 "new work pushed to upstream's main" \
+    push_main upstream https://github.com/sysprog21/codetrial
+
+# The URL is matched at the host, so a look-alike is not upstream, and GitHub's
+# SSH fallback on port 443 still is, as a push target and as the remote the
+# fork's main is compared against.
+expect 1 "new work on main of a look-alike host" \
+    push_main impostor https://notgithub.com/sysprog21/codetrial
+ssh443=ssh://git@ssh.github.com:443/sysprog21/codetrial
+expect 0 "new work pushed to upstream's main over port 443" \
+    push_main upstream "$ssh443"
+git remote set-url upstream "$ssh443"
+expect 1 "new work on a fork's main, upstream over port 443" \
+    git push -q fork HEAD:refs/heads/main
+git switch -q "$previous"
+
 # Linked worktrees share .git/hooks. The installed wrapper must therefore find
 # the worktree that runs it, rather than remain a link into this checkout.
 git worktree add -q -b linked "$work/linked" || exit 1
