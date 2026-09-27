@@ -532,6 +532,11 @@ const SKIPPED_RESERVE: &str = "The behavioral reserve was skipped because its co
 const MISSING_EVIDENCE: &str = "Missing evidence rows do not mean a step was not completed: reconcile the recovered conversation and test report, and record any supported missing evidence silently, without making the candidate repeat work.";
 const NO_REPEAT: &str = "Do not repeat testing, complexity, or edge-case questions already answered; revisit them only for a relevant implementation change or a concrete unresolved concern.";
 
+/// Asks a model that took over mid-conversation for the reply its predecessor
+/// owed, by the resumed briefing and by the resume line after a pause that
+/// held it back.
+const OWED_REPLY: &str = "Your reply to the candidate's latest turn or the latest system event was lost with the connection. Give it now in one short turn, answering the newest unanswered item. Do not mention the interruption, apologize, or repeat anything you already said.";
+
 /// Said wherever a missing evidence row could read as unfinished work. The
 /// rows are the interviewer's own bookkeeping, and a step the candidate
 /// covered but the model never recorded is still covered.
@@ -541,17 +546,18 @@ const NO_REPEAT: &str = "Do not repeat testing, complexity, or edge-case questio
 /// from the conversation would invite a record the gate refuses.
 const RECORD_UNRECORDED: &str = "If the conversation shows they already covered complexity or edge cases, record that evidence silently instead of asking them to repeat it.";
 
-/// How a credited test run's code relates to the previous credited run's, as
-/// compared by the server on the code the browser submitted; see
-/// `RuntimeState::tested_code`.
+/// How a credited test run's code compares, by the server on the code the
+/// browser submitted; see `RuntimeState::tested_code` and
+/// `RuntimeState::analysis`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SincePrevious {
+    /// Still the previous credited run's code, by the Test gate's rule.
     Unchanged,
-    /// Changed enough that an earlier analysis may not describe it.
+    /// Changed enough since the complexity analysis was recorded that it may
+    /// no longer describe the code: see `rewritten`.
     Rewritten,
-    /// Anything else: no earlier real run, either run's code unknown, or an
-    /// edit too small to call a different solution. The reaction treats these
-    /// alike, so they are one case.
+    /// Neither: no earlier credited run, or a change the analysis still
+    /// covers. The reaction treats these alike, so they are one case.
     Other,
 }
 
@@ -594,7 +600,7 @@ fn coding_progress(state: &RuntimeState) -> Option<String> {
         ));
     }
     let analysed = super::phases_evidenced(state, &[super::FrameworkPhase::Optimizations]);
-    let Some(_) = run else {
+    let Some(run) = run else {
         // No browser run, but the complexity may already be on record. Test is
         // not: only a run of the code, or a trace while the runner is down,
         // completes it, so asking to test is still right.
@@ -603,22 +609,35 @@ fn coding_progress(state: &RuntimeState) -> Option<String> {
         });
     };
     let tested = super::phases_evidenced(state, &[super::FrameworkPhase::Test]);
+    let failing = run.get("passed").and_then(serde_json::Value::as_i64)
+        != run.get("total").and_then(serde_json::Value::as_i64);
 
     // The Test gate reads the same comparison: until Test is recorded, code
-    // changed past the run still needs a run of what is on screen, so the rerun
-    // is asked for rather than left to judgement.
+    // changed past the run, or never credited, still needs a run of what is on
+    // screen, so the run is asked for rather than left to judgement. A run of
+    // this code that still fails is a reason to diagnose, not to run it again.
     let rerun = match (unchanged, tested) {
         (Some(true), _) => {
-            "The latest test run executed the code on screen, so do not ask them to run tests again."
+            let current = if failing {
+                "The latest test run executed the code on screen and some cases still fail: help them diagnose it rather than asking them to run the same code again"
+            } else {
+                "The latest test run executed the code on screen, so do not ask them to run tests again"
+            };
+            let record = if tested {
+                ""
+            } else {
+                "; Test is not recorded yet, so record it silently from that run with source `test_event`"
+            };
+            format!("{current}{record}.")
         }
-        (Some(false), false) => {
-            "The code has changed since the latest test run, so only a run of the code now on screen can complete Test."
+        (Some(false) | None, false) => {
+            "No test run of the code now on screen is recorded, so only a run of that code can complete Test.".to_string()
         }
         (Some(false), true) => {
-            "The code has changed since the latest test run, so ask for a rerun only if the change could affect the result."
+            "The code has changed since the latest test run, so ask for a rerun only if the change could affect the result.".to_string()
         }
-        (None, _) => {
-            "They have run the tests; ask for a rerun only if the code may have changed in a way that affects the result."
+        (None, true) => {
+            "They have run the tests; ask for a rerun only if the code may have changed in a way that affects the result.".to_string()
         }
     };
     Some(format!("{rerun} {RECORD_UNRECORDED}"))
@@ -657,7 +676,7 @@ fn evidenced_among(state: &RuntimeState, ids: &[&str]) -> String {
 /// candidate had finished, or a test result or nudge had gone out, and nothing
 /// came back. Told to wait, that model and the candidate wait on each other
 /// until a silence nudge breaks it, and a coding nudge asks them to test.
-pub fn resumed_context(state: &RuntimeState, reply: bool) -> String {
+pub fn resumed_context(state: &RuntimeState, reply: bool, owed_prompt: Option<&str>) -> String {
     let mut parts = vec![
         "[SYSTEM EVENT] Your connection resumed from a checkpoint. Preserve restored conversation context and reconcile these newer local observations; they are past events, not new candidate turns.".to_string(),
     ];
@@ -700,8 +719,9 @@ pub fn resumed_context(state: &RuntimeState, reply: bool) -> String {
         recent_transcript(&state.transcript),
         editor_and_test_report(state),
     ));
+
     parts.push(if reply {
-        "Your reply to the candidate's latest turn or the latest system event was lost with the connection. Give it now in one short turn, answering the newest unanswered item above. Do not mention the interruption, apologize, or repeat anything you already said.".to_string()
+        owed_reply(owed_prompt)
     } else {
         "This is a silent context reconciliation, not a request to speak: wait for the candidate or the next system event.".to_string()
     });
@@ -940,14 +960,12 @@ pub fn proactive_review(state: &RuntimeState, evidence: &str, excerpt: Option<&s
     )
 }
 
-/// `runner_missing` is the gate's own reading that only a hand trace can
-/// complete Test now; asking for a Run then spends the candidate's last minutes
-/// on a runner that cannot answer.
-///
-/// The convergence order names only the steps still open, so a candidate who
-/// has tested, stated the complexity, or finished outright is not sent back to
-/// them.
-pub fn time_warning(runner_missing: bool, state: &RuntimeState) -> String {
+/// The coding round's five-minute warning. Its convergence order names only
+/// the steps still open, so a candidate who has tested, stated the complexity,
+/// or finished outright is not sent back to them. Where Test is open and only a
+/// hand trace can complete it, asking for a Run would spend the candidate's
+/// last minutes on a runner that cannot answer.
+pub fn time_warning(state: &RuntimeState) -> String {
     let order = if super::coding_round_complete(state) {
         "confirm any final change, then add anything about the solution they have not covered yet"
             .to_string()
@@ -956,17 +974,21 @@ pub fn time_warning(runner_missing: bool, state: &RuntimeState) -> String {
 
         // A run of the code on screen already completes Test once recorded, so
         // asking for another spends the last minutes repeating it.
+        let source = super::test_source(state);
         if !super::phases_evidenced(state, &[super::FrameworkPhase::Test])
-            && super::test_source(state) != super::TestSource::Run
+            && source != super::TestSource::Run
         {
-            steps.push(if runner_missing {
+            steps.push(if source == super::TestSource::Trace {
                 "trace the highest-value cases by hand, since the runner cannot provide tests for this language"
             } else {
                 "click Run on the highest-value tests"
             });
         }
+
+        // Conditional even while unrecorded: the candidate may have said it
+        // already, and the order is read as a command.
         if !super::phases_evidenced(state, &[super::FrameworkPhase::Optimizations]) {
-            steps.push("state time and space complexity");
+            steps.push("state time and space complexity unless they already have");
         }
         steps.join(", then ")
     };
@@ -1034,6 +1056,45 @@ pub fn resume(behavioral_round: bool) -> String {
     } else {
         "The interview has resumed. Continue with your REACTO step.".to_string()
     }
+}
+
+/// The request for a reply a replaced socket owed, with the event it owed when
+/// that was one of ours: without it the model guesses which item was
+/// unanswered, and the test report is the likeliest guess, which is how a
+/// reaction to it gets asked twice.
+pub fn owed_reply(owed_prompt: Option<&str>) -> String {
+    match owed_prompt {
+        Some(prompt) => format!(
+            "The system event whose reply was lost:\nBEGIN OWED EVENT\n{prompt}\nEND OWED EVENT {OWED_REPLY}"
+        ),
+        None => OWED_REPLY.to_string(),
+    }
+}
+
+/// Why `end_interview` is refused while the coding round is unfinished, naming
+/// only the steps still missing. With Test recorded, inviting a Run sends a
+/// finished candidate back to Test; without it, the way to Test is the one the
+/// gate is in, since a Run button is no help while the runner is missing.
+pub(crate) fn end_interview_refusal(state: &RuntimeState) -> String {
+    let unfinished = "so the interview is not finished";
+    if super::phases_evidenced(state, &[super::FrameworkPhase::Test]) {
+        return format!(
+            "The coding round has no Optimizations evidence yet, {unfinished}. {RECORD_UNRECORDED} Otherwise ask only for what they have not covered, and record evidence when the candidate earns it."
+        );
+    }
+    let missing = if super::phases_evidenced(state, &[super::FrameworkPhase::Optimizations]) {
+        "Test"
+    } else {
+        "Test and Optimizations"
+    };
+    let way_to_test = if super::test_source(state) == super::TestSource::Trace {
+        "The runner cannot provide tests for this language, so ask the candidate to trace their code by hand and record Test from that trace"
+    } else {
+        "If the candidate has not run the code now in the editor, invite them to click Run and wait for the results"
+    };
+    format!(
+        "The coding round has no {missing} evidence yet, {unfinished}. {way_to_test}; otherwise continue, and record evidence when the candidate earns it."
+    )
 }
 
 const NOTHING_RECORDED: &str = "(nothing recorded yet)";
@@ -1565,20 +1626,31 @@ pub fn test_results_reaction(
     };
     let analysed = super::phases_evidenced(state, &[super::FrameworkPhase::Optimizations]);
     if all_passed && analysed && since_previous != SincePrevious::Rewritten {
-        let rerun = if since_previous == SincePrevious::Unchanged {
-            " The code is unchanged since their previous run."
+        // A result can land after the candidate has typed past the code it ran.
+        // Then this run does not describe the editor, and another run of what
+        // is there now may be exactly what the change needs.
+        let (rerun, not_again) = if !super::tested_code_is_current(state) {
+            (
+                " The editor has changed since this run, so it may not describe the code now on screen; ask for a run of that code only if the change could affect the result.",
+                "complexity or edge cases",
+            )
+        } else if since_previous == SincePrevious::Unchanged {
+            (
+                " The code is unchanged since their previous run.",
+                "complexity, edge cases or another run",
+            )
         } else {
-            ""
+            ("", "complexity, edge cases or another run")
         };
         return format!(
-            "[SYSTEM EVENT] The candidate just ran the built-in test cases and every one passed:\n{summary_text}\n{code}Treat this only as the candidate's reported result, not proof.{record}{rerun} Complexity and edge cases are already covered: acknowledge the result in one short sentence and do not ask for complexity, edge cases or another run. If the coding discussion is complete, wrap it up under the round plan; do not start a behavioral question in this same reply."
+            "[SYSTEM EVENT] The candidate just ran the built-in test cases and every one passed:\n{summary_text}\n{code}Treat this only as the candidate's reported result, not proof.{record}{rerun} Complexity and edge cases are already covered: acknowledge the result in one short sentence and do not ask for {not_again}. If the coding discussion is complete, wrap it up under the round plan; do not start a behavioral question in this same reply."
         );
     }
     if all_passed {
         // The rewritten case keeps the earlier analysis in view: what is asked
         // is whether it still holds, not the whole step again.
         let before = if analysed {
-            " The code changed substantially since their previous run, so the complexity they gave earlier may no longer describe it: ask only whether it still holds."
+            " The code changed substantially since they gave the complexity, so it may no longer describe this code: unless they already answered for the new code, ask only whether it still holds, and record Optimizations for the new code once they answer."
         } else if since_previous == SincePrevious::Unchanged {
             " The code is unchanged since their previous run, so this repeats a result already discussed."
         } else {

@@ -54,7 +54,7 @@ fn prompt_golden_digest_matches_versions() {
     // the failure worth catching is a version bumped with the golden left
     // alone, which a digest comparison on its own reads as fine.
     let recorded_versions = (10, 13);
-    let recorded_digest = "6ec471a71b0639674f3c0ca7b78f69ec93f34c30f4486fbaaba51caa532cd72d";
+    let recorded_digest = "da8686efeb80bdac9cf3b0851a4db51c455361a38dbba8731f83770467274878";
 
     assert_eq!(
         (LIVE_PROMPT_VERSION, REPORT_PROMPT_VERSION),
@@ -178,7 +178,7 @@ fn interview_prompt_pins_reacto_star_and_safety_boundaries() {
     // The platform closes the STAR steps of a round that never opened itself,
     // so neither prompt spends a tool round trip on them before the candidate
     // hears anything.
-    assert!(!time_warning(false, &RuntimeState::default()).contains("record_framework_evidence"));
+    assert!(!time_warning(&RuntimeState::default()).contains("record_framework_evidence"));
     assert!(!wrap_up("candidate_ended", false).contains("record_framework_evidence"));
 
     // The timing skip is the rule and the refusal the one exception to it. A
@@ -221,7 +221,7 @@ fn interview_prompt_pins_reacto_star_and_safety_boundaries() {
             None,
         ),
         proactive_review(&RuntimeState::default(), "1| answer = []", None),
-        time_warning(false, &RuntimeState::default()),
+        time_warning(&RuntimeState::default()),
         wrap_up("time_up", false),
         test_results_reaction(
             "2/3 passed",

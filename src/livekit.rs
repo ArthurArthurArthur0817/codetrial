@@ -104,7 +104,8 @@ mod turn;
 pub use session::execute_tool_call;
 use session::{
     GeminiEventContext, TestRunLine, close_turns, cut_off_turn, handle_gemini_event, log_clock,
-    prompt_fields, prompt_line, send_model_text, send_wrap_up_and_wait, set_agent_state,
+    prompt_fields, prompt_line, send_model_context, send_model_text, send_wrap_up_and_wait,
+    set_agent_state,
 };
 
 use report::{freeze_report_prompt, generate_report_bounded, publish_report};
@@ -483,7 +484,8 @@ async fn replace_gemini_session(
 
     *context.gemini = session;
 
-    let (owed, debt) = hand_over(context.state, context.activity, context.output_audio);
+    let (owed, debt, owed_prompt) =
+        hand_over(context.state, context.activity, context.output_audio);
 
     // The one line that ties a replacement to what the new socket is missing:
     // how old the checkpoint it resumed from is, what was owed, and what the
@@ -506,6 +508,7 @@ async fn replace_gemini_session(
         } else {
             Replacement::Cold
         },
+        owed_prompt.as_deref(),
     )
     .await;
     if spoke {
@@ -525,6 +528,8 @@ async fn replace_gemini_session(
 /// Ends what the dead socket left in flight, and reports whether the new one
 /// owes a reply and why, for the replacement log line: the candidate's turn,
 /// the number of a prompt still unanswered or `none`, and a tool continuation.
+/// The prompt's own text comes back too, so the briefing can name what to
+/// answer rather than leave the new socket to guess.
 /// Everything a replacement does to the room's own state and nothing it does
 /// to the room, so a test drives the same steps production takes.
 ///
@@ -541,8 +546,10 @@ fn hand_over(
     state: &mut RuntimeState,
     activity: &mut RuntimeActivity,
     output_audio: &mut OutputAudio,
-) -> (bool, String) {
-    let prompt = if activity.prompted_at.is_some() && !activity.prompt_allows_silence {
+) -> (bool, String, Option<String>) {
+    let owes_prompt = activity.owes_prompt();
+    let owed_prompt = activity.prompt_text.take().filter(|_| owes_prompt);
+    let prompt = if owes_prompt {
         activity.prompt_sequence.to_string()
     } else {
         "none".to_string()
@@ -556,7 +563,7 @@ fn hand_over(
     cut_off_turn(activity, output_audio);
     clear_abandoned_socket_work(state, activity);
     activity.evidence_shown = None;
-    (owed, debt)
+    (owed, debt, owed_prompt)
 }
 
 /// How a socket was replaced, as far as the briefing sent to it cares.
@@ -581,6 +588,7 @@ async fn brief_replacement(
     state: &mut RuntimeState,
     activity: &mut RuntimeActivity,
     replacement: Replacement,
+    owed_prompt: Option<&str>,
 ) -> bool {
     if matches!(replacement, Replacement::Resumed { .. }) {
         // Matched literally by the soak in scripts/browser-check.cjs, which has
@@ -599,9 +607,13 @@ async fn brief_replacement(
     // `next_event`, where this arm is waiting to restart it. Propagating here
     // would end the interview on the one write the restart exists to make, and
     // the write most likely to meet a socket that is already gone.
-    match send_recovery_brief(gemini, state, replacement).await {
+    match send_recovery_brief(gemini, state, replacement, owed_prompt).await {
         Ok(true) => {
-            activity.mark_prompted(Instant::now());
+            // The briefing is scaffolding, not the event: a socket that drops
+            // before answering it still owes what the briefing asked about, and
+            // naming the briefing there would nest it, transcript and all,
+            // inside the next one.
+            activity.mark_prompted(Instant::now(), owed_prompt, false);
             true
         }
         Ok(false) => false,
@@ -609,7 +621,7 @@ async fn brief_replacement(
             eprintln!(
                 "connection-recovery briefing failed ({error}); waiting for the close to be reported"
             );
-            keep_recovery_debt(state, activity, replacement);
+            keep_recovery_debt(state, activity, replacement, owed_prompt);
             false
         }
     }
@@ -623,15 +635,18 @@ fn keep_recovery_debt(
     state: &mut RuntimeState,
     activity: &mut RuntimeActivity,
     replacement: Replacement,
+    owed_prompt: Option<&str>,
 ) {
     match replacement {
         Replacement::Cold => state.needs_cold_brief = true,
-        Replacement::Resumed { owed: true } => activity.owe_prompt(Instant::now()),
+        Replacement::Resumed { owed: true } => {
+            activity.owe_prompt(Instant::now(), owed_prompt.map(str::to_string));
+        }
         Replacement::Resumed { owed: false } => {}
     }
 }
 
-/// Sends the briefing and reports whether it asked for a reply.
+/// Sends the briefing, and reports whether it asked for a reply.
 ///
 /// A resumed socket gets its update as context. It speaks only when the old
 /// socket owed a reply, since otherwise the candidate has the floor. A cold
@@ -643,18 +658,24 @@ async fn send_recovery_brief(
     gemini: &mut GeminiLiveSession,
     state: &mut RuntimeState,
     replacement: Replacement,
+    owed_prompt: Option<&str>,
 ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
-    // Both briefings carry the whole editor, so the model has now seen it.
     if let Replacement::Resumed { owed } = replacement
         && !state.needs_cold_brief
     {
+        // A reply owed during a pause cannot be asked for yet, since it would
+        // be discarded; unpausing asks for it instead of the plain resume line.
         let reply = owed && !state.paused;
-        let context = crate::agent::with_timer(state, crate::agent::resumed_context(state, reply));
+        if owed && state.paused {
+            state.owed_reply_on_resume = Some(crate::agent::owed_reply(owed_prompt));
+        }
+        let context = crate::agent::with_timer(
+            state,
+            crate::agent::resumed_context(state, reply, owed_prompt),
+        );
+        // The briefing carries the whole editor, so the model has now seen it.
         state.code_shown = state.code.clone();
-        state
-            .evidence_ledger
-            .record_model_input(ModelInputKind::Turn, &context);
-        gemini.send_context(&context, reply).await?;
+        send_model_context(gemini, state, ModelInputKind::Turn, &context, reply).await?;
         return Ok(reply);
     }
     if state.paused {
@@ -956,7 +977,8 @@ async fn open_session<'a>(
         &greeting,
     )
     .await?;
-    turn.activity.mark_prompted(Instant::now());
+    turn.activity
+        .mark_prompted(Instant::now(), Some(&greeting), false);
 
     Ok(Some(OpenSession {
         room,
@@ -1051,7 +1073,9 @@ async fn on_watch_tick(
     // both the silence nudge and a deferred `GoAway` waiting on output that is
     // not coming. The reply stays owed, so a replacement socket still gives it.
     // After the absence check, so a room being torn down is not reconnected.
-    let stalls = context.activity.settle_stalls(tick_at);
+    let stalls = context
+        .activity
+        .settle_stalls(tick_at, context.output_audio.is_playing());
     if stalls.prompt_released {
         eprintln!(
             "timing: no output {}s after a prompt; returning the floor at={} room={}",
@@ -1158,11 +1182,7 @@ async fn send_watched_prompt<E>(
     if prompt.behavioral_nudge {
         activity.behavioral_nudged = true;
     }
-    if prompt.allows_silence {
-        activity.mark_prompted_allowing_silence(Instant::now());
-    } else {
-        activity.mark_prompted(Instant::now());
-    }
+    activity.mark_prompted(Instant::now(), Some(&prompt.text), prompt.allows_silence);
     Ok(())
 }
 
@@ -1968,7 +1988,9 @@ async fn handle_data_packet(
         // the socket it failed on is replaced when the close is reported.
         match send_model_text(context.gemini, context.state, ModelInputKind::Turn, &prompt).await {
             Ok(()) => {
-                context.activity.mark_prompted(Instant::now());
+                context
+                    .activity
+                    .mark_prompted(Instant::now(), Some(&prompt), false);
 
                 // Which data event made Jim speak, against the progress it was
                 // sent with, so a transcript that repeats a step can be matched

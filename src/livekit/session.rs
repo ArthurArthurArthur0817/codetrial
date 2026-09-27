@@ -59,6 +59,20 @@ pub(super) async fn send_model_text(
     gemini.send_text(text).await
 }
 
+/// `send_model_text` for ordered context rather than realtime text: counted
+/// the same way, sent as a `clientContent` turn that asks for a reply only
+/// when `turn_complete`.
+pub(super) async fn send_model_context(
+    gemini: &mut GeminiLiveSession,
+    state: &mut RuntimeState,
+    kind: ModelInputKind,
+    text: &str,
+    turn_complete: bool,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    state.evidence_ledger.record_model_input(kind, text);
+    gemini.send_context(text, turn_complete).await
+}
+
 pub(super) struct GeminiEventContext<'a> {
     pub(super) output_audio: &'a mut OutputAudio,
     pub(super) gemini: &'a mut GeminiLiveSession,
@@ -238,21 +252,22 @@ pub(super) async fn handle_gemini_event(
     event: GeminiEvent,
     interruptible: Interruptible,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // The turn a discard ends belongs to the generation the pause cut off, so
+    // it answers nothing sent since; only delivered output settles a prompt. It
+    // is still dispatched, and an `Interrupted` there runs `cut_off_turn`,
+    // which would clear a resume prompt sent after the pause. That debt is held
+    // across the dispatch and put back.
+    let mut held_debt = None;
     match output_disposition(
         &event,
         context.activity.discarding_output,
         context.state.paused,
     ) {
         OutputDisposition::Drop => return Ok(()),
-
-        // The turn a discard ends belongs to the generation the pause cut off,
-        // so it answers nothing sent since; only delivered output settles a
-        // prompt.
-        //
-        // So it touches no prompt state: `note_turn_boundary` would read it as
-        // the resume prompt's own answer. The pause that armed the discard ran
-        // `cut_off_turn`, which already cleared anything the old turn owed.
-        OutputDisposition::EndsTheDiscard => context.activity.discarding_output = false,
+        OutputDisposition::EndsTheDiscard => {
+            context.activity.discarding_output = false;
+            held_debt = Some(context.activity.prompt_debt());
+        }
         OutputDisposition::Deliver => {
             if answers_prompt(&event) {
                 context.activity.note_output();
@@ -261,7 +276,7 @@ pub(super) async fn handle_gemini_event(
             }
         }
     }
-    match event {
+    let handled = match event {
         GeminiEvent::ToolCall(calls) => on_tool_calls(room, context, calls).await,
         GeminiEvent::OutputTranscript(text) => on_output_transcript(room, context, &text).await,
         GeminiEvent::InputTranscript(text) => {
@@ -284,7 +299,11 @@ pub(super) async fn handle_gemini_event(
         // `WRAP_UP_WAIT` and there is no socket left to replace.
         GeminiEvent::GoAway { .. } => Ok(()),
         _ => Ok(()),
+    };
+    if let Some(debt) = held_debt {
+        context.activity.restore_prompt_debt(debt);
     }
+    handled
 }
 
 /// Answers every call in the batch in one message, and republishes the
@@ -333,7 +352,7 @@ async fn on_tool_calls(
     match context.gemini.send_tool_responses(&answers).await {
         // Gemini now owes a generation for this, and will deliver it on this
         // socket or not at all.
-        Ok(()) => context.activity.tool_response_outstanding = true,
+        Ok(()) => context.activity.note_tool_response(Instant::now()),
         Err(error) => {
             eprintln!(
                 "Gemini tool response failed ({error}); waiting for the close to be reported"
@@ -708,17 +727,8 @@ fn tool_response(state: &mut RuntimeState, call: &GeminiFunctionCall) -> serde_j
         // clock.
         TOOL_END_INTERVIEW => {
             if !crate::agent::coding_round_complete(state) {
-                // The way to Test named for the state the gate is in: a Run
-                // button is no help while the runner is reported missing.
-                let way_to_test = if crate::agent::test_source(state)
-                    == crate::agent::TestSource::Trace
-                {
-                    "The runner cannot provide tests for this language, so ask the candidate to trace their code by hand and record Test from that trace"
-                } else {
-                    "If the candidate has not run the code now in the editor, invite them to click Run and wait for the results"
-                };
                 return serde_json::json!({
-                    "error": format!("The coding round has no Test and Optimizations evidence yet, so the interview is not finished. {way_to_test}; otherwise continue, and record evidence when the candidate earns it.")
+                    "error": crate::agent::end_interview_refusal(state)
                 });
             }
             if state.interview_loop == crate::agent::InterviewLoop::CodingBehavioral
@@ -826,7 +836,9 @@ pub(super) async fn send_wrap_up_and_wait(
         &farewell,
     )
     .await?;
-    context.activity.mark_prompted(Instant::now());
+    context
+        .activity
+        .mark_prompted(Instant::now(), Some(&farewell), false);
     let deadline = Instant::now() + WRAP_UP_WAIT;
     loop {
         if Instant::now() >= deadline {
@@ -913,6 +925,7 @@ pub(super) fn cut_off_turn(
 
     activity.prompted_at = None;
     activity.prompt_behind_turn = false;
+    activity.generating = false;
 
     // The generation this was waiting for died with the turn.
     activity.tool_response_outstanding = false;

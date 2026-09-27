@@ -3,8 +3,8 @@
 //! items are in scope.
 
 use super::{
-    MIN_WRITTEN_CHARS, RuntimeState, changed_characters, code_written, edited_within, rewritten,
-    uncommented_chars,
+    MIN_WRITTEN_CHARS, RuntimeState, TestedCode, changed_characters, code_written, edited_within,
+    rewritten, uncommented_chars,
 };
 
 /// What was typed, the half of `changed_characters` the starter check reads.
@@ -186,26 +186,43 @@ fn uncommented_chars_drops_comments_and_keeps_literals() {
 }
 
 /// Where a passing run stops trusting an earlier complexity answer: more than
-/// 80 characters of content either way, or three lines, each alone enough.
-/// Pinned at both edges, since a threshold off by one is the whole decision.
+/// 80 characters of code added and removed together, comments aside, or
+/// another language. Pinned at the edge, since a threshold off by one is the
+/// whole decision, and on what a net-size measure missed: a new algorithm of
+/// about the same length.
 #[test]
-fn a_rewrite_is_eighty_one_characters_or_three_lines() {
-    let base = "x = 1";
-    let longer = |extra: usize| format!("{base}{}", "y".repeat(extra));
+fn a_rewrite_is_what_changed_not_how_long_it_is() {
+    let analysed = |code: &str| TestedCode {
+        language: "python".to_string(),
+        code: code.to_string(),
+    };
+    let base = analysed("x = 1");
+    let longer = |extra: usize| format!("x = 1{}", "y".repeat(extra));
     assert!(
-        !rewritten(base, &longer(80)),
+        !rewritten(&base, "python", &longer(80)),
         "eighty characters is an edit"
     );
-    assert!(rewritten(base, &longer(81)), "eighty-one is a rewrite");
-    assert!(rewritten(&longer(81), base), "either way");
+    assert!(
+        rewritten(&base, "python", &longer(81)),
+        "eighty-one is a rewrite"
+    );
+    assert!(
+        rewritten(&analysed(&longer(81)), "python", "x = 1"),
+        "either way"
+    );
 
-    // Few characters, but three more lines, is still a rewrite on its own.
-    assert!(
-        !rewritten(base, &format!("{base}\na\nb")),
-        "two lines is an edit"
-    );
-    assert!(
-        rewritten(base, &format!("{base}\na\nb\nc")),
-        "three lines is a rewrite"
-    );
+    // The same length, another algorithm: what changed is counted both ways.
+    let nested = analysed(&format!(
+        "for i in a:\n    for j in b:\n        {}",
+        "p".repeat(40)
+    ));
+    let hashed = format!("seen = set(a)\nfor j in b:\n    {}", "q".repeat(40));
+    assert!(rewritten(&nested, "python", &hashed));
+
+    // A comment is no change to what the analysis described.
+    let comment = format!("x = 1  # {}", "note ".repeat(30));
+    assert!(!rewritten(&base, "python", &comment));
+
+    // Another language is another solution.
+    assert!(rewritten(&base, "cpp", "x = 1"));
 }

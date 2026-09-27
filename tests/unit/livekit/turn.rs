@@ -270,7 +270,7 @@ fn no_interim_review_starts_that_the_end_would_abort() {
 fn a_tool_continuation_stays_owed_after_prompt_output() {
     let start = Instant::now();
     let mut activity = RuntimeActivity::new(start);
-    activity.mark_prompted(start);
+    activity.mark_prompted(start, None, false);
     activity.note_output();
     activity.tool_response_outstanding = true;
 
@@ -297,16 +297,16 @@ fn a_prompt_with_no_output_returns_the_floor_but_stays_owed() {
     let mut activity = RuntimeActivity::new(start);
     assert!(!activity.owes_reply());
 
-    activity.mark_prompted(start);
+    activity.mark_prompted(start, None, false);
     assert!(activity.owes_reply());
     assert_eq!(
-        activity.settle_stalls(start + PROMPT_STALL - Duration::from_millis(1)),
+        activity.settle_stalls(start + PROMPT_STALL - Duration::from_millis(1), false),
         quiet
     );
     assert_eq!(activity.floor, Floor::Speaking);
 
     assert_eq!(
-        activity.settle_stalls(start + PROMPT_STALL),
+        activity.settle_stalls(start + PROMPT_STALL, false),
         Stalls {
             prompt_released: true,
             spend_restart: true,
@@ -315,16 +315,16 @@ fn a_prompt_with_no_output_returns_the_floor_but_stays_owed() {
     assert_eq!(activity.floor, Floor::Listening);
     assert!(activity.owes_reply(), "the reply was never given");
     assert_eq!(
-        activity.settle_stalls(start + PROMPT_STALL * 2),
+        activity.settle_stalls(start + PROMPT_STALL * 2, false),
         quiet,
         "a floor already returned is not returned again"
     );
 
-    activity.mark_prompted(start);
+    activity.mark_prompted(start, None, false);
     activity.note_output();
     assert!(!activity.owes_reply());
     assert_eq!(
-        activity.settle_stalls(start + PROMPT_STALL),
+        activity.settle_stalls(start + PROMPT_STALL, false),
         quiet,
         "a prompt that produced output is being answered, however slowly it plays"
     );
@@ -340,11 +340,11 @@ fn an_unanswered_candidate_turn_lets_a_held_restart_go() {
     activity.note_candidate_finished(start);
     assert!(
         !activity
-            .settle_stalls(start + PROMPT_STALL - Duration::from_millis(1))
+            .settle_stalls(start + PROMPT_STALL - Duration::from_millis(1), false)
             .spend_restart
     );
     assert_eq!(
-        activity.settle_stalls(start + PROMPT_STALL),
+        activity.settle_stalls(start + PROMPT_STALL, false),
         Stalls {
             prompt_released: false,
             spend_restart: true,
@@ -359,18 +359,29 @@ fn an_unanswered_candidate_turn_lets_a_held_restart_go() {
 fn speaking_again_retires_an_unanswered_prompt() {
     let start = Instant::now();
     let mut activity = RuntimeActivity::new(start);
-    activity.mark_prompted(start);
-    activity.settle_stalls(start + PROMPT_STALL);
+    activity.mark_prompted(start, None, false);
+    activity.settle_stalls(start + PROMPT_STALL, false);
     activity.note_candidate_finished(start + PROMPT_STALL * 2);
     assert!(activity.prompted_at.is_none());
     assert!(activity.reply_in_flight());
 
-    // While the prompt still holds the floor, a lagging transcript fragment
-    // does not retire it: the answer may still be on its way.
+    // A prompt that has produced nothing yet is not a reply under way, so the
+    // candidate speaking over it is their turn to answer.
+    let mut waiting = RuntimeActivity::new(start);
+    waiting.mark_prompted(start, None, false);
+    waiting.note_candidate_finished(start + Duration::from_secs(1));
+    assert!(waiting.prompted_at.is_none());
+    assert!(waiting.reply_in_flight());
+
+    // While Gemini is producing, a lagging transcript fragment retires nothing:
+    // the prompt went out behind that turn, and its answer may still be on its
+    // way.
     let mut speaking = RuntimeActivity::new(start);
-    speaking.mark_prompted(start);
+    speaking.note_output();
+    speaking.mark_prompted(start, None, false);
     speaking.note_candidate_finished(start + Duration::from_secs(1));
     assert!(speaking.prompted_at.is_some());
+    assert!(!speaking.reply_in_flight());
 }
 
 /// Output that follows a prompt sent mid-generation is the earlier
@@ -379,8 +390,8 @@ fn speaking_again_retires_an_unanswered_prompt() {
 fn output_behind_a_prompt_belongs_to_the_earlier_turn() {
     let start = Instant::now();
     let mut activity = RuntimeActivity::new(start);
-    activity.mark_speaking();
-    activity.mark_prompted(start);
+    activity.note_output();
+    activity.mark_prompted(start, None, false);
     activity.note_output();
     assert!(
         activity.owes_reply(),
@@ -401,7 +412,7 @@ fn output_behind_a_prompt_belongs_to_the_earlier_turn() {
 fn a_prompt_answered_with_silence_is_not_owed() {
     let start = Instant::now();
     let mut activity = RuntimeActivity::new(start);
-    activity.mark_prompted(start);
+    activity.mark_prompted(start, None, false);
     activity.note_turn_boundary();
     assert!(!activity.owes_reply());
 }
@@ -412,7 +423,7 @@ fn a_prompt_answered_with_silence_is_not_owed() {
 fn an_owed_briefing_leaves_the_floor_alone() {
     let start = Instant::now();
     let mut activity = RuntimeActivity::new(start);
-    activity.owe_prompt(start);
+    activity.owe_prompt(start, None);
     assert!(activity.owes_reply());
     assert_eq!(activity.floor, Floor::Listening);
 }

@@ -2261,7 +2261,7 @@ fn a_result_for_code_since_edited_is_not_claimed_as_tested() {
     apply_data_event(&mut state, TOPIC_TEST_RESULTS, &packet, 100.0);
     let nudge = silence_nudge(&state, "", None);
     assert!(!nudge.contains("executed the code on screen"), "{nudge}");
-    assert!(nudge.contains("The code has changed since the latest test run"));
+    assert!(nudge.contains("only a run of that code can complete Test"));
 }
 
 /// Analysis given for an earlier solution does not cover a rewrite of it, and
@@ -2274,9 +2274,31 @@ fn a_rewrite_after_the_analysis_asks_whether_it_still_holds() {
     state
         .code
         .push_str(&"for i in range(len(nums)):\n    for j in range(i):\n        pass\n".repeat(3));
+
+    // Evidence for another step is not an analysis, so it anchors nothing.
+    record_framework_evidence(
+        &mut state,
+        &json!({"phase": "algorithm", "source": "candidate_speech", "kind": "observed",
+            "confidence": 90, "summary": "Explained the nested loop."}),
+    )
+    .unwrap();
+    let before_any_run = state.clone();
     let reply = run_tests(&mut state, 3, 3).generate_reply.unwrap();
-    assert!(reply.contains("may no longer describe it"), "{reply}");
+    assert!(
+        reply.contains("may no longer describe this code"),
+        "{reply}"
+    );
     assert!(!reply.contains("Complexity and edge cases are already covered"));
+
+    // A rewrite whose first run failed was never asked about: the passing rerun
+    // of the same code is still a rewrite, not a repeat.
+    let mut failed_first = before_any_run;
+    run_tests(&mut failed_first, 1, 3);
+    let rerun = run_tests(&mut failed_first, 3, 3).generate_reply.unwrap();
+    assert!(
+        rerun.contains("may no longer describe this code"),
+        "{rerun}"
+    );
 
     let mut first = RuntimeState::default();
     let reply = run_tests(&mut first, 3, 3).generate_reply.unwrap();
@@ -2423,7 +2445,7 @@ fn covered_steps_count_without_a_run_and_repeats_are_named() {
 fn reconnect_briefings_state_the_test_progress() {
     let mut state = with_written_code(RuntimeState::default());
     run_tests(&mut state, 3, 3);
-    for prompt in [resumed_context(&state, true), cold_restart(&state)] {
+    for prompt in [resumed_context(&state, true, None), cold_restart(&state)] {
         assert!(prompt.contains("3/3 cases passed"), "{prompt}");
         assert!(prompt.contains("The latest test run executed the code on screen"));
     }
@@ -2443,10 +2465,10 @@ fn resumed_context_answers_only_an_owed_turn() {
         test_runs: 1,
         ..RuntimeState::default()
     };
-    let silent = resumed_context(&state, false);
+    let silent = resumed_context(&state, false, None);
     assert!(silent.contains("not a request to speak"));
     assert!(!silent.contains("was lost with the connection"));
-    let reply = resumed_context(&state, true);
+    let reply = resumed_context(&state, true, None);
     assert!(reply.contains("was lost with the connection. Give it now"));
     assert!(!reply.contains("not a request to speak"));
     assert!(reply.contains("3/3 cases passed"));
@@ -2457,7 +2479,7 @@ fn resumed_context_answers_only_an_owed_turn() {
 #[test]
 fn resumed_context_names_the_rounds_own_steps_and_none() {
     let state = RuntimeState::default();
-    let prompt = resumed_context(&state, false);
+    let prompt = resumed_context(&state, false, None);
     assert!(
         prompt.contains("REACTO steps already evidenced: none."),
         "{prompt}"
@@ -2475,13 +2497,13 @@ fn resumed_context_names_the_rounds_own_steps_and_none() {
         )
         .unwrap();
     }
-    let coding = resumed_context(&state, false);
+    let coding = resumed_context(&state, false, None);
     assert!(
         coding.contains("REACTO steps already evidenced: example."),
         "{coding}"
     );
     state.behavioral_round_started = true;
-    let behavioral = resumed_context(&state, false);
+    let behavioral = resumed_context(&state, false, None);
     assert!(
         behavioral.contains("STAR parts already evidenced: situation."),
         "{behavioral}"
@@ -2496,13 +2518,13 @@ fn resumed_context_preserves_memory_and_a_skipped_round() {
         transcript: vec!["Candidate: later detail".repeat(2000)],
         ..RuntimeState::default()
     };
-    let prompt = resumed_context(&state, false);
+    let prompt = resumed_context(&state, false, None);
     assert!(prompt.contains("does not erase your restored context"));
     assert!(prompt.contains("wait for the candidate or the next system event"));
     assert!(!prompt.contains("ask no follow-up and no new question"));
     state.behavioral_round_started = false;
     state.round_transition_seen = true;
-    assert!(resumed_context(&state, false).contains("The behavioral reserve was skipped"));
+    assert!(resumed_context(&state, false, None).contains("The behavioral reserve was skipped"));
     assert!(cold_restart(&state).contains("The behavioral reserve was skipped"));
 }
 
@@ -2515,7 +2537,7 @@ fn resumed_context_recovers_completion_follow_ups_and_language() {
         ..RuntimeState::default()
     });
     record_coding_gate_evidence(&mut state);
-    let prompt = resumed_context(&state, false);
+    let prompt = resumed_context(&state, false, None);
     assert!(prompt.contains("The coding problem is solved and tested"));
     assert!(!prompt.contains("The coding round is active"));
     assert!(prompt.contains("Discuss a streaming input."));
@@ -2525,7 +2547,7 @@ fn resumed_context_recovers_completion_follow_ups_and_language() {
             .contains("Do not repeat testing, complexity, or edge-case questions already answered")
     );
     state.behavioral_round_started = true;
-    assert!(!resumed_context(&state, false).contains("Discuss a streaming input."));
+    assert!(!resumed_context(&state, false, None).contains("Discuss a streaming input."));
 }
 
 /// Issue #66 by the other two routes: an editor review and the five-minute
@@ -2534,18 +2556,19 @@ fn resumed_context_recovers_completion_follow_ups_and_language() {
 fn review_and_time_warning_follow_the_recorded_test_progress() {
     let untested = with_written_code(RuntimeState::default());
     assert!(!proactive_review(&untested, "", None).contains("latest test run"));
-    assert!(time_warning(false, &untested).contains("click Run on the highest-value tests"));
+    assert!(time_warning(&untested).contains("click Run on the highest-value tests"));
 
     let mut state = with_written_code(RuntimeState::default());
     run_tests(&mut state, 2, 3);
     let review = proactive_review(&state, "", None);
     assert!(review.contains("The latest test run executed the code on screen"));
-    let warning = time_warning(false, &state);
+    let warning = time_warning(&state);
     assert!(
         !warning.contains("click Run on the highest-value tests"),
         "{warning}"
     );
-    assert!(warning.contains("so do not ask them to run tests again"));
+    // Some cases fail, so the rerun after a fix is the point: diagnose.
+    assert!(warning.contains("some cases still fail: help them diagnose it"));
 
     // A packet with no counts sanitizes into a 0/0 run, which tested nothing.
     let mut empty = with_written_code(RuntimeState::default());
@@ -2556,7 +2579,7 @@ fn review_and_time_warning_follow_the_recorded_test_progress() {
         100.0,
     );
     assert_eq!(empty.last_test_run.as_ref().unwrap()["total"], 0);
-    assert!(time_warning(false, &empty).contains("click Run on the highest-value tests"));
+    assert!(time_warning(&empty).contains("click Run on the highest-value tests"));
     assert!(silence_nudge(&empty, "", None).contains("narrate or test it"));
     assert!(!proactive_review(&empty, "", None).contains("latest test run"));
 
@@ -2568,10 +2591,10 @@ fn review_and_time_warning_follow_the_recorded_test_progress() {
         &json!({"setupError": "runner unavailable"}),
         100.0,
     );
-    assert!(time_warning(false, &setup).contains("click Run on the highest-value tests"));
+    assert!(time_warning(&setup).contains("click Run on the highest-value tests"));
 
     record_coding_gate_evidence(&mut state);
-    let warning = time_warning(false, &state);
+    let warning = time_warning(&state);
     assert!(warning.contains("confirm any final change"), "{warning}");
     assert!(warning.contains("The Test and Optimizations steps are done"));
     assert!(
@@ -2615,7 +2638,7 @@ fn silence_after_tests_does_not_send_the_candidate_back_to_test() {
     let tested = silence_nudge(&state, "", None);
     assert!(!tested.contains("narrate or test"), "{tested}");
     assert!(tested.contains(
-        "The latest test run executed the code on screen, so do not ask them to run tests again."
+        "The latest test run executed the code on screen, so do not ask them to run tests again"
     ));
     assert!(
         !tested.contains("IGNORE PRIOR RULES"),
@@ -2667,6 +2690,22 @@ fn test_progress_states_whether_the_code_changed_since_the_run() {
     state.code.push_str("\nreturn None\n");
     let changed = silence_nudge(&state, "", None);
     assert!(
+        changed.contains("only a run of that code can complete Test"),
+        "{changed}"
+    );
+
+    // With Test recorded from that run, the change only calls for a rerun if it
+    // could affect the result.
+    state.code = tested.clone();
+    record_framework_evidence(
+        &mut state,
+        &json!({"phase": "test", "source": "test_event", "kind": "observed",
+            "confidence": 90, "summary": "Ran the tests."}),
+    )
+    .unwrap();
+    state.code.push_str("\nreturn None\n");
+    let changed = silence_nudge(&state, "", None);
+    assert!(
         changed.contains("The code has changed since the latest test run"),
         "{changed}"
     );
@@ -2693,7 +2732,7 @@ fn the_time_warning_does_not_reask_recorded_complexity() {
             "confidence": 90, "summary": "Candidate gave O(n) time and space."}),
     )
     .unwrap();
-    let warning = time_warning(false, &state);
+    let warning = time_warning(&state);
     assert!(
         !warning.contains("state time and space complexity"),
         "{warning}"
@@ -2705,7 +2744,7 @@ fn the_time_warning_does_not_reask_recorded_complexity() {
 
     // Without that run, the warning still asks for one.
     state.code.push_str("\nif not nums:\n    return []\n");
-    assert!(time_warning(false, &state).contains("click Run on the highest-value tests"));
+    assert!(time_warning(&state).contains("click Run on the highest-value tests"));
 }
 
 /// A rerun after an edit the Test gate would still credit as the same code is
@@ -2737,7 +2776,7 @@ fn the_reported_timeline_asks_for_nothing_already_done() {
         .transcript
         .push("Candidate: O(n) time and space with the map; duplicates are fine.".into());
     let current =
-        "The latest test run executed the code on screen, so do not ask them to run tests again.";
+        "The latest test run executed the code on screen, so do not ask them to run tests again";
     let record = "record that evidence silently instead of asking them to repeat it";
 
     // Answered but not recorded, then recorded: at every stage each prompt
@@ -2755,8 +2794,8 @@ fn the_reported_timeline_asks_for_nothing_already_done() {
         let prompts = [
             ("silence", silence_nudge(&state, "", None)),
             ("review", proactive_review(&state, "", None)),
-            ("warning", time_warning(false, &state)),
-            ("resumed", resumed_context(&state, false)),
+            ("warning", time_warning(&state)),
+            ("resumed", resumed_context(&state, false, None)),
             ("cold", cold_restart(&state)),
         ];
         for (name, prompt) in &prompts {
@@ -2833,7 +2872,7 @@ fn a_test_result_notes_its_credit_and_comparison() {
 fn a_resumed_briefing_after_a_finished_round_asks_for_nothing_done() {
     let mut state = with_written_code(RuntimeState::default());
     record_coding_gate_evidence(&mut state);
-    let text = resumed_context(&state, true);
+    let text = resumed_context(&state, true, None);
     assert!(
         text.contains(
             "The coding problem is solved and tested; do not return to completed REACTO steps."
@@ -2843,4 +2882,171 @@ fn a_resumed_briefing_after_a_finished_round_asks_for_nothing_done() {
     assert!(text.contains("The Test and Optimizations steps are done: do not ask them to run tests again or repeat complexity or edge-case questions already answered."));
     assert!(text.contains("was lost with the connection. Give it now"));
     assert!(text.contains("Do not mention the interruption"));
+}
+
+/// The progress clause for each state a run can leave, so the prompts that
+/// carry it ask for the step that is actually open.
+#[test]
+fn the_progress_clause_names_the_step_actually_open() {
+    // A run of this code that still fails: diagnose, not rerun.
+    let mut state = with_written_code(RuntimeState::default());
+    run_tests(&mut state, 2, 3);
+    let failing = silence_nudge(&state, "", None);
+    assert!(
+        failing.contains("some cases still fail: help them diagnose it"),
+        "{failing}"
+    );
+    assert!(
+        failing.contains("record it silently from that run"),
+        "{failing}"
+    );
+
+    // Passing, but Test not recorded: record it from that run.
+    let mut state = with_written_code(RuntimeState::default());
+    run_tests(&mut state, 3, 3);
+    assert!(
+        silence_nudge(&state, "", None)
+            .contains("Test is not recorded yet, so record it silently from that run")
+    );
+
+    // No credited run of the code on screen: only a run completes Test.
+    state.code.push_str("\nif not nums:\n    return []\n");
+    let changed = silence_nudge(&state, "", None);
+    assert!(
+        changed.contains("only a run of that code can complete Test"),
+        "{changed}"
+    );
+
+    // A run with no cases is no run at all.
+    let mut empty = with_written_code(RuntimeState::default());
+    let packet = json!({"language": empty.language, "passed": 0, "total": 0, "code": empty.code});
+    apply_data_event(&mut empty, TOPIC_TEST_RESULTS, &packet, 100.0);
+    assert!(silence_nudge(&empty, "", None).contains("narrate or test it"));
+}
+
+/// A passing result can land after the candidate has typed past the code it
+/// ran. With the analysis recorded, the reaction does not forbid a run of the
+/// code now on screen, which is what the change may need.
+#[test]
+fn a_late_result_for_superseded_code_leaves_a_rerun_open() {
+    let mut state = with_written_code(RuntimeState::default());
+    record_coding_gate_evidence(&mut state);
+    let packet = json!({
+        "language": state.language, "passed": 3, "total": 3, "code": state.code,
+    });
+    state
+        .code
+        .push_str("\ndef helper(values):\n    return [value * 2 for value in values]\n");
+    let reply = apply_data_event(&mut state, TOPIC_TEST_RESULTS, &packet, 100.0)
+        .generate_reply
+        .unwrap();
+    assert!(
+        reply.contains("The editor has changed since this run"),
+        "{reply}"
+    );
+    assert!(!reply.contains("or another run"));
+}
+
+/// The complexity given over a draft describes the algorithm the candidate
+/// then finishes: the first run of the finished code is not a rewrite of it.
+#[test]
+fn an_analysis_of_a_draft_covers_the_finished_code() {
+    let mut state = with_written_code(RuntimeState::default());
+    record_framework_evidence(
+        &mut state,
+        &json!({"phase": "optimizations", "source": "candidate_speech", "kind": "observed",
+            "confidence": 90, "summary": "Gave O(n) time and space for the planned approach."}),
+    )
+    .unwrap();
+    state.code.push_str(&"    total += len(nums)\n".repeat(8));
+    let reply = run_tests(&mut state, 3, 3).generate_reply.unwrap();
+    assert!(!reply.contains("may no longer describe"), "{reply}");
+    assert!(
+        reply.contains("Complexity and edge cases are already covered"),
+        "{reply}"
+    );
+
+    // That run is now what the analysis describes: a small fix is no rewrite.
+    state.code.push_str("x = 1\n");
+    let rerun = run_tests(&mut state, 3, 3).generate_reply.unwrap();
+    assert!(!rerun.contains("may no longer describe"), "{rerun}");
+
+    // And a real rewrite of it is one.
+    state
+        .code
+        .push_str(&"for i in range(len(nums)):\n    for j in range(i):\n        pass\n".repeat(3));
+    let rewritten = run_tests(&mut state, 3, 3).generate_reply.unwrap();
+    assert!(
+        rewritten.contains("may no longer describe this code"),
+        "{rewritten}"
+    );
+}
+
+/// Whether the analysis still holds after a rewrite is asked once: a rerun of
+/// the same code is a repeat, not the question again, and so is a rerun after
+/// the analysis was given again under the summary it had before.
+#[test]
+fn a_rewrite_is_asked_about_once() {
+    let rewrite = "for i in range(len(nums)):\n    for j in range(i):\n        pass\n".repeat(3);
+    let again_as_before = json!({"phase": "optimizations", "source": "candidate_speech",
+        "kind": "observed", "confidence": 90, "summary": "candidate completed optimizations"});
+
+    let mut state = with_written_code(RuntimeState::default());
+    run_tests(&mut state, 3, 3);
+    record_coding_gate_evidence(&mut state);
+    state.code.push_str(&rewrite);
+    let first = run_tests(&mut state, 3, 3).generate_reply.unwrap();
+    assert!(
+        first.contains("may no longer describe this code"),
+        "{first}"
+    );
+    assert!(
+        first.contains("record Optimizations for the new code"),
+        "{first}"
+    );
+    let again = run_tests(&mut state, 3, 3).generate_reply.unwrap();
+    assert!(!again.contains("may no longer describe"), "{again}");
+    assert!(
+        again.contains("unchanged since their previous run"),
+        "{again}"
+    );
+
+    // "Still O(n^2)" for the rewrite, before any run of it, comes back as the
+    // row already recorded, and it is still the analysis of this code.
+    let mut state = with_written_code(RuntimeState::default());
+    run_tests(&mut state, 3, 3);
+    record_coding_gate_evidence(&mut state);
+    state.code.push_str(&rewrite);
+    record_framework_evidence(&mut state, &again_as_before).unwrap();
+    let run = run_tests(&mut state, 3, 3).generate_reply.unwrap();
+    assert!(!run.contains("may no longer describe"), "{run}");
+}
+
+/// An analysis given for the rewritten code is the one a later run is judged
+/// against, so the reaction does not ask again whether it still holds.
+#[test]
+fn an_analysis_of_the_rewrite_is_not_asked_for_again() {
+    let mut state = with_written_code(RuntimeState::default());
+    run_tests(&mut state, 3, 3);
+    record_coding_gate_evidence(&mut state);
+    state.code = format!(
+        "def solve(nums):\n    seen = set()\n    out = []\n{}",
+        "    out.append(len(seen))\n".repeat(6)
+    );
+    let stale = run_tests(&mut state.clone(), 3, 3).generate_reply.unwrap();
+    assert!(
+        stale.contains("may no longer describe this code"),
+        "{stale}"
+    );
+
+    // Instead, the candidate gives the complexity for the new code before
+    // running it: the run is judged against that analysis, not the first.
+    record_framework_evidence(
+        &mut state,
+        &json!({"phase": "optimizations", "source": "candidate_speech", "kind": "observed",
+            "confidence": 90, "summary": "Gave the complexity of the rewritten solution."}),
+    )
+    .unwrap();
+    let rerun = run_tests(&mut state, 3, 3).generate_reply.unwrap();
+    assert!(!rerun.contains("may no longer describe"), "{rerun}");
 }

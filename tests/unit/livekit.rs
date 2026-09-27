@@ -945,7 +945,10 @@ fn the_reply_latency_stamp_is_armed_and_cleared_by_the_floor() {
     );
 
     // Not re-armed by a late fragment that lands mid-reply: that would restart
-    // the clock on a turn the candidate is already hearing.
+    // the clock on a turn the candidate is already hearing. The reply is under
+    // way once it has produced output, which is what the dispatcher notes for
+    // every audio chunk before queueing it.
+    activity.note_output();
     activity.floor = Floor::Speaking;
     activity.note_candidate_finished(Instant::now() + Duration::from_secs(5));
     assert_eq!(
@@ -2022,7 +2025,7 @@ async fn replacement_sockets_receive_local_progress_before_continuing() {
     }
 
     let mut tool_activity = RuntimeActivity::new(Instant::now());
-    tool_activity.mark_prompted(Instant::now());
+    tool_activity.mark_prompted(Instant::now(), None, false);
     tool_activity.note_output();
     tool_activity.tool_response_outstanding = true;
     let tool_continuation = Resumed {
@@ -2127,10 +2130,23 @@ async fn replacement_sockets_receive_local_progress_before_continuing() {
             ..RuntimeState::default()
         };
         let mut activity = RuntimeActivity::new(Instant::now());
-        brief_replacement(&mut gemini, &mut state, &mut activity, replacement).await;
+        const OWED_EVENT: &str = "The owed test reaction.";
+        brief_replacement(
+            &mut gemini,
+            &mut state,
+            &mut activity,
+            replacement,
+            Some(OWED_EVENT),
+        )
+        .await;
         let speaks = matches!(expect, Expect::Spoken | Expect::Context { reply: true });
         assert_eq!(activity.floor == Floor::Speaking, speaks, "{expect:?}");
         assert_eq!(activity.owes_reply(), speaks, "{expect:?}");
+        if speaks {
+            // What a drop before the answer leaves owed is the event, never the
+            // briefing, which would nest inside the next one.
+            assert_eq!(activity.prompt_text.as_deref(), Some(OWED_EVENT));
+        }
         assert_eq!(state.needs_cold_brief, expect == Expect::Deferred);
         let _ = gemini.close().await;
         let sent = tokio::time::timeout(Duration::from_secs(5), server)
@@ -2153,11 +2169,19 @@ async fn replacement_sockets_receive_local_progress_before_continuing() {
             assert!(text.contains("Your connection resumed from a checkpoint"));
             assert!(!text.contains("Do not mention the interruption, apologize, re-introduce"));
             assert_eq!(text.contains("was lost with the connection"), reply);
+            assert_eq!(text.contains(OWED_EVENT), reply);
             assert_eq!(text.contains("not a request to speak"), !reply);
             if paused {
+                // A reply owed during the pause could not be asked for then, so
+                // unpausing asks for it; otherwise the plain resume line.
+                let owed = matches!(replacement, Resumed { owed: true });
+                assert_eq!(state.owed_reply_on_resume.is_some(), owed);
                 let unpaused = unpause(&mut state);
                 assert!(unpaused.starts_with("The interview has resumed."));
                 assert!(!unpaused.contains("checkpoint"));
+                assert_eq!(unpaused.contains("was lost with the connection"), owed);
+                assert_eq!(unpaused.contains(OWED_EVENT), owed);
+                assert!(state.owed_reply_on_resume.is_none(), "asked for once");
             }
         }
     }
@@ -2179,13 +2203,13 @@ fn a_replaced_socket_reports_the_reply_it_owed_before_clearing_it() {
         ),
         (
             "prompt",
-            |activity, now| activity.mark_prompted(now),
+            |activity, now| activity.mark_prompted(now, Some("the owed event"), false),
             true,
             "candidate=false prompt=1 tool=false",
         ),
         (
             "editor review",
-            |activity, now| activity.mark_prompted_allowing_silence(now),
+            |activity, now| activity.mark_prompted(now, None, true),
             false,
             "candidate=false prompt=none tool=false",
         ),
@@ -2212,7 +2236,11 @@ fn a_replaced_socket_reports_the_reply_it_owed_before_clearing_it() {
         setup(&mut activity, now);
         assert_eq!(
             hand_over(&mut state, &mut activity, &mut output_audio),
-            (owed, debt.to_string()),
+            (
+                owed,
+                debt.to_string(),
+                (name == "prompt").then(|| "the owed event".to_string())
+            ),
             "{name}"
         );
         assert!(!activity.owes_reply(), "{name}");
@@ -2280,9 +2308,14 @@ fn a_failed_briefing_keeps_its_debt_for_the_next_socket() {
     ] {
         let mut state = RuntimeState::default();
         let mut activity = RuntimeActivity::new(now);
-        keep_recovery_debt(&mut state, &mut activity, replacement);
+        activity.mark_prompted(now, Some("an answered prompt"), false);
+        activity.note_output();
+        keep_recovery_debt(&mut state, &mut activity, replacement, Some("owed event"));
         assert_eq!(state.needs_cold_brief, cold_owed);
         assert_eq!(activity.owes_reply(), reply_owed);
+        if reply_owed {
+            assert_eq!(activity.prompt_text.as_deref(), Some("owed event"));
+        }
     }
 }
 
@@ -2326,7 +2359,7 @@ async fn a_briefing_that_fails_to_send_keeps_its_debt() {
 
         let mut state = RuntimeState::default();
         let mut activity = RuntimeActivity::new(Instant::now());
-        brief_replacement(&mut gemini, &mut state, &mut activity, replacement).await;
+        brief_replacement(&mut gemini, &mut state, &mut activity, replacement, None).await;
         assert_eq!(state.needs_cold_brief, cold_owed, "{cold_owed}");
         assert_eq!(activity.owes_reply(), reply_owed);
         assert_eq!(activity.floor, Floor::Listening);
@@ -2422,6 +2455,11 @@ fn tested_and_answered() -> RuntimeState {
     state
 }
 
+/// The test reaction the stalled socket never answered, which the resumed
+/// briefing has to name.
+const REACTION: &str =
+    "[SYSTEM EVENT] The candidate just ran the built-in test cases and every one passed.";
+
 /// How the old socket stalled before its `GoAway` could be spent.
 #[derive(Clone, Copy, Debug)]
 enum Stall {
@@ -2443,7 +2481,7 @@ async fn replace_after_stall(mut state: RuntimeState, stall: Stall) -> (String, 
     let mut restart = DeferredRestart::default();
     match stall {
         Stall::CandidateTurn => activity.note_candidate_finished(start),
-        Stall::Reaction => activity.mark_prompted(start),
+        Stall::Reaction => activity.mark_prompted(start, Some(REACTION), false),
     }
     let before = activity.prompt_sequence;
     assert!(!restart.request(
@@ -2455,9 +2493,9 @@ async fn replace_after_stall(mut state: RuntimeState, stall: Stall) -> (String, 
 
     // A tick short of the stall changes nothing; the one at it lets the held
     // advisory go.
-    let early = activity.settle_stalls(start + PROMPT_STALL - Duration::from_millis(1));
+    let early = activity.settle_stalls(start + PROMPT_STALL - Duration::from_millis(1), false);
     assert!(!early.spend_restart, "{stall:?}: too early");
-    let stalls = activity.settle_stalls(start + PROMPT_STALL);
+    let stalls = activity.settle_stalls(start + PROMPT_STALL, false);
     assert!(stalls.spend_restart, "{stall:?}");
     assert!(
         restart.take_if_settled(&activity, output_audio.is_playing()),
@@ -2465,7 +2503,7 @@ async fn replace_after_stall(mut state: RuntimeState, stall: Stall) -> (String, 
     );
     assert_eq!(stalls.prompt_released, matches!(stall, Stall::Reaction));
 
-    let (owed, _) = hand_over(&mut state, &mut activity, &mut output_audio);
+    let (owed, _, owed_prompt) = hand_over(&mut state, &mut activity, &mut output_audio);
     assert!(owed, "{stall:?}: the old socket owed a reply");
     let (mut gemini, server) = fake_resumed_socket().await;
     let spoke = brief_replacement(
@@ -2473,6 +2511,7 @@ async fn replace_after_stall(mut state: RuntimeState, stall: Stall) -> (String, 
         &mut state,
         &mut activity,
         Replacement::Resumed { owed },
+        owed_prompt.as_deref(),
     )
     .await;
     let _ = gemini.close().await;
@@ -2510,8 +2549,9 @@ async fn a_reply_left_owed_by_a_stall_survives_a_held_go_away() {
     for stall in [Stall::CandidateTurn, Stall::Reaction] {
         let state = tested_and_answered();
         let (text, _) = replace_after_stall(state.clone(), stall).await;
+        let owed_prompt = matches!(stall, Stall::Reaction).then_some(REACTION);
         assert!(
-            text.starts_with(&crate::agent::resumed_context(&state, true)),
+            text.starts_with(&crate::agent::resumed_context(&state, true, owed_prompt)),
             "{stall:?}: {text}"
         );
     }
@@ -2600,8 +2640,8 @@ fn the_prompt_log_fields_name_the_prompt_and_its_progress() {
             "kind": "observed", "confidence": 90, "summary": "Gave O(n) time and space."}),
     )
     .unwrap();
-    activity.mark_prompted(Instant::now());
-    activity.mark_prompted(Instant::now());
+    activity.mark_prompted(Instant::now(), None, false);
+    activity.mark_prompted(Instant::now(), None, false);
     assert_eq!(
         session::prompt_fields(&state, &activity),
         "id=2 test_runs=1 evidenced=optimizations"
@@ -2612,4 +2652,164 @@ fn the_prompt_log_fields_name_the_prompt_and_its_progress() {
         line.ends_with(" kind=briefing id=2 test_runs=1 evidenced=optimizations room=room-1"),
         "{line}"
     );
+}
+
+/// A tool response Gemini never continues from stalls like a prompt: at
+/// twenty seconds the held `GoAway` may go, and the continuation stays owed as
+/// a prompt so the replacement still gives it.
+#[test]
+fn a_stalled_tool_continuation_releases_a_held_go_away() {
+    let start = Instant::now();
+    let mut activity = RuntimeActivity::new(start);
+    let mut restart = DeferredRestart::default();
+    activity.note_tool_response(start);
+    assert!(!restart.request(
+        activity.floor,
+        false,
+        false,
+        activity.tool_response_outstanding
+    ));
+    assert!(
+        !activity
+            .settle_stalls(start + PROMPT_STALL - Duration::from_millis(1), false)
+            .spend_restart
+    );
+    let stalls = activity.settle_stalls(start + PROMPT_STALL, false);
+    assert!(stalls.spend_restart);
+    assert!(!activity.tool_response_outstanding);
+    assert!(activity.owes_prompt(), "the continuation is still owed");
+    assert!(restart.take_if_settled(&activity, false));
+}
+
+/// What a stalled tool continuation owes is the continuation, not the text of
+/// an earlier prompt already answered, which a briefing would present as
+/// unanswered.
+#[test]
+fn a_stalled_tool_continuation_owes_no_earlier_prompt() {
+    let start = Instant::now();
+    let mut activity = RuntimeActivity::new(start);
+    activity.mark_prompted(start, Some("an answered reaction"), false);
+    activity.note_output();
+    activity.note_turn_boundary();
+    activity.note_tool_response(start);
+    assert!(
+        activity
+            .settle_stalls(start + PROMPT_STALL, false)
+            .spend_restart
+    );
+    assert!(activity.owes_prompt());
+    assert_eq!(activity.prompt_text, None);
+}
+
+/// A continuation that has begun is not stalled, however long it runs: its
+/// release would let a pending close start the wrap-up mid-turn.
+#[test]
+fn a_continuation_under_way_does_not_stall() {
+    let start = Instant::now();
+    let mut activity = RuntimeActivity::new(start);
+    activity.note_tool_response(start);
+    activity.note_output();
+    let stalls = activity.settle_stalls(start + PROMPT_STALL * 3, false);
+    assert!(!stalls.spend_restart);
+    assert!(activity.tool_response_outstanding);
+}
+
+/// The stall release leaves the floor alone while earlier audio still plays:
+/// that is the playout's floor, and handing it back mid-sentence resets the
+/// silence timers early.
+#[test]
+fn a_stalled_prompt_waits_for_playout_before_the_floor_goes_back() {
+    let start = Instant::now();
+    let mut activity = RuntimeActivity::new(start);
+    activity.mark_prompted(start, None, false);
+    assert!(
+        !activity
+            .settle_stalls(start + PROMPT_STALL, true)
+            .prompt_released
+    );
+    assert_eq!(activity.floor, Floor::Speaking);
+    assert!(
+        activity
+            .settle_stalls(start + PROMPT_STALL, false)
+            .prompt_released
+    );
+}
+
+/// A discarded turn's ending runs the interruption handler, whose
+/// `cut_off_turn` clears prompt debt. The debt a resume prompt carries is held
+/// across that and put back, so the ending of the cut-off reply is not read as
+/// the resume prompt's answer.
+#[test]
+fn a_held_prompt_debt_survives_the_cut_off_turn_it_is_held_across() {
+    let (mut output_audio, _frames) = test_output_audio();
+    let start = Instant::now();
+    let mut activity = RuntimeActivity::new(start);
+    activity.mark_prompted(start, Some("resume"), false);
+    let debt = activity.prompt_debt();
+    cut_off_turn(&mut activity, &mut output_audio);
+    assert!(!activity.owes_prompt());
+    activity.restore_prompt_debt(debt);
+    assert!(activity.owes_prompt());
+
+    // With the floor it took, so an unanswered resume prompt still stalls.
+    assert_eq!(activity.floor, Floor::Speaking);
+    assert!(
+        activity
+            .settle_stalls(start + PROMPT_STALL, false)
+            .prompt_released
+    );
+
+    // Nothing owed puts nothing back, the floor included.
+    let mut idle = RuntimeActivity::new(start);
+    let debt = idle.prompt_debt();
+    idle.mark_speaking();
+    idle.restore_prompt_debt(debt);
+    assert_eq!(idle.floor, Floor::Speaking);
+}
+
+/// A candidate who speaks over a prompt nothing has answered yet takes over
+/// its debt, and with it the floor the prompt took: left there, no stall
+/// releases it, and a held `GoAway` is never spent.
+#[test]
+fn a_candidate_turn_over_an_unanswered_prompt_still_stalls() {
+    let start = Instant::now();
+    let mut activity = RuntimeActivity::new(start);
+    activity.mark_prompted(start, None, false);
+    activity.note_candidate_finished(start);
+    assert!(!activity.owes_prompt());
+    assert_eq!(activity.floor, Floor::Speaking);
+    let stalls = activity.settle_stalls(start + PROMPT_STALL, false);
+    assert!(stalls.prompt_released && stalls.spend_restart);
+    assert_eq!(activity.floor, Floor::Listening);
+}
+
+/// Refusing `end_interview` with Test already recorded names what is missing,
+/// complexity, and does not invite another Run.
+#[test]
+fn a_refused_ending_after_test_does_not_invite_another_run() {
+    let mut state = tested_and_answered();
+    state
+        .framework_evidence
+        .retain(|evidence| evidence.phase != crate::agent::FrameworkPhase::Optimizations);
+    crate::agent::record_framework_evidence(
+        &mut state,
+        &serde_json::json!({"phase": "test", "source": "test_event",
+            "kind": "observed", "confidence": 90, "summary": "Ran the tests."}),
+    )
+    .unwrap();
+    let call = crate::gemini::GeminiFunctionCall {
+        id: "end".to_string(),
+        name: crate::runtime::TOOL_END_INTERVIEW.to_string(),
+        args: serde_json::json!({}),
+    };
+    let refusal = execute_tool_call(&mut state, &call)["error"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        refusal.starts_with("The coding round has no Optimizations evidence yet"),
+        "{refusal}"
+    );
+    assert!(!refusal.contains("Test and Optimizations"));
+    assert!(!refusal.contains("click Run"));
 }

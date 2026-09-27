@@ -44,13 +44,14 @@ use integrity::integrity_hash;
 pub use integrity::{sanitize_integrity_event, sanitize_test_run};
 use problems::variant_for;
 pub use problems::{DEFAULT_PROBLEM_ID, PROBLEMS, find_problem, get_problem, topics_for};
+pub(crate) use prompts::end_interview_refusal;
 pub use prompts::{
     InterimReviewInput, LanguageChoiceContext, MAX_EXCERPT_LINE_CHARS, MAX_NUMBERED_BYTES,
     ReportPromptInput, SincePrevious, TestRecord, behavioral_silence_nudge,
     behavioral_time_warning, build_instructions_for_plan, changed_excerpt, cold_restart,
     format_test_run, format_test_run_for_reaction, greeting, hint_ladder_used_text, hint_rung_text,
     hint_rung_withheld_text, interim_review_prompt, interim_system_instruction, language_choice,
-    log_hint_text, numbered, numbered_from, proactive_review, read_editor_text,
+    log_hint_text, numbered, numbered_from, owed_reply, proactive_review, read_editor_text,
     released_follow_ups, report_prompt, report_system_instruction, resume, resumed_context,
     rolling_assessment, round_skipped, round_started, silence_nudge, spoken_language,
     test_results_reaction, test_runner_unavailable_reaction, test_setup_error_reaction,
@@ -679,6 +680,17 @@ impl SpeakerTurn {
     }
 }
 
+/// What a recorded complexity analysis describes; see
+/// `RuntimeState::analysis`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Analysis {
+    /// Given with no run of the code on screen, so possibly over a draft: the
+    /// next credited run's code is what it describes.
+    AwaitingRun,
+    /// The code it describes.
+    Of(TestedCode),
+}
+
 /// Code a test run executed; see `RuntimeState::tested_code`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TestedCode {
@@ -747,6 +759,10 @@ pub struct RuntimeState {
     /// early stub, or of another language's buffer, does not vouch for code
     /// written after it.
     pub tested_code: Option<TestedCode>,
+    /// What the complexity analysis last recorded describes, so a later run is
+    /// judged against the solution that analysis described rather than against
+    /// whatever ran before it.
+    pub analysis: Option<Analysis>,
     /// The language whose latest run said the platform could not run tests at
     /// all: the judge is missing or the execution service could not start a
     /// run. A trace of the written code in that language can complete Test
@@ -797,6 +813,11 @@ pub struct RuntimeState {
     /// A socket resumed from the cold one inherits the debt, since its memory
     /// starts from that cold session.
     pub needs_cold_brief: bool,
+    /// A resumed socket replaced a session that owed a reply while the
+    /// interview was paused. The reply cannot be asked for then, since it
+    /// would be discarded, so this request for it, owed event included, is
+    /// spoken after the resume line on unpause.
+    pub owed_reply_on_resume: Option<String>,
     /// Observations a reviewer recorded in the pauses, while the interview was
     /// still running. Held apart from `framework_evidence`, which is the
     /// interviewer's own bookkeeping about which phase happened: these are the
@@ -879,6 +900,7 @@ impl Default for RuntimeState {
             last_test_run: None,
             test_runs: 0,
             tested_code: None,
+            analysis: None,
             runner_unavailable: None,
             hints_used: 0,
             volunteered_hints: 0,
@@ -890,6 +912,7 @@ impl Default for RuntimeState {
             integrity_first_heartbeat: None,
             integrity_last_heartbeat: None,
             needs_cold_brief: false,
+            owed_reply_on_resume: None,
             interim_notes: Vec::new(),
             interim_transcript_lines: 0,
             interim_code: String::new(),
@@ -1236,18 +1259,26 @@ pub(crate) fn test_record_after_run(state: &RuntimeState, credited: bool) -> Tes
 /// long to compare is not current: a same-length rewrite of a long solution
 /// would otherwise count as the code that ran.
 pub(crate) fn tested_code_is_current(state: &RuntimeState) -> bool {
-    state.tested_code.as_ref().is_some_and(|tested| {
-        tested.language == state.language
-            && (tested.code == state.code
-                || edited_within(&state.language, &tested.code, &state.code))
-    })
+    state
+        .tested_code
+        .as_ref()
+        .is_some_and(|tested| covers(tested, &state.language, &state.code))
+}
+
+/// Whether `code` in `language` is still the code `tested` holds, by the Test
+/// gate's rule: the same language, with less than a short expression added or
+/// removed. The one definition every comparison of two runs, or of a run and
+/// the editor, goes through.
+pub(crate) fn covers(tested: &TestedCode, language: &str, code: &str) -> bool {
+    tested.language == language
+        && (tested.code == code || edited_within(language, &tested.code, code))
 }
 
 /// Whether fewer than `MIN_WRITTEN_CHARS` were added and fewer removed, from
 /// one table: the common subsequence is the same either way round. Comments
 /// are left out, so noting the complexity after a run, or deleting the
 /// starter's prompt line, does not void a run of code that did not change.
-pub(crate) fn edited_within(language: &str, before: &str, code: &str) -> bool {
+fn edited_within(language: &str, before: &str, code: &str) -> bool {
     let before = uncommented_chars(language, before);
     let code = uncommented_chars(language, code);
     changed_characters(&before, &code)
@@ -1316,22 +1347,39 @@ fn uncommented_chars(language: &str, code: &str) -> Vec<char> {
     kept
 }
 
-/// Changed by enough that an analysis of the old code may not describe the
-/// new: more than 80 characters of content either way, or three lines. A
-/// size measure, deliberately coarse; it only decides whether a passing run
-/// asks if an earlier complexity answer still holds.
-pub(crate) fn rewritten(old: &str, new: &str) -> bool {
-    content_chars(old)
-        .count()
-        .abs_diff(content_chars(new).count())
-        > 80
-        || old.lines().count().abs_diff(new.lines().count()) >= 3
+/// Changed by enough that an analysis of `before` may not describe `code`:
+/// another language, more than 80 characters of code added and removed
+/// together, comments aside, or a change too long to compare. Counting what
+/// changed rather than the net size is what catches a new algorithm of about
+/// the same length, which an unchanged size would pass as the same solution.
+pub(crate) fn rewritten(before: &TestedCode, language: &str, code: &str) -> bool {
+    if before.language != language {
+        return true;
+    }
+    let old = uncommented_chars(language, &before.code);
+    let new = uncommented_chars(language, code);
+    changed_characters(&old, &new).is_none_or(|(added, removed)| added + removed > 80)
+}
+
+/// Records which code a complexity analysis just given describes. One given
+/// over a run of the code on screen describes that code. One given ahead of
+/// any such run may describe a draft, and finishing the same algorithm is not
+/// a rewrite, so the first credited run after it is what it describes.
+fn anchor_analysis(state: &mut RuntimeState) {
+    state.analysis = Some(if tested_code_is_current(state) {
+        Analysis::Of(TestedCode {
+            language: state.language.clone(),
+            code: state.code.clone(),
+        })
+    } else {
+        Analysis::AwaitingRun
+    });
 }
 
 /// A test run that ran something: not a runner setup error, and not the 0/0
 /// record a packet with no counts is sanitized into.
 pub(crate) fn real_test_run(run: &serde_json::Value) -> bool {
-    !run.get("setupError").is_some_and(python_truthy)
+    !evidence::run_failed_to_start(run)
         && run
             .get("total")
             .and_then(serde_json::Value::as_i64)
@@ -1458,6 +1506,13 @@ pub fn record_framework_evidence(
         .filter(|summary| !summary.is_empty())
         .ok_or("invalid summary")
         .map(|summary| bounded_model_text(summary, MAX_FRAMEWORK_SUMMARY_CHARS))?;
+
+    // Before the duplicate check, since a repeat is still the analysis given
+    // again, now: "still O(n log n)" for rewritten code comes back under the
+    // summary it had before. Nothing below refuses an Optimizations record.
+    if phase == FrameworkPhase::Optimizations && kind != EvidenceKind::Skipped {
+        anchor_analysis(state);
+    }
     if let Some(index) = state.framework_evidence.iter().position(|item| {
         item.phase == phase && item.source == source && item.kind == kind && item.summary == summary
     }) {

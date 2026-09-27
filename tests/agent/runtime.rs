@@ -414,10 +414,7 @@ fn leetcode_reactions_preserve_stage_transitions() {
     assert!(passed.contains("move to Optimizations"));
     assert!(passed.contains("do not start a behavioral question"));
 
-    assert!(
-        time_warning(false, &RuntimeState::default())
-            .contains("Do not start a behavioral question")
-    );
+    assert!(time_warning(&RuntimeState::default()).contains("Do not start a behavioral question"));
     assert!(
         wrap_up("candidate_ended", false)
             .contains("Do not ask a new coding or behavioral question")
@@ -438,7 +435,7 @@ fn leetcode_reactions_preserve_stage_transitions() {
             "(the editor is currently empty)",
             None,
         ),
-        time_warning(false, &RuntimeState::default()),
+        time_warning(&RuntimeState::default()),
         wrap_up("time_up", false),
         test_results_reaction(
             "1/3 passed",

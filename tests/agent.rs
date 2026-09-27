@@ -260,7 +260,7 @@ fn prompt_samples() -> Value {
         "coldRestartEmpty": cold_restart(&RuntimeState::default()),
         "review": proactive_review(&RuntimeState::default(), &working_changed, Some(&excerpt)),
         "reviewWithoutExcerpt": proactive_review(&RuntimeState::default(), &working, None),
-        "time": time_warning(false, &RuntimeState::default()),
+        "time": time_warning(&RuntimeState::default()),
         "wrapCandidate": wrap_up("candidate_ended", false),
         "wrapTimer": wrap_up("time_up", false),
         "wrapBehavioral": wrap_up("time_up", true),
@@ -395,8 +395,13 @@ fn prompt_samples() -> Value {
 
     // Outside the literal because more keys there pass the json! macro's
     // recursion limit. The map is sorted, so where a key is added changes
-    // nothing in the golden.
-    prompts["timeRunnerMissing"] = json!(time_warning(true, &RuntimeState::default()));
+    // nothing in the golden. The warning offers a trace instead of a run when
+    // the browser cannot run the language on screen.
+    prompts["timeRunnerMissing"] = json!(time_warning(&RuntimeState {
+        language: "python".to_string(),
+        runner_unavailable: Some("python".to_string()),
+        ..RuntimeState::default()
+    }));
 
     // The states the #66 prompts differ on: a run of the code on screen, and
     // that run with the coding gate passed.
@@ -445,17 +450,23 @@ fn prompt_samples() -> Value {
             ),
         ),
         ("reviewTested", proactive_review(&tested_state, "", None)),
-        ("timeTested", time_warning(false, &tested_state)),
-        ("timeSolved", time_warning(false, &solved_state)),
-        ("resumedContext", resumed_context(&tested_state, false)),
-        ("resumedContextReply", resumed_context(&tested_state, true)),
+        ("timeTested", time_warning(&tested_state)),
+        ("timeSolved", time_warning(&solved_state)),
+        (
+            "resumedContext",
+            resumed_context(&tested_state, false, None),
+        ),
+        (
+            "resumedContextReply",
+            resumed_context(&tested_state, true, None),
+        ),
         (
             "resumedContextSolved",
-            resumed_context(&solved_state, false),
+            resumed_context(&solved_state, false, None),
         ),
         (
             "resumedContextBehavioral",
-            resumed_context(&behavioral_state, false),
+            resumed_context(&behavioral_state, false, None),
         ),
         (
             "testsPassAnalysed",
@@ -466,6 +477,17 @@ fn prompt_samples() -> Value {
                 None,
                 &solved_state,
                 SincePrevious::Unchanged,
+            ),
+        ),
+        (
+            "testsPassRewritten",
+            test_results_reaction(
+                "3/3 passed",
+                true,
+                TestRecord::Settled,
+                None,
+                &solved_state,
+                SincePrevious::Rewritten,
             ),
         ),
     ] {
