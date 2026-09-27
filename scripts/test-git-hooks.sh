@@ -205,6 +205,17 @@ expect 0 "a branch whose messages pass" git push -q origin HEAD:refs/heads/main
 git commit -q --allow-empty --no-verify -m "wip: skipped the hook"
 expect 1 "a commit that skipped the hook" git push -q origin HEAD:refs/heads/main
 
+# The same message is skipped only when Dependabot wrote it, and only by the
+# author address, so a person's commit on its branch is still read.
+bump="Bump a-crate-with-a-long-name from 1.0.0 to 1.0.1 in the rust group"
+git commit -q --allow-empty --no-verify -m "$bump" \
+    --author "dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>"
+expect 0 "a Dependabot commit is not held to the rules" \
+    sh -c 'git rev-parse HEAD | ./scripts/check-commit-log.sh'
+git commit -q --allow-empty --no-verify -m "$bump"
+expect 1 "the same message from anyone else is" \
+    sh -c 'git rev-parse HEAD | ./scripts/check-commit-log.sh'
+
 # Linked worktrees share .git/hooks. The installed wrapper must therefore find
 # the worktree that runs it, rather than remain a link into this checkout.
 git worktree add -q -b linked "$work/linked" || exit 1
