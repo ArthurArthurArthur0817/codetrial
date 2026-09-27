@@ -908,13 +908,41 @@ lobbyTest("a completed problem returns with a due-review explanation", async (pa
   assert.match(state.note, /Review due after 1 day/);
 });
 
-lobbyTest("a saved report reopens from the lobby", async (page) => {
+lobbyTest("a saved report reopens and collapses from the lobby", async (page) => {
   reports = [savedAttempt(EASY[0])];
+  reports[0].payload.report.debrief = {
+    approach: "Use a map to find the complement in linear time.",
+  };
   await lobby(page);
-  await page.getByRole("button", { name: "Open report" }).click();
-  assert.equal(await page.locator("#attempt-history .report-card").count(), 1);
-  assert.equal(await page.locator("#attempt-history #download-report").count(), 0);
-  assert.equal(await page.locator("#attempt-history #done").count(), 0);
+  const history = page.locator("#attempt-history");
+  const report = history.locator(".report-card");
+  const toggle = history.getByRole("button", { name: /^(Open|Collapse) report$/ });
+  assert.equal(await toggle.textContent(), "Open report");
+  assert.equal(await report.isVisible(), false);
+
+  await toggle.click();
+  assert.equal(await toggle.textContent(), "Collapse report");
+  assert.equal(await report.isVisible(), true);
+  const finalCode = report.locator("details").filter({ hasText: "Your final code" });
+  assert.equal(await finalCode.evaluate((node) => node.open), false);
+  await finalCode.locator("summary").click();
+  assert.equal(await finalCode.evaluate((node) => node.open), true);
+  const debrief = report.locator("details").filter({ hasText: "What the interviewer held back" });
+  assert.equal(await debrief.evaluate((node) => node.open), false);
+  await debrief.locator("summary").click();
+  assert.equal(await debrief.evaluate((node) => node.open), true);
+
+  await toggle.click();
+  assert.equal(await toggle.textContent(), "Open report");
+  assert.equal(await report.isVisible(), false);
+
+  await toggle.click();
+  assert.equal(await toggle.textContent(), "Collapse report");
+  assert.equal(await report.count(), 1);
+  assert.equal(await report.isVisible(), true);
+  assert.equal(await finalCode.evaluate((node) => node.open), true);
+  assert.equal(await debrief.evaluate((node) => node.open), true);
+  assert.equal(await history.locator(".report-actions, #download-report, #done").count(), 0);
 });
 
 lobbyTest("try again selects the problem", async (page) => {

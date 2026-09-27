@@ -812,17 +812,23 @@ function renderAttemptHistory(attempts) {
     const retry = document.createElement("button");
     retry.type = "button";
     retry.textContent = "Try again";
+    const report = document.createElement("div");
+    report.innerHTML = reportMarkup({
+      report: attempt.report,
+      problemTitle: attempt.problemTitle,
+      language: languageLabel(attempt.language ?? "not recorded"),
+      code: "(final code was not saved)",
+    });
+    report.querySelector(".report-actions")?.remove();
+    report.hidden = true;
     open.addEventListener("click", () => {
-      const report = document.createElement("div");
-      report.innerHTML = reportMarkup({
-        report: attempt.report,
-        problemTitle: attempt.problemTitle,
-        language: languageLabel(attempt.language ?? "not recorded"),
-        code: "(final code was not saved)",
-      });
-      report.querySelector(".report-actions")?.remove();
-      item.append(report);
-      open.disabled = true;
+      if (!report.hidden) {
+        report.hidden = true;
+        open.textContent = "Open report";
+        return;
+      }
+      report.hidden = false;
+      open.textContent = "Collapse report";
     });
     retry.addEventListener("click", () => {
       const card = cards.find((candidate) => candidate.id === attempt.problemId);
@@ -834,6 +840,7 @@ function renderAttemptHistory(attempts) {
       nodes.recommendation.textContent = `Selected problem: ${title(card)}.`;
     });
     item.append(label, open, retry);
+    item.append(report);
     nodes.attemptHistory.append(item);
   }
 }
