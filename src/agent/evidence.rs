@@ -4,8 +4,8 @@
 //! It stores hashes and bounded counts instead of code, diagnostics, or speech,
 //! so the ledger can be replayed without becoming another prompt transcript.
 
+use crate::sha256_hex;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 const LEDGER_VERSION: u32 = 1;
 const MAX_LEDGER_ENTRIES: usize = 256;
@@ -758,12 +758,12 @@ impl EvidenceLedger {
         *count += 1;
         *total += bytes;
 
-        let mut hasher = Sha256::new();
-        hasher.update(self.metrics.model_input_digest.as_bytes());
-        hasher.update(format!("{kind:?}").as_bytes());
-        hasher.update(bytes.to_le_bytes());
-        hasher.update(text.as_bytes());
-        self.metrics.model_input_digest = format!("{:x}", hasher.finalize());
+        self.metrics.model_input_digest = sha256_hex(&[
+            self.metrics.model_input_digest.as_bytes(),
+            format!("{kind:?}").as_bytes(),
+            &bytes.to_le_bytes(),
+            text.as_bytes(),
+        ]);
     }
 
     /// Records a code observation whose structural classification was produced
@@ -779,7 +779,7 @@ impl EvidenceLedger {
         candidate_edit: bool,
         analysis: CodeAnalysis,
     ) {
-        let digest = hex_digest(code.as_bytes());
+        let digest = sha256_hex(&[code.as_bytes()]);
         if self.code.latest_digest == digest && self.code.language == language {
             return;
         }
@@ -1007,7 +1007,7 @@ impl EvidenceLedger {
         category: DiagnosticCategory,
         diagnostic: &str,
     ) {
-        let signature = hex_digest(diagnostic.as_bytes());
+        let signature = sha256_hex(&[diagnostic.as_bytes()]);
         match category {
             DiagnosticCategory::Syntax => self.diagnostics.syntax += 1,
             DiagnosticCategory::Type => self.diagnostics.type_errors += 1,
@@ -1153,21 +1153,15 @@ fn delta(current: u32, previous: u32) -> i32 {
         as i32
 }
 
-fn hex_digest(input: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(input);
-    format!("{:x}", hasher.finalize())
-}
-
 /// One editor state: the language and the buffer together. The language is
 /// length-prefixed, since the browser names it and nothing stops a name from
 /// ending in bytes the buffer could begin with.
 fn state_digest(language: &str, code: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update((language.len() as u64).to_le_bytes());
-    hasher.update(language.as_bytes());
-    hasher.update(code.as_bytes());
-    format!("{:x}", hasher.finalize())
+    sha256_hex(&[
+        &(language.len() as u64).to_le_bytes(),
+        language.as_bytes(),
+        code.as_bytes(),
+    ])
 }
 
 pub(crate) fn analyze_code(language: &str, previous: &str, current: &str) -> CodeAnalysis {
@@ -1596,7 +1590,7 @@ pub(crate) fn parser_unavailable() -> CodeAnalysis {
     CodeAnalysis::observed(CodeObservation::ParserUnavailable)
 }
 
-/// Borrowed from the two buffers being compared, which both outlive it: the
+/// Borrowed from the trees and buffers being compared, which outlive it: the
 /// facts are only ever compared with each other inside one analysis and never
 /// stored, so hashing each token (and formatting each leaf first) bought
 /// nothing but a SHA-256 and an allocation per token per keystroke.
@@ -1610,19 +1604,19 @@ struct SyntaxFacts<'a> {
     /// Python class bodies, whose names the methods inside cannot see.
     class_scopes: std::collections::HashSet<usize>,
     /// Kind and text, since `+` and a string holding "+" are different leaves.
-    leaves: Vec<(&'static str, &'a str)>,
+    leaves: Vec<(&'a str, &'a str)>,
     comments: Vec<&'a str>,
     /// `None` stands in for a parameter's name, so that gaining or losing a
     /// parameter moves these and renaming one does not. Not a leaf, so it
     /// cannot collide with the leaves it sits beside.
-    interface_leaves: Vec<Option<(&'static str, &'a str)>>,
+    interface_leaves: Vec<Option<(&'a str, &'a str)>>,
     /// Every named node but a comment, with its depth, in document order.
     /// Python spells a block in whitespace alone, so dedenting a `return` out
     /// of a loop moves no node, no identifier and no token: the counts and the
     /// leaves above are identical, and without the nesting the edit read as a
     /// reindent. A brace language moves a `}` for the same edit; this is the
     /// same fact for the grammar that has none.
-    shape: Vec<(&'static str, u32)>,
+    shape: Vec<(&'a str, u32)>,
     /// Each loop's kind followed by the named kinds of what it binds, the
     /// target of a `for ... in`, `for ... of` or `for (... : ...)`. Kinds
     /// alone, so renaming the loop variable is still a rename, while `for i in`
@@ -1636,7 +1630,7 @@ struct SyntaxFacts<'a> {
     /// and JavaScript while Python read it as an expression. C++ puts an
     /// optional init-statement under the same field name ahead of a range
     /// loop's declarator, which it would have shadowed.
-    loop_bindings: Vec<&'static str>,
+    loop_bindings: Vec<&'a str>,
 }
 
 /// Walks the tree in document order and records what a change to the code can
@@ -1661,7 +1655,7 @@ struct SyntaxFacts<'a> {
 /// is a fact about the code the candidate wrote; only what is nested inside it
 /// is qualified.
 fn syntax_facts<'a>(
-    root: tree_sitter::Node<'_>,
+    root: tree_sitter::Node<'a>,
     source: &'a str,
     grammar: &str,
 ) -> SyntaxFacts<'a> {
@@ -2108,7 +2102,7 @@ fn failure_signature(payload: &serde_json::Value) -> Option<String> {
     if failures.is_empty() {
         None
     } else {
-        Some(hex_digest(material.as_bytes()))
+        Some(sha256_hex(&[material.as_bytes()]))
     }
 }
 

@@ -2950,7 +2950,7 @@ mod failure {
 mod replay {
     use codetrial::recording::{
         MAX_REPLAY_BYTES, MAX_REPLAY_EVENT_BYTES, MAX_REPLAY_EVENTS, MAX_REPLAY_STRING,
-        REPLAY_VERSION, ReplayKind, ReplayRejection, parse_replay_event, redact_replay_payload,
+        REPLAY_VERSION, ReplayKind, ReplayRejection, parse_replay_event,
     };
     use serde_json::{Value, json};
 
@@ -3764,11 +3764,5 @@ mod replay {
         assert_eq!(media.payload["frame"], "[media removed]");
         assert_eq!(media.payload["other"], "[media removed]");
         assert_eq!(media.payload["items"][0], "[media removed]");
-
-        // And the redaction is the same function the ingest path uses, applied
-        // to a value that never went through an envelope.
-        let direct = redact_replay_payload(&json!({ "refreshToken": "r", "keep": 1 }));
-        assert!(direct.get("refreshToken").is_none());
-        assert_eq!(direct["keep"], 1);
     }
 }

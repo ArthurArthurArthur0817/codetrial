@@ -144,6 +144,8 @@ jobs:
       # installing it here is the whole configuration.
       - name: Install native build dependency
         run: sudo apt-get update && sudo apt-get install -y libglib2.0-dev mold shellcheck shfmt
+      - name: Install WebRTC C++ compiler
+        uses: ./.github/actions/webrtc-clang
 
       # The runner image ships a stable toolchain, but not necessarily one new
       # enough for edition 2024, and clippy and rustfmt are gates rather than
@@ -463,6 +465,8 @@ jobs:
 
       - name: Install native build dependency
         run: sudo apt-get update && sudo apt-get install -y libglib2.0-dev mold
+      - name: Install WebRTC C++ compiler
+        uses: ./.github/actions/webrtc-clang
 
       - name: Install Rust
         id: rust
@@ -679,6 +683,9 @@ jobs:
       # `CARGO_HOME` is the runner's, mounted in. It is what the cache restored
       # a step ago, and the container cannot see it otherwise: without this
       # every release re-downloads the registry and the prebuilt libwebrtc.
+      - name: Install Linux WebRTC C++ compiler
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/webrtc-clang
       - name: Build Linux executable against the compatibility baseline
         if: runner.os == 'Linux'
         shell: bash
@@ -687,8 +694,10 @@ jobs:
             --user "$(id -u):$(id -g)" \
             --volume "$GITHUB_WORKSPACE:/workspace" \
             --volume "$HOME/.cargo:/cargo" \
+            --volume "$RUNNER_TEMP/clang:/clang:ro" \
             --workdir /workspace \
             --env CARGO_HOME=/cargo \
+            --env CXX=/clang/bin/clang++ \
             ${{ matrix.image }} \
             cargo build --release --locked --target ${{ matrix.target }}
       # A successful link does not prove the Objective-C categories survived.
@@ -714,12 +723,14 @@ jobs:
           objc=$(otool -oV "$binary")
           grep -Eq "^[[:space:]]*name[[:space:]]+0x[0-9a-f]+ (\(0x${slot:-none}[ )]|$sel\$)" <<< "$objc" \
             || { echo 'WebRTC NSString category is missing' >&2; exit 1; }
-      # Two libraries set the floor, not one. The C++ half of this build links
-      # libstdc++, so a newer compiler raises the GLIBCXX_ requirement whether
-      # or not it touches GLIBC_, and a binary refused for either reason is
-      # refused the same way: in the loader, before main. The pattern reads
-      # numeric versions only, which is what leaves a name like
-      # GLIBC_ABI_DT_RELR out: it is a marker, not a version to compare.
+      # Two libraries can set the floor, not one. WebRTC carries Chromium's
+      # libc++ statically, so today nothing asks for libstdc++ and GLIBCXX_ is
+      # absent; a dependency that links it again would raise that requirement
+      # whether or not it touches GLIBC_, and a binary refused for either
+      # reason is refused the same way: in the loader, before main. So GLIBC_
+      # must be present and GLIBCXX_ is held to its ceiling only when it is.
+      # The pattern reads numeric versions only, which is what leaves a name
+      # like GLIBC_ABI_DT_RELR out: it is a marker, not a version to compare.
       - name: Verify Linux release compatibility
         if: runner.os == 'Linux'
         shell: bash
@@ -737,14 +748,17 @@ jobs:
             required=$(LC_ALL=C readelf -W --version-info "$binary" \
               | sed -nE "s/.*Name: $1_([0-9.]+)[[:space:]]+Flags:.*/\1/p" \
               | sort -V | tail -n 1)
-            [ -n "$required" ] \
-              || { echo "Linux release has no $1 symbol requirement" >&2; exit 1; }
+            if [ -z "$required" ]; then
+              [ "${3:-}" = optional ] && return 0
+              echo "Linux release has no $1 symbol requirement" >&2
+              exit 1
+            fi
             newest=$(printf '%s\n%s\n' "$required" "$2" | sort -V | tail -n 1)
             [ "$newest" = "$2" ] \
               || { echo "Linux release requires $1_$required, not $1_$2 or older" >&2; exit 1; }
           }
           floor GLIBC '${{ matrix.glibc }}'
-          floor GLIBCXX '${{ matrix.glibcxx }}'
+          floor GLIBCXX '${{ matrix.glibcxx }}' optional
       # The symbol table says the binary asks for nothing newer; this says the
       # loader agrees. Every other step that runs it runs it on the runner,
       # whose glibc is 2.39, where the failure in issue #30 cannot reproduce.

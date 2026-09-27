@@ -635,18 +635,6 @@ pub(crate) fn query_pairs(query: &str) -> HashMap<String, String> {
         .collect()
 }
 
-pub(crate) fn query_escape(value: &str) -> String {
-    value
-        .bytes()
-        .flat_map(|byte| match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
-                vec![byte as char]
-            }
-            _ => format!("%{byte:02X}").chars().collect(),
-        })
-        .collect()
-}
-
 pub(crate) fn query_unescape(value: &str) -> Option<String> {
     let mut output = Vec::with_capacity(value.len());
     let bytes = value.as_bytes();

@@ -511,36 +511,6 @@ fn runtime_helpers_match_frozen_fixture() {
         )
     );
     assert_eq!(log_hint_text(2), "Recorded. Total hints so far: 2.");
-    assert_eq!(
-        format_transcript(&[
-            TranscriptItem {
-                item_type: "message",
-                role: "assistant",
-                text: "Hi",
-            },
-            TranscriptItem {
-                item_type: "message",
-                role: "user",
-                text: "Hello",
-            },
-            TranscriptItem {
-                item_type: "message",
-                role: "assistant",
-                text: "[SYSTEM EVENT] hidden",
-            },
-            TranscriptItem {
-                item_type: "message",
-                role: "assistant",
-                text: "  [SYSTEM EVENT] kept by Python",
-            },
-            TranscriptItem {
-                item_type: "tool",
-                role: "assistant",
-                text: "skip",
-            },
-        ]),
-        expected["transcript"].as_str().unwrap()
-    );
 }
 
 #[test]

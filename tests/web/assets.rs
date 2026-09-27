@@ -86,7 +86,7 @@ async fn embedded_web_assets_serve_without_a_web_directory() {
     config.web_dir = absent_web_dir("no-web");
     let (base, server) = spawn_web_server(config).await;
 
-    let response = reqwest::get(&base).await.unwrap();
+    let response = http_client().get(&base).send().await.unwrap();
     assert_eq!(response.status(), 200);
     assert_eq!(
         response.headers().get("content-type").unwrap(),
@@ -102,7 +102,7 @@ async fn embedded_web_assets_serve_without_a_web_directory() {
     // Committed rather than fetched by `scripts/fetch-vendor.sh`, so the
     // assertion does not depend on whether the fetch has run here.
     let vendor = format!("{base}/vendor/avatar/three-vrm.js");
-    let response = reqwest::get(&vendor).await.unwrap();
+    let response = http_client().get(&vendor).send().await.unwrap();
     assert_eq!(response.status(), 200);
     assert_eq!(
         response.headers().get("cache-control").unwrap(),
@@ -110,7 +110,7 @@ async fn embedded_web_assets_serve_without_a_web_directory() {
     );
     let etag = response.headers().get("etag").unwrap().clone();
 
-    let client = reqwest::Client::new();
+    let client = http_client();
     let revalidated = client
         .get(&vendor)
         .header("if-none-match", etag.clone())
@@ -134,7 +134,11 @@ async fn embedded_web_assets_serve_without_a_web_directory() {
     assert!(head.bytes().await.unwrap().is_empty());
 
     for route in ["/interview", "/interview/"] {
-        let response = reqwest::get(&format!("{base}{route}")).await.unwrap();
+        let response = http_client()
+            .get(format!("{base}{route}"))
+            .send()
+            .await
+            .unwrap();
         assert_eq!(response.status(), 200, "{route}");
         assert!(response.text().await.unwrap().contains("CodeTrial"));
     }
@@ -146,7 +150,11 @@ async fn embedded_web_assets_serve_without_a_web_directory() {
     // `normalization_cannot_launder_a_refused_path` owns those cases against
     // the rule itself, and the release smoke step owns them against a binary
     // that really does match keys exactly.
-    let response = reqwest::get(&format!("{base}/.git/config")).await.unwrap();
+    let response = http_client()
+        .get(format!("{base}/.git/config"))
+        .send()
+        .await
+        .unwrap();
     assert_ne!(response.status(), 200);
 
     server.shutdown().await;
@@ -168,12 +176,14 @@ async fn embedded_assets_fill_gaps_in_a_partial_web_directory() {
     let (base, server) = spawn_web_server(config).await;
 
     // Present on disk, so disk answers even though the embed also has it.
-    let response = reqwest::get(&base).await.unwrap();
+    let response = http_client().get(&base).send().await.unwrap();
     assert_eq!(response.status(), 200);
     assert_eq!(response.text().await.unwrap(), "<!doctype html>disk wins");
 
     // Absent from this tree, so the embedded copy fills the gap.
-    let response = reqwest::get(&format!("{base}/vendor/avatar/three-vrm.js"))
+    let response = http_client()
+        .get(format!("{base}/vendor/avatar/three-vrm.js"))
+        .send()
         .await
         .unwrap();
     assert_eq!(response.status(), 200);
@@ -183,7 +193,9 @@ async fn embedded_assets_fill_gaps_in_a_partial_web_directory() {
     // fallback, so a disk store searched to exhaustion first would answer with
     // the one file it has and hand back the wrong page with a 200. Candidate
     // order has to beat store order.
-    let interview = reqwest::get(&format!("{base}/interview"))
+    let interview = http_client()
+        .get(format!("{base}/interview"))
+        .send()
         .await
         .unwrap()
         .text()
@@ -213,7 +225,7 @@ async fn vendored_assets_are_served_typed_and_cached() {
     let mut config = web_config();
     config.web_dir = std::path::PathBuf::from(DEFAULT_WEB_DIR);
     let (base, server) = spawn_web_server(config).await;
-    let client = reqwest::Client::new();
+    let client = http_client();
 
     for (file, content_type) in [
         // `WebAssembly.instantiateStreaming` refuses anything else.
@@ -326,7 +338,7 @@ async fn static_server_serves_health_fixture_and_missing_asset() {
         ..web_config()
     })
     .await;
-    let client = reqwest::Client::new();
+    let client = http_client();
 
     let health = client.get(format!("{base}/healthz")).send().await.unwrap();
     assert_eq!(health.status(), 200);
@@ -419,7 +431,7 @@ async fn static_server_serves_health_fixture_and_missing_asset() {
 #[tokio::test]
 async fn runtime_config_can_disable_compiled_language_runs() {
     let (enabled_base, enabled_server) = spawn_web_server(web_config()).await;
-    let client = reqwest::Client::new();
+    let client = http_client();
 
     let enabled = client
         .get(format!("{enabled_base}/runtime-config.js"))
@@ -510,8 +522,14 @@ async fn disk_and_embedded_stores_resolve_urls_identically() {
         "/.git/config",
         "/vendor/.hidden",
     ] {
-        let from_disk = reqwest::get(&format!("{disk_base}{route}")).await.unwrap();
-        let from_embed = reqwest::get(&format!("{embedded_base}{route}"))
+        let from_disk = http_client()
+            .get(format!("{disk_base}{route}"))
+            .send()
+            .await
+            .unwrap();
+        let from_embed = http_client()
+            .get(format!("{embedded_base}{route}"))
+            .send()
             .await
             .unwrap();
         assert_eq!(

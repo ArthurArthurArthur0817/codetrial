@@ -43,12 +43,8 @@ fn prompts_match_frozen_fixture() {
 fn prompt_golden_digest_matches_versions() {
     let expected: Value = serde_json::from_str(include_str!("../golden/prompts.json"))
         .expect("prompt fixture should parse");
-    let digest = format!(
-        "{:x}",
-        Sha256::digest(
-            serde_json::to_vec(&expected).expect("parsed prompt fixture should serialize")
-        )
-    );
+    let digest =
+        sha256_hex(&serde_json::to_vec(&expected).expect("parsed prompt fixture should serialize"));
 
     // The versions the digest below was recorded against, and that digest.
     //

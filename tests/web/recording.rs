@@ -507,7 +507,7 @@ async fn a_refused_interview_leaves_its_consent_unspent() {
         .at_capacity
         .store(true, std::sync::atomic::Ordering::Relaxed);
     let (base, server) = spawn_web_server_with_dispatcher(config, dispatcher.clone()).await;
-    let client = reqwest::Client::new();
+    let client = http_client();
 
     let interview = start_interview(&client, &base, &cookie).await;
     let busy = client
@@ -1339,7 +1339,7 @@ async fn a_webhook_from_another_project_does_not_touch_the_room() {
         .unwrap();
 
     let (base, server) = spawn_web_server(config).await;
-    let client = reqwest::Client::new();
+    let client = http_client();
 
     let failed = json!({
         "event": "egress_ended",
@@ -1438,7 +1438,7 @@ async fn an_unsigned_webhook_cannot_move_a_recording() {
         .unwrap();
 
     let (base, server) = spawn_web_server(config).await;
-    let client = reqwest::Client::new();
+    let client = http_client();
     let state = || -> String {
         rusqlite::Connection::open(&path)
             .unwrap()

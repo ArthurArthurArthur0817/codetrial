@@ -25,7 +25,7 @@ async fn production_promises_the_browser_it_will_stay_on_https() {
     })
     .await;
 
-    let home = reqwest::get(&base).await.unwrap();
+    let home = http_client().get(&base).send().await.unwrap();
     assert_eq!(
         home.headers().get("strict-transport-security").unwrap(),
         "max-age=31536000"
@@ -52,7 +52,7 @@ async fn only_the_face_worker_may_evaluate_a_string() {
     })
     .await;
 
-    let page = reqwest::get(&base).await.unwrap();
+    let page = http_client().get(&base).send().await.unwrap();
     let page_policy = page
         .headers()
         .get("content-security-policy")
@@ -63,7 +63,9 @@ async fn only_the_face_worker_may_evaluate_a_string() {
     assert!(!page_policy.contains("'unsafe-eval'"), "{page_policy}");
     assert!(page_policy.contains("'wasm-unsafe-eval'"), "{page_policy}");
 
-    let worker = reqwest::get(format!("{base}/face-worker.js"))
+    let worker = http_client()
+        .get(format!("{base}/face-worker.js"))
+        .send()
         .await
         .unwrap();
     assert_eq!(worker.status(), reqwest::StatusCode::OK);
@@ -89,7 +91,7 @@ async fn responses_carry_baseline_security_headers() {
     })
     .await;
 
-    let home = reqwest::get(&base).await.unwrap();
+    let home = http_client().get(&base).send().await.unwrap();
 
     assert_eq!(
         home.headers().get("x-content-type-options").unwrap(),
@@ -188,7 +190,9 @@ async fn public_web_service_omits_malformed_livekit_origins() {
         let mut config = web_config();
         config.pool = primary_pool(url, "devkey", "devsecret");
         let (base, server) = spawn_web_server(config).await;
-        let policy = reqwest::get(&base)
+        let policy = http_client()
+            .get(&base)
+            .send()
             .await
             .unwrap()
             .headers()
@@ -212,7 +216,9 @@ async fn production_policy_names_no_loopback_origins() {
     })
     .await;
 
-    let policy = reqwest::get(&base)
+    let policy = http_client()
+        .get(&base)
+        .send()
         .await
         .unwrap()
         .headers()
@@ -254,7 +260,9 @@ async fn the_recording_template_is_reachable_under_a_policy_that_permits_its_roo
     config.recording = Some(recording);
     let (base, server) = spawn_web_server(config).await;
 
-    let template = reqwest::get(format!("{base}{}", codetrial::recording::TEMPLATE_PATH))
+    let template = http_client()
+        .get(format!("{base}{}", codetrial::recording::TEMPLATE_PATH))
+        .send()
         .await
         .unwrap();
     assert_eq!(template.status(), 200);

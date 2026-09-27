@@ -26,11 +26,14 @@ fn object_names_survive_their_slashes() {
     // The JSON API takes the whole object name as one path segment, so a prefix
     // that arrived unescaped would name a different object, or none.
     assert_eq!(
-        encode_path("codetrial/abc123.mp4"),
+        percent_encode_component("codetrial/abc123.mp4"),
         "codetrial%2Fabc123.mp4"
     );
-    assert_eq!(encode_path("a b"), "a%20b");
-    assert_eq!(encode_path("plain-name_1.mp4"), "plain-name_1.mp4");
+    assert_eq!(percent_encode_component("a b"), "a%20b");
+    assert_eq!(
+        percent_encode_component("plain-name_1.mp4"),
+        "plain-name_1.mp4"
+    );
 }
 
 #[test]
@@ -127,4 +130,130 @@ fn a_service_account_without_a_key_is_refused_at_startup() {
     })
     .to_string();
     assert!(GoogleDelivery::new(&pretend, "bucket", "drive", now).is_err());
+}
+
+/// A delivery whose staged-object reads go to `storage_api`. Nothing here
+/// signs, so the credential only has to exist.
+fn delivery_reading_from(storage_api: String) -> GoogleDelivery {
+    GoogleDelivery {
+        http: reqwest::Client::builder().no_proxy().build().unwrap(),
+        credentials: ServiceAccount {
+            client_email: String::new(),
+            private_key: Vec::new(),
+            token_uri: String::new(),
+        },
+        bucket: "staging".to_string(),
+        drive_id: "drive".to_string(),
+        token: Mutex::new(None),
+        now: Arc::new(|| 0),
+        storage_api,
+    }
+}
+
+/// Serve `respond` on loopback and record each request's path, query and
+/// `Range` header, in that order.
+async fn storage_stub(
+    respond: fn() -> axum::response::Response,
+) -> (String, Arc<std::sync::Mutex<Vec<String>>>) {
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let log = Arc::clone(&seen);
+    let router = axum::Router::new().fallback(
+        move |uri: axum::http::Uri, headers: axum::http::HeaderMap| async move {
+            let range = headers
+                .get(reqwest::header::RANGE)
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+            log.lock().unwrap().push(format!("{uri} {range}"));
+            respond()
+        },
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    (format!("http://{address}"), seen)
+}
+
+/// The size is what the resumable upload declares up front, so a wrong one
+/// finishes a truncated file or never finishes at all.
+#[tokio::test]
+async fn the_staged_size_is_read_from_the_named_object() {
+    use axum::response::IntoResponse;
+    let (base, seen) = storage_stub(|| axum::Json(json!({ "size": "4096" })).into_response()).await;
+    let delivery = delivery_reading_from(base);
+
+    assert_eq!(
+        delivery.object_size("codetrial/abc.mp4", "token").await,
+        Ok(4096)
+    );
+    assert_eq!(*seen.lock().unwrap(), ["/b/staging/o/codetrial%2Fabc.mp4 "]);
+}
+
+/// A chunk is uploaded as returned, so its bytes have to be the object's.
+#[tokio::test]
+async fn a_range_returns_the_bytes_the_object_holds() {
+    use axum::response::IntoResponse;
+    let (base, seen) =
+        storage_stub(|| (axum::http::StatusCode::PARTIAL_CONTENT, "hello").into_response()).await;
+    let delivery = delivery_reading_from(base);
+
+    assert_eq!(
+        delivery
+            .object_range("codetrial/abc.mp4", "token", 10, 14)
+            .await,
+        Ok(b"hello".to_vec())
+    );
+    assert_eq!(
+        *seen.lock().unwrap(),
+        ["/b/staging/o/codetrial%2Fabc.mp4?alt=media bytes=10-14"]
+    );
+}
+
+/// An object that reports no bytes has nothing to upload, and declaring a
+/// zero-length session would finish an empty file.
+#[tokio::test]
+async fn an_empty_staged_object_is_refused() {
+    use axum::response::IntoResponse;
+    let (base, _) = storage_stub(|| axum::Json(json!({ "size": "0" })).into_response()).await;
+    let delivery = delivery_reading_from(base);
+
+    assert!(
+        delivery
+            .object_size("codetrial/abc.mp4", "token")
+            .await
+            .is_err()
+    );
+}
+
+/// A 401 on either read means the remembered token is dead, so the next call
+/// has to mint a new one instead of failing the same way until it expires.
+#[tokio::test]
+async fn a_rejected_token_is_forgotten_by_both_reads() {
+    use axum::response::IntoResponse;
+    let (base, _) = storage_stub(|| axum::http::StatusCode::UNAUTHORIZED.into_response()).await;
+    let delivery = delivery_reading_from(base);
+    let remember = |delivery: &GoogleDelivery| {
+        *delivery.token.try_lock().unwrap() = Some(CachedToken {
+            value: "stale".to_string(),
+            expires_at: i64::MAX,
+        });
+    };
+
+    remember(&delivery);
+    assert!(
+        delivery
+            .object_size("codetrial/abc.mp4", "stale")
+            .await
+            .is_err()
+    );
+    assert!(delivery.token.try_lock().unwrap().is_none(), "object_size");
+
+    remember(&delivery);
+    assert!(
+        delivery
+            .object_range("codetrial/abc.mp4", "stale", 0, 4)
+            .await
+            .is_err()
+    );
+    assert!(delivery.token.try_lock().unwrap().is_none(), "object_range");
 }

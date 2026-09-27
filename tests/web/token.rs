@@ -498,7 +498,7 @@ fn token_duration_survives_a_recording_cap_under_the_floor() {
 async fn token_endpoint_rate_limits_a_noisy_client() {
     let (config, cookie, db_path) = signed_in_web_config("rate-limit");
     let (base, server) = spawn_web_server(config).await;
-    let client = reqwest::Client::new();
+    let client = http_client();
     let url = format!("{base}/api/token");
     let body = json!({"problemId":"two-sum","durationMin":45});
 
@@ -535,7 +535,7 @@ async fn token_endpoint_rate_limits_a_noisy_client() {
 async fn token_api_matches_frontend_contract_over_http() {
     let (config, cookie, db_path) = signed_in_web_config("contract");
     let (base, server) = spawn_web_server(config).await;
-    let response = reqwest::Client::new()
+    let response = http_client()
         .post(format!("{base}/api/token"))
         .header("cookie", &cookie)
         .json(&json!({"problemId":"merge-intervals","durationMin":120}))
@@ -581,7 +581,7 @@ async fn token_api_matches_frontend_contract_over_http() {
 async fn observer_is_not_the_candidate() {
     let (config, cookie, db_path) = signed_in_web_config("observer");
     let (base, server) = spawn_web_server(config).await;
-    let client = reqwest::Client::new();
+    let client = http_client();
     let candidate: Value = client
         .post(format!("{base}/api/token"))
         .header("cookie", &cookie)
@@ -650,7 +650,7 @@ async fn observer_is_not_the_candidate() {
 async fn observer_tokens_belong_to_the_account_that_minted_the_room() {
     let (config, cookie, db_path) = signed_in_web_config("observer-owner");
     let (base, server) = spawn_web_server(config).await;
-    let client = reqwest::Client::new();
+    let client = http_client();
     let observer_url = format!("{base}/api/observer-token");
 
     let minted: Value = client
@@ -711,7 +711,7 @@ async fn token_api_rejects_malformed_body_and_defaults_an_empty_one() {
     let dispatcher = std::sync::Arc::<RecordingDispatcher>::default();
     let (base, server) =
         spawn_web_server_with_dispatcher(config, std::sync::Arc::clone(&dispatcher)).await;
-    let client = reqwest::Client::new();
+    let client = http_client();
 
     // A body that is present but unparsable is a client bug. Handing back a
     // default interview would hide it until the candidate is already in the
@@ -759,7 +759,7 @@ async fn token_api_ignores_empty_and_production_fixed_room() {
     let (mut empty_config, empty_cookie, empty_db_path) = signed_in_web_config("empty-room");
     empty_config.fixed_room_name = Some(String::new());
     let (empty_base, empty_server) = spawn_web_server(empty_config).await;
-    let empty_body: Value = reqwest::Client::new()
+    let empty_body: Value = http_client()
         .post(format!("{empty_base}/api/token"))
         .header("cookie", &empty_cookie)
         .json(&json!({}))
@@ -783,7 +783,7 @@ async fn token_api_ignores_empty_and_production_fixed_room() {
     production_config.fixed_room_name = Some("interview-local".to_string());
     production_config.production = true;
     let (production_base, production_server) = spawn_web_server(production_config).await;
-    let production_body: Value = reqwest::Client::new()
+    let production_body: Value = http_client()
         .post(format!("{production_base}/api/token"))
         .header("cookie", &production_cookie)
         .json(&json!({}))
@@ -816,7 +816,7 @@ async fn token_api_staffs_every_room_it_hands_out() {
     let dispatcher = std::sync::Arc::<RecordingDispatcher>::default();
     let (base, server) =
         spawn_web_server_with_dispatcher(config, std::sync::Arc::clone(&dispatcher)).await;
-    let client = reqwest::Client::new();
+    let client = http_client();
 
     let mut handed_out = Vec::new();
     for _ in 0..2 {
@@ -860,7 +860,7 @@ async fn a_staffed_room_names_the_project_that_signed_the_token() {
     let (base, server) =
         spawn_web_server_with_dispatcher(config, std::sync::Arc::clone(&dispatcher)).await;
 
-    let body: Value = reqwest::Client::new()
+    let body: Value = http_client()
         .post(format!("{base}/api/token"))
         .header("cookie", &cookie)
         .json(&json!({}))
@@ -899,7 +899,7 @@ async fn a_room_that_cannot_be_staffed_is_refused_rather_than_sold() {
     let (base, server) =
         spawn_web_server_with_dispatcher(config, std::sync::Arc::clone(&dispatcher)).await;
 
-    let response = reqwest::Client::new()
+    let response = http_client()
         .post(format!("{base}/api/token"))
         .header("cookie", &cookie)
         .json(&json!({"problemId":"two-sum","durationMin":45}))
@@ -925,7 +925,7 @@ async fn token_api_rejects_oversize_body() {
     let dispatcher = std::sync::Arc::<RecordingDispatcher>::default();
     let (base, server) =
         spawn_web_server_with_dispatcher(config, std::sync::Arc::clone(&dispatcher)).await;
-    let response = reqwest::Client::new()
+    let response = http_client()
         .post(format!("{base}/api/token"))
         .header("cookie", &cookie)
         .body(vec![b'a'; MAX_BODY_BYTES + 1])
@@ -952,7 +952,7 @@ async fn token_api_fails_closed_with_frontend_error_shape_without_livekit_creden
     let (mut config, cookie, db_path) = signed_in_web_config("missing-livekit");
     config.pool = Default::default();
     let (base, server) = spawn_web_server(config).await;
-    let response = reqwest::Client::new()
+    let response = http_client()
         .post(format!("{base}/api/token"))
         .header("cookie", &cookie)
         .json(&json!({"problemId":"two-sum","durationMin":45}))
@@ -1005,12 +1005,7 @@ async fn token_requires_a_session_once_accounts_exist() {
     let url = format!("{base}/api/token");
     let body = json!({"problemId": "two-sum", "durationMin": 45});
 
-    let anonymous = reqwest::Client::new()
-        .post(&url)
-        .json(&body)
-        .send()
-        .await
-        .unwrap();
+    let anonymous = http_client().post(&url).json(&body).send().await.unwrap();
     assert_eq!(anonymous.status(), 401);
     assert!(
         anonymous.json::<Value>().await.unwrap()["error"]
@@ -1020,7 +1015,7 @@ async fn token_requires_a_session_once_accounts_exist() {
         "the refusal has to say what to do about it"
     );
 
-    let signed_in = reqwest::Client::new()
+    let signed_in = http_client()
         .post(&url)
         .header(
             "cookie",
@@ -1056,7 +1051,7 @@ async fn token_requires_recorded_github_login() {
     config.session_secret = Some("secret".to_string());
     config.db_path = Some(path.clone());
     let (base, server) = spawn_web_server(config).await;
-    let client = reqwest::Client::new();
+    let client = http_client();
 
     let anonymous = client
         .post(format!("{base}/api/token"))
@@ -1091,7 +1086,7 @@ async fn token_requires_verified_recording_identity() {
     let (mut config, cookie, path) = signed_in_web_config("recording-identity");
     config.recording = Some(recording_config());
     let (base, server) = spawn_web_server(config).await;
-    let client = reqwest::Client::new();
+    let client = http_client();
 
     let refused = client
         .post(format!("{base}/api/token"))

@@ -308,15 +308,6 @@ const REDACTED_KEYS: [&str; 10] = [
     "cookie",
 ];
 
-/// Everything a replay event must not carry, removed rather than refused.
-///
-/// Removed, because a producer that accidentally included a token should still
-/// deliver the transcript line it was carrying; refusing the whole event would
-/// lose the interview to protect it.
-pub fn redact_replay_payload(payload: &Value) -> Value {
-    strip_secret_keys(&trim_replay_payload(payload))
-}
-
 /// Media out, overlong strings cut. Everything here is a transformation of a
 /// value the producer is allowed to send.
 fn trim_replay_payload(payload: &Value) -> Value {

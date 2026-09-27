@@ -22,6 +22,7 @@ use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use serde_json::{Value, json};
 use tokio::sync::Mutex;
 
+use crate::percent_encode_component;
 use crate::recording::{BoxFuture, DeliveryProvider};
 
 /// Chunks are a multiple of 256 KiB, which the resumable protocol requires, and
@@ -78,7 +79,13 @@ pub struct GoogleDelivery {
     drive_id: String,
     token: Mutex<Option<CachedToken>>,
     now: Arc<dyn Fn() -> i64 + Send + Sync>,
+    /// Always `STORAGE_API` outside tests. A field rather than the constant so
+    /// the staged-object reads can be driven against a local server: they are
+    /// the half of delivery whose answers are checked byte for byte.
+    storage_api: String,
 }
+
+const STORAGE_API: &str = "https://storage.googleapis.com/storage/v1";
 
 struct ServiceAccount {
     client_email: String,
@@ -159,6 +166,7 @@ impl GoogleDelivery {
             drive_id: drive_id.to_string(),
             token: Mutex::new(None),
             now,
+            storage_api: STORAGE_API.to_string(),
         })
     }
 
@@ -302,9 +310,10 @@ impl GoogleDelivery {
         let response = self
             .http
             .get(format!(
-                "https://storage.googleapis.com/storage/v1/b/{}/o/{}",
+                "{}/b/{}/o/{}",
+                self.storage_api,
                 self.bucket,
-                encode_path(gcs_object)
+                percent_encode_component(gcs_object)
             ))
             .bearer_auth(token)
             .send()
@@ -335,9 +344,10 @@ impl GoogleDelivery {
         let response = self
             .http
             .get(format!(
-                "https://storage.googleapis.com/storage/v1/b/{}/o/{}?alt=media",
+                "{}/b/{}/o/{}?alt=media",
+                self.storage_api,
                 self.bucket,
-                encode_path(gcs_object)
+                percent_encode_component(gcs_object)
             ))
             .bearer_auth(token)
             .header(reqwest::header::RANGE, format!("bytes={start}-{end}"))
@@ -490,24 +500,6 @@ fn sign_rs256(pkcs8: &[u8], message: &[u8]) -> Result<Vec<u8>, String> {
     )
     .map_err(|error| format!("the assertion could not be signed: {error}"))?;
     Ok(signature)
-}
-
-/// Percent-encoding for one path segment.
-///
-/// A GCS object name contains slashes, and the JSON API takes it as a single
-/// path segment, so those slashes have to arrive as `%2F` or the request names
-/// a different object.
-fn encode_path(value: &str) -> String {
-    let mut encoded = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                encoded.push(byte as char);
-            }
-            _ => encoded.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    encoded
 }
 
 async fn read_json(response: reqwest::Response, what: &str) -> Result<Value, String> {
@@ -751,9 +743,10 @@ impl DeliveryProvider for GoogleDelivery {
             let response = self
                 .http
                 .delete(format!(
-                    "https://storage.googleapis.com/storage/v1/b/{}/o/{}",
+                    "{}/b/{}/o/{}",
+                    self.storage_api,
                     self.bucket,
-                    encode_path(gcs_object)
+                    percent_encode_component(gcs_object)
                 ))
                 .bearer_auth(&token)
                 .send()

@@ -41,17 +41,19 @@ Candidate video reaches Gemini only with
 `CODETRIAL_GEMINI_CANDIDATE_VIDEO_ENABLED=true`. Face-presence analysis runs in
 the browser and reports itself unavailable rather than guessing.
 
-Jim's avatar model is Seed-san by VirtualCast, Inc.; its required credit and
-license are in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md), along with
-every other bundled asset and its checksum.
-
 ## Dependencies by lifecycle
 
 | Phase | Required | Notes |
 |---|---|---|
-| Build time | Rust stable, `curl` or `wget`, and `sha256sum` or `shasum` | Cargo resolves application crates from `Cargo.lock`. `make build` fetches the checksum-pinned browser assets on the first build. |
+| Build time | Rust stable, `curl` or `wget`, and `sha256sum` or `shasum`; Linux also needs Clang 21+ and GLib development headers | Cargo resolves application crates from `Cargo.lock`. `make build` fetches the checksum-pinned browser assets on the first build. |
 | Test time | Build-time tools, Node.js 18+, and Python 3 | Node runs browser and fixture checks; Python verifies generated problem-bank files. `npm ci` adds ESLint and Playwright for the full local browser gate. `ruff`, `shellcheck`, `shfmt`, `commentflow`, `actionlint`, and `cargo-audit` are optional: each gate reports that it skipped rather than failing without them. CI installs all of them, so those lanes are enforced on a pull request whatever a checkout can run; locally the `actionlint` lane also takes its container image. |
 | Runtime | The compiled `codetrial` binary and a config file | No Node.js, Python, or `node_modules` is required. Rust dependencies are compiled into the binary; browser dependencies are vendored, checksum-pinned, and embedded, so a `web/` directory is optional and only overrides what is already inside. |
+
+On Linux x86_64, `make` downloads the checksum-pinned WebRTC compiler into
+`target/clang` and uses it unless `CXX` is already set (requires `curl`,
+`sha256sum`, `flock`, and `tar` with xz support). Plain `cargo` needs it named:
+`CXX="$PWD/target/clang/bin/clang++" cargo build`, or `CXX` set to an installed
+Clang 21+ compiler.
 
 Running an interview also needs a LiveKit Cloud project and a Google AI Studio
 API key. C, C++, and Java test runs additionally use the remote Compiler
@@ -229,7 +231,7 @@ recorded rather than left implicit. See
 | [Installing a binary](docs/install.md) | Published binaries, platform notes, the config beside them |
 | [Interview length](docs/interview-length.md) | What the lobby offers and what the endpoints enforce |
 | [Integrity evidence](docs/integrity-evidence.md) | Response windows, and what CodeTrial declines to look for |
-| [Third-party notices](THIRD-PARTY-NOTICES.md) | Bundled software, model attribution, licenses, checksums |
+| [Third-party notices](THIRD-PARTY-NOTICES.md) | Bundled software, licenses, checksums |
 | [Avatar contract](docs/avatar-contract.md) | Renderer behavior, asset limits, privacy, accessibility |
 | [Provider pooling](docs/providers.md) | Spreading rooms over several LiveKit projects |
 | [Recording contract](docs/recording-contract.md) | Provisioning, consent, delivery, retention, operations |

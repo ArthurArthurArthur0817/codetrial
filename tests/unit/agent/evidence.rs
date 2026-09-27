@@ -2874,7 +2874,7 @@ fn a_cached_incremental_parse_analyzes_exactly_as_a_fresh_one() {
     // The trees themselves, node by node, before the analyses: two trees can
     // count the same kinds while one has its nodes at the wrong offsets, and an
     // edit that claims too little of the buffer produces exactly that.
-    fn nodes(tree: &tree_sitter::Tree) -> Vec<(&'static str, usize, usize)> {
+    fn nodes(tree: &tree_sitter::Tree) -> Vec<(&str, usize, usize)> {
         let mut out = Vec::new();
         let mut cursor = tree.walk();
         loop {

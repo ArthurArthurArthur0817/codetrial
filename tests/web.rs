@@ -6,7 +6,7 @@ use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use serde_json::{Value, json};
 use sha2::Sha256;
 
@@ -28,6 +28,10 @@ use codetrial::web::{
     TOKEN_RATE_LIMIT, TokenConfig, WebServerConfig, initialize_account_database, login_config,
     static_file_meta, token_response,
 };
+
+#[path = "common/http.rs"]
+mod http;
+use http::{client as http_client, client_builder as http_client_builder};
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -221,7 +225,7 @@ async fn account_server(label: &str) -> (String, TestServer, std::path::PathBuf,
     config.session_secret = Some("session-secret".to_string());
     config.db_path = Some(db_path.clone());
     let (base, server) = spawn_web_server(config).await;
-    (base, server, db_path, reqwest::Client::new())
+    (base, server, db_path, http_client())
 }
 
 /// Signs in the way the browser does, so a test that cares about who owns what
@@ -927,7 +931,7 @@ async fn recorded_server(
             .unwrap();
     }
     let (base, server) = spawn_web_server(config).await;
-    (base, server, path, reqwest::Client::new(), cookie)
+    (base, server, path, http_client(), cookie)
 }
 
 /// The same, with a provider a test can watch. Every failure the pipeline has
@@ -970,7 +974,7 @@ async fn recorded_server_with_provider(
         format!("http://{addr}"),
         server,
         path,
-        reqwest::Client::new(),
+        http_client(),
         cookie,
     )
 }

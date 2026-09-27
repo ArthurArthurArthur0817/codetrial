@@ -1,9 +1,20 @@
-.PHONY: all build clean indent check mutants fetch-vendor verify-vendor web \
-	hooks uninstall-hooks
+.PHONY: all build clean indent check mutants fetch-vendor fetch-clang \
+	verify-vendor web hooks uninstall-hooks
 
 all: build
 
-build: fetch-vendor
+# webrtc-sys needs Clang 21+ on Linux. When the caller has not chosen a C++
+# compiler, an x86_64 Linux build uses the pinned one scripts/fetch-clang.sh
+# installs, a no-op once it is on disk; anything else keeps its own CXX.
+ifeq ($(shell uname -sm),Linux x86_64)
+ifeq ($(origin CXX),default)
+CXX := $(CURDIR)/target/clang/bin/clang++
+export CXX
+CLANG := fetch-clang
+endif
+endif
+
+build: fetch-vendor $(CLANG)
 	cargo build --release
 
 clean:
@@ -13,13 +24,13 @@ clean:
 # the same tools over the same files in the same order; two copies of that list
 # would agree only until one of them was edited. Clippy stays here: it is a
 # lint rather than a formatter, and `make check` runs it too.
-indent:
+indent: $(CLANG)
 	@./scripts/indent.sh --write
 	cargo clippy --all-targets -- -D warnings
 
 # No verify-vendor prerequisite: scripts/test.sh runs it, and having both hash
 # 12MB of wasm twice per check bought nothing.
-check:
+check: $(CLANG)
 	./scripts/test.sh
 	./scripts/gemini-check.sh
 
@@ -60,7 +71,7 @@ MUTANTS_SCOPE ?= -f 'src/recording/*.rs' -f src/accounts.rs -f 'src/accounts/*.r
 # `--cargo-arg=--locked` rather than a bare `--locked`: cargo-mutants owns its
 # own flags and forwards this one to every cargo it runs, which is what keeps a
 # mutant from being judged against a lockfile it quietly updated.
-mutants: fetch-vendor
+mutants: fetch-vendor $(CLANG)
 	cargo mutants --cargo-arg=--locked $(MUTANTS_FLAGS) $(MUTANTS_SCOPE)
 
 # The hooks run the fast half of the gate over the staged content and hold the
@@ -84,5 +95,8 @@ fetch-vendor:
 verify-vendor:
 	@./scripts/verify-vendor.sh
 
-web: fetch-vendor
+fetch-clang:
+	@sh scripts/fetch-clang.sh target/clang > /dev/null
+
+web: fetch-vendor $(CLANG)
 	cargo run -- web
