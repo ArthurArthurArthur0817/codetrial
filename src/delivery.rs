@@ -79,7 +79,13 @@ pub struct GoogleDelivery {
     drive_id: String,
     token: Mutex<Option<CachedToken>>,
     now: Arc<dyn Fn() -> i64 + Send + Sync>,
+    /// Always `STORAGE_API` outside tests. A field rather than the constant so
+    /// the staged-object reads can be driven against a local server: they are
+    /// the half of delivery whose answers are checked byte for byte.
+    storage_api: String,
 }
+
+const STORAGE_API: &str = "https://storage.googleapis.com/storage/v1";
 
 struct ServiceAccount {
     client_email: String,
@@ -160,6 +166,7 @@ impl GoogleDelivery {
             drive_id: drive_id.to_string(),
             token: Mutex::new(None),
             now,
+            storage_api: STORAGE_API.to_string(),
         })
     }
 
@@ -303,7 +310,8 @@ impl GoogleDelivery {
         let response = self
             .http
             .get(format!(
-                "https://storage.googleapis.com/storage/v1/b/{}/o/{}",
+                "{}/b/{}/o/{}",
+                self.storage_api,
                 self.bucket,
                 percent_encode_component(gcs_object)
             ))
@@ -336,7 +344,8 @@ impl GoogleDelivery {
         let response = self
             .http
             .get(format!(
-                "https://storage.googleapis.com/storage/v1/b/{}/o/{}?alt=media",
+                "{}/b/{}/o/{}?alt=media",
+                self.storage_api,
                 self.bucket,
                 percent_encode_component(gcs_object)
             ))
@@ -734,7 +743,8 @@ impl DeliveryProvider for GoogleDelivery {
             let response = self
                 .http
                 .delete(format!(
-                    "https://storage.googleapis.com/storage/v1/b/{}/o/{}",
+                    "{}/b/{}/o/{}",
+                    self.storage_api,
                     self.bucket,
                     percent_encode_component(gcs_object)
                 ))
