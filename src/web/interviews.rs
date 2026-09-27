@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 
 use crate::accounts::{
     MAX_INTERVIEWS_PER_USER, MAX_REPORTS_PER_USER, ReportSave, blocking, create_interview,
-    delete_reports, list_reports, random_token, save_report,
+    delete_report, delete_reports, list_reports, random_token, save_report,
 };
 use crate::current_epoch_seconds_i64;
 
@@ -48,6 +48,22 @@ pub(crate) async fn delete_reports_handler(Owner { accounts, user }: Owner) -> R
         Err(_) => json_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             json!({ "error": "Could not delete reports." }),
+        ),
+    }
+}
+
+/// 200 with a count of 0 rather than a 404 when nothing matched, the same shape
+/// the bulk delete answers with. The report is gone either way, so a retry
+/// after a timed-out first attempt succeeds instead of reporting a failure.
+pub(crate) async fn delete_report_handler(
+    Owner { accounts, user }: Owner,
+    UriPath(id): UriPath<String>,
+) -> Response {
+    match blocking(move || delete_report(&accounts, user.id, &id)).await {
+        Ok(deleted) => json_response(StatusCode::OK, json!({ "deleted": deleted })),
+        Err(_) => json_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            json!({ "error": "Could not delete report." }),
         ),
     }
 }

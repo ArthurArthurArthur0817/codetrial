@@ -1014,6 +1014,30 @@ fn deleting_reports_is_scoped_idempotent_and_reclaims_quota() {
     );
 }
 
+#[test]
+fn deleting_one_report_takes_only_that_report_of_its_owner() {
+    let path = scratch("delete-report");
+    initialize_account_database(&path).unwrap();
+    let accounts = accounts_at(&path);
+    let deleting = user_id_for(&accounts, &sign_in_as(&path, "deleting", -1));
+    let other = user_id_for(&accounts, &sign_in_as(&path, "other", -2));
+    for id in ["keep", "drop"] {
+        save_report(&accounts, deleting, id, "two-sum", &json!({})).unwrap();
+    }
+    save_report(&accounts, other, "theirs", "two-sum", &json!({})).unwrap();
+
+    assert_eq!(delete_report(&accounts, deleting, "theirs").unwrap(), 0);
+    assert_eq!(list_reports(&accounts, other).unwrap().len(), 1);
+
+    assert_eq!(delete_report(&accounts, deleting, "drop").unwrap(), 1);
+    let left = list_reports(&accounts, deleting).unwrap();
+    assert_eq!(
+        left.iter().map(|report| &report["id"]).collect::<Vec<_>>(),
+        ["keep"]
+    );
+    assert_eq!(delete_report(&accounts, deleting, "drop").unwrap(), 0);
+}
+
 /// Reports written inside one second still come back in one order.
 ///
 /// Both timestamps are whole seconds, so a candidate who finishes two

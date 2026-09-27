@@ -41,6 +41,8 @@ let holdReports = null;
 /// latency long enough to win the race.
 let holdLogin = null;
 let deleteRequests = 0;
+/// Ids `DELETE /api/reports/{id}` was asked for, in order.
+let deletedIds = [];
 
 before(async () => {
   browser = await launchChromium();
@@ -68,6 +70,13 @@ before(async () => {
         return true;
       }
       if (url.pathname === "/api/session") return json(session);
+      if (request.method === "DELETE" && url.pathname.startsWith("/api/reports/")) {
+        const id = decodeURIComponent(url.pathname.slice("/api/reports/".length));
+        deletedIds.push(id);
+        const before = reports.length;
+        reports = reports.filter((report) => report.id !== id);
+        return json({ deleted: before - reports.length });
+      }
       if (url.pathname === "/api/reports") {
         if (request.method === "DELETE") {
           const deleted = reports.length;
@@ -105,6 +114,7 @@ beforeEach(() => {
   holdReports = null;
   holdLogin = null;
   deleteRequests = 0;
+  deletedIds = [];
 });
 
 /// Hold `/api/reports` open and hand back the release. Everything between the
@@ -1446,6 +1456,146 @@ lobbyTest("saved reports require confirmation and clear the progress panel", asy
   assert.doesNotMatch(await page.locator("#recommendation").textContent(), /passed your last two/);
   assert.equal(await page.locator("#report-delete-status").textContent(), "Saved reports and progress were deleted.");
   assert.equal(await page.evaluate(() => document.activeElement.id), "report-delete-status");
+});
+
+lobbyTest("a filtered attempt list deletes the report the row shows", async (page) => {
+  const attempt = (id, language, day) => ({
+    id,
+    problemId: EASY[0],
+    payload: {
+      id, problemId: EASY[0], problemTitle: `Attempt ${id}`, language,
+      date: `2026-01-0${day}T00:00:00Z`, report: { decision: "HIRE" },
+    },
+  });
+  reports = [attempt("a", "python", 1), attempt("b", "cpp", 2), attempt("c", "python", 3)];
+  await lobby(page);
+  await page.selectOption("#progress-language", "python");
+  const rows = () => page.locator("#attempt-history > li > p").allTextContents();
+  assert.equal((await rows()).length, 2);
+  // Newest first, so the first row shown is the third report stored and the
+  // first report stored is not on screen at all.
+  const first = page.locator("#attempt-history > li").first().getByRole("button", { name: /^Delete the / });
+
+  page.once("dialog", (dialog) => dialog.dismiss());
+  await first.click();
+  assert.deepEqual(deletedIds, []);
+
+  page.once("dialog", (dialog) => {
+    assert.match(dialog.message(), /report for Attempt c\?/);
+    return dialog.accept();
+  });
+  await first.click();
+  await settles(page, () => document.querySelector("#report-delete-status").textContent !== "");
+  assert.deepEqual(deletedIds, ["c"]);
+  assert.deepEqual(reports.map((report) => report.id), ["a", "b"]);
+  assert.equal(await page.locator("#progress-language").inputValue(), "python", "the filter outlived the reload");
+  const left = await rows();
+  assert.equal(left.length, 1);
+  assert.match(left[0], /Attempt a/);
+  assert.equal(await page.locator("#report-delete-status").textContent(), "The report was deleted.");
+  assert.equal(deleteRequests, 0, "one report deleted was every report deleted");
+});
+
+lobbyTest("two attempts on one day have Delete buttons that name different reports", async (page) => {
+  const attempt = (id, time) => ({
+    id,
+    problemId: EASY[0],
+    payload: {
+      id, problemId: EASY[0], problemTitle: "Same problem", language: "python",
+      date: `2026-01-01T${time}:00Z`, report: { decision: "HIRE" },
+    },
+  });
+  reports = [attempt("morning", "09:00"), attempt("evening", "18:30")];
+  await lobby(page);
+  const names = await page.locator("#attempt-history [data-delete-report]")
+    .evaluateAll((buttons) => buttons.map((button) => button.getAttribute("aria-label")));
+  assert.equal(names.length, 2);
+  assert.notEqual(names[0], names[1]);
+});
+
+lobbyTest("deleting a row leaves focus in the list and announces the result", async (page) => {
+  const attempt = (id, day) => ({
+    id,
+    problemId: EASY[0],
+    payload: {
+      id, problemId: EASY[0], problemTitle: `Attempt ${id}`, language: "python",
+      date: `2026-01-0${day}T00:00:00Z`, report: { decision: "HIRE" },
+    },
+  });
+  reports = [attempt("a", 1), attempt("b", 2), attempt("c", 3)];
+  await lobby(page);
+  page.once("dialog", (dialog) => dialog.accept());
+  // Newest first, so the second row shown is "b" and "a" takes its place.
+  await page.locator("#attempt-history [data-delete-report]").nth(1).click();
+  await settles(page, () => document.querySelector("#report-delete-status").textContent !== "");
+  assert.deepEqual(deletedIds, ["b"]);
+  assert.equal(await page.locator("#report-delete-status").getAttribute("role"), "status");
+  assert.match(
+    await page.evaluate(() => document.activeElement.getAttribute("aria-label")),
+    /report for Attempt a$/,
+  );
+});
+
+lobbyTest("a device row still deletes after the first session check failed", async (page) => {
+  session = { signedIn: false };
+  await page.addInitScript((entry) => {
+    if (!localStorage.getItem("codetrial_history")) {
+      localStorage.setItem("codetrial_history", JSON.stringify([entry]));
+    }
+  }, { id: "local", problemId: EASY[0], date: "2026-01-04T00:00:00Z", report: { decision: "HIRE" } });
+  failing.add("/api/session");
+  await lobby(page);
+  // One flaky call at load, answered on the recheck: the list drawn was this
+  // device's, and that is the copy there is to delete.
+  failing.delete("/api/session");
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.locator("#attempt-history [data-delete-report]").click();
+  await settles(page, () => document.querySelector("#report-delete-status").textContent !== "");
+  assert.equal(await page.locator("#report-delete-status").textContent(), "The report was deleted.");
+  assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem("codetrial_history"))), []);
+});
+
+lobbyTest("a back/forward restore holds the row deletes down until the lobby reloads", async (page) => {
+  reports = [{ ...savedAttempt(EASY[0]), id: "kept", payload: { ...savedAttempt(EASY[0]).payload, id: "kept" } }];
+  await lobby(page);
+  const remove = page.locator("#attempt-history [data-delete-report]");
+  assert.equal(await remove.isDisabled(), false);
+  const release = holdHistory();
+  await restore(page);
+  assert.equal(await remove.isDisabled(), true);
+  release();
+  await awaitReady(page);
+  assert.equal(await remove.isDisabled(), false);
+});
+
+lobbyTest("an account delete this device could not follow shows the copy it kept", async (page) => {
+  const entry = { id: "both", problemId: EASY[0], date: "2026-01-03T00:00:00Z", report: { decision: "HIRE" } };
+  reports = [{ id: "both", problemId: EASY[0], payload: entry }];
+  await page.addInitScript((saved) => {
+    localStorage.setItem("codetrial_history", JSON.stringify([saved]));
+    const setItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function writeHistory(key, value) {
+      if (key === "codetrial_history") throw new Error("blocked");
+      return setItem.call(this, key, value);
+    };
+  }, entry);
+  await lobby(page);
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.locator("#attempt-history [data-delete-report]").click();
+  await settles(page, () => document.querySelector("#report-delete-status").textContent !== "");
+  assert.deepEqual(reports, []);
+  assert.equal(
+    await page.locator("#report-delete-status").textContent(),
+    "The report was deleted from your account, but its copy on this device could not be deleted.",
+  );
+  assert.match(await page.locator("#progress-summary").textContent(), /saved on this device/);
+  assert.equal(await page.locator("#attempt-history > li").count(), 1);
+});
+
+lobbyTest("a row without an id offers no delete", async (page) => {
+  reports = [savedAttempt(EASY[0])];
+  await lobby(page);
+  assert.equal(await page.locator("#attempt-history").getByRole("button", { name: /^Delete/ }).count(), 0);
 });
 
 lobbyTest("a phase row lists three weaknesses and folds the rest where they can still be read", async (page) => {

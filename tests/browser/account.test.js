@@ -7,6 +7,7 @@ import { join } from "node:path";
 
 import {
   clearReportHistory,
+  deleteReport,
   historyKey,
   readDeviceHistory,
   readLocalHistory,
@@ -543,6 +544,105 @@ test("a cross-tab sign-out keeps the account copy rather than claiming a clear",
   }), "failed");
   assert.equal(storage.getItem(historyKey), "keep");
   assert.deepEqual(calls, ["/api/session"]);
+});
+
+test("deleting one report removes every copy of it and nothing else", async () => {
+  const storage = memoryStorage();
+  // The review store holds the same attempt under its own order, plus an older
+  // one the short history has rolled past, so a position means a different
+  // report in each store.
+  // Dated apart, because an id-less row is paired with its review copy by what
+  // else it holds, and rows holding nothing else would all pair.
+  const row = (id, day) => ({ ...(id ? { id } : {}), problemId: "p", date: `2026-01-0${day}` });
+  storage.setItem(historyKey, JSON.stringify([row("c", 4), row("b", 3), row(null, 2)]));
+  storage.setItem(reviewHistoryKey, JSON.stringify([row("b", 3), row("c", 4), row("a", 1)]));
+  const calls = [];
+  assert.equal(await deleteReport("b", {
+    storage,
+    fetcher: async (url) => {
+      calls.push(url);
+      return response({ signedIn: false });
+    },
+  }), "deleted");
+  assert.deepEqual(calls, ["/api/session"], "a signed-out browser has no account copy to ask about");
+  assert.deepEqual(JSON.parse(storage.getItem(historyKey)), [row("c", 4), row(null, 2)]);
+  assert.deepEqual(readReviewHistory(storage).map((entry) => entry.id), ["c", "a"]);
+  assert.deepEqual(readDeviceHistory(storage).map((entry) => entry.date), ["2026-01-04", "2026-01-02", "2026-01-01"]);
+});
+
+test("deleting one report asks the account for that id alone", async () => {
+  const storage = memoryStorage();
+  storage.setItem(historyKey, JSON.stringify([{ id: "one/off try" }, { id: "kept" }]));
+  const calls = [];
+  assert.equal(await deleteReport("one/off try", {
+    account: true,
+    storage,
+    fetcher: async (url, options) => {
+      calls.push({ url, method: options?.method, deadline: options?.signal instanceof AbortSignal });
+      return url === "/api/session" ? response({ signedIn: true }) : response({ deleted: 1 });
+    },
+  }), "deleted");
+  assert.deepEqual(calls, [
+    { url: "/api/session", method: undefined, deadline: true },
+    { url: "/api/reports/one%2Foff%20try", method: "DELETE", deadline: true },
+  ]);
+  assert.deepEqual(JSON.parse(storage.getItem(historyKey)), [{ id: "kept" }]);
+});
+
+test("a report the account kept stays on this device too", async () => {
+  const kept = JSON.stringify([{ id: "keep" }]);
+  for (const fetcher of [
+    async () => { throw new Error("offline"); },
+    async (url) => url === "/api/session" ? response({ signedIn: true }) : response({}, false),
+    // Signed out in another tab: the account copy cannot be reached, so
+    // deleting the local one would claim a deletion that did not happen.
+    async () => response({ signedIn: false }),
+  ]) {
+    const storage = memoryStorage();
+    storage.setItem(historyKey, kept);
+    assert.equal(await deleteReport("keep", { account: true, storage, fetcher }), "failed");
+    assert.equal(storage.getItem(historyKey), kept);
+  }
+  assert.equal(await deleteReport("", { fetcher: async () => assert.fail("no request for no id") }), "failed");
+
+  const brokenStorage = {
+    getItem: () => JSON.stringify([{ id: "keep" }]),
+    setItem: () => { throw new Error("blocked"); },
+  };
+  const signedIn = async (url) => url === "/api/session" ? response({ signedIn: true }) : response({ deleted: 1 });
+  assert.equal(await deleteReport("keep", { storage: brokenStorage, fetcher: signedIn }), "account-deleted-local-failed");
+  assert.equal(await deleteReport("keep", {
+    storage: brokenStorage,
+    fetcher: async () => response({ signedIn: false }),
+  }), "failed");
+});
+
+test("deleting an id no store holds says so instead of claiming a removal", async () => {
+  // A pre-id row whose assigned id never reached storage: the rows are still
+  // there, so answering "deleted" named a removal the next read undoes.
+  const legacy = JSON.stringify([{ problemId: "p", date: "2026-01-01" }]);
+  const signedOut = memoryStorage();
+  signedOut.setItem(historyKey, legacy);
+  assert.equal(await deleteReport("assigned", {
+    storage: signedOut,
+    fetcher: async () => response({ signedIn: false }),
+  }), "missing");
+  assert.equal(signedOut.getItem(historyKey), legacy);
+
+  const signedIn = (deleted) => async (url) =>
+    url === "/api/session" ? response({ signedIn: true }) : response({ deleted });
+  const storage = memoryStorage();
+  storage.setItem(historyKey, legacy);
+  assert.equal(await deleteReport("assigned", { account: true, storage, fetcher: signedIn(0) }), "missing");
+  // The account held it though this device did not, which is still a removal.
+  assert.equal(await deleteReport("assigned", { account: true, storage, fetcher: signedIn(1) }), "deleted");
+  // A count of 0 removed nothing, so a local write that then fails is a plain
+  // failure rather than an account deletion.
+  const brokenStorage = {
+    getItem: () => JSON.stringify([{ id: "keep" }]),
+    setItem: () => { throw new Error("blocked"); },
+  };
+  assert.equal(await deleteReport("keep", { storage: brokenStorage, fetcher: signedIn(0) }), "failed");
 });
 
 test("every history request carries a deadline", async () => {

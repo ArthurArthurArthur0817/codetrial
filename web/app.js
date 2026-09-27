@@ -1,5 +1,5 @@
 import { FRAMEWORKS, codingLoop } from "./lib.js";
-import { clearReportHistory, readDeviceHistory, renameLocalHistory } from "./history.js";
+import { clearReportHistory, deleteReport, readDeviceHistory, renameLocalHistory } from "./history.js";
 import { pickProblem, practiceFocus, storeSharedFocus, suggestDifficulty } from "./problem-picker.js";
 import { normalizeProgressEntries, pickerEntry, progressModelFrom } from "./progress.js";
 import { reportMarkup } from "./render.js";
@@ -402,11 +402,19 @@ function syncLobbyControls() {
   start.disabled = !problem || starting || accountBusy || deletingReports;
   nodes.loginLink.disabled = starting || loginPending || historyRefreshing || deletingReports;
   nodes.randomProblem.disabled = !historyReady || accountBusy || deletingReports;
-  nodes.deleteReports.disabled = !historyReady || starting || accountBusy || deletingReports;
+  const deleteBlocked = reportDeletesBlocked();
+  nodes.deleteReports.disabled = deleteBlocked;
+  for (const remove of nodes.attemptHistory.querySelectorAll("[data-delete-report]")) remove.disabled = deleteBlocked;
 }
 
 function accountUpdatePending() {
   return loginPending || loginResult !== null || historyRefreshing;
+}
+
+/// One rule for the bulk delete and every row's: until the lobby knows whose
+/// list is on screen, a delete cannot say which copy it is removing.
+function reportDeletesBlocked() {
+  return !historyReady || starting || accountUpdatePending() || deletingReports;
 }
 
 /// The server refuses to mint a token without a session, so this only saves the
@@ -672,10 +680,85 @@ async function deleteSavedReports() {
   }
 }
 
-function showReportDeleteStatus(message, className = "critical small") {
+/// Keyed on `attempt.id`, never on the row's position: the list is filtered, so
+/// the third row shown is rarely the third report stored.
+async function deleteSavedReport(attempt, when, button) {
+  if (reportDeletesBlocked()) return;
+  const confirmed = window.confirm(
+    `Delete the ${when} report for ${attempt.problemTitle}? Recording files follow their separate retention policy. This cannot be undone.`,
+  );
+  if (!confirmed) return;
+  const position = [...nodes.attemptHistory.children].indexOf(button.closest("li"));
+  deletingReports = true;
+  syncLobbyControls();
+  nodes.reportDeleteStatus.textContent = "";
+  let message = "Could not delete the report. It may not have been removed.";
+  let className = "critical small";
+  try {
+    // `accountHistory` is null when the session never answered, and the list
+    // drawn then is this device's, so only `true` names an account list.
+    const result = await deleteReport(attempt.id, { account: accountHistory === true });
+    if (result !== "failed") {
+      if (result === "account-deleted-local-failed") {
+        message = "The report was deleted from your account, but its copy on this device could not be deleted.";
+      } else if (result === "missing") {
+        message = "That report was not found, so nothing was deleted.";
+      } else {
+        message = "The report was deleted.";
+        className = "good small";
+      }
+      await reloadAfterDelete(result === "account-deleted-local-failed");
+    }
+  } catch {
+    // The failure message above stands.
+  } finally {
+    deletingReports = false;
+    syncLobbyControls();
+  }
+  showReportDeleteStatus(message, className, false);
+  focusAttemptRow(position, button);
+}
+
+/// Reloaded rather than spliced out of what is on screen, so the filters lose a
+/// language or a length only the deleted report had.
+///
+/// A generation of its own, so this reload and any other in flight cannot both
+/// land: a `GET /api/reports` sent before the `DELETE` answered would otherwise
+/// repaint the report it removed. A back/forward restore still reading the
+/// session is restarted instead of cut off halfway through `loadAccount`.
+///
+/// `local` draws this device's copy whatever the account holds, because that
+/// is the one the status line says was left behind.
+async function reloadAfterDelete(local) {
+  if (!historyReady) {
+    await refreshHistory();
+    return;
+  }
+  const generation = ++historyLoad;
+  if (accountHistory && !local) await renderServerHistory(generation);
+  else await renderLocalHistory(generation);
+  if (generation === historyLoad) settle();
+}
+
+/// Focus stays in the list, on the row that took the deleted one's place, so a
+/// keyboard user deleting several is not thrown past the whole progress panel
+/// after each. The status line is a live region and announces itself.
+function focusAttemptRow(position, button) {
+  if (button.isConnected) {
+    button.focus();
+    return;
+  }
+  const rows = nodes.attemptHistory.children;
+  const row = rows[Math.min(position, rows.length - 1)];
+  const target = row?.querySelector("[data-delete-report]") ?? row?.querySelector("button");
+  if (target) target.focus();
+  else nodes.reportDeleteStatus.focus();
+}
+
+function showReportDeleteStatus(message, className = "critical small", focus = true) {
   nodes.reportDeleteStatus.className = className;
   nodes.reportDeleteStatus.textContent = message;
-  nodes.reportDeleteStatus.focus();
+  if (focus) nodes.reportDeleteStatus.focus();
 }
 
 function selectedDifficulties() {
@@ -932,6 +1015,22 @@ function renderAttemptHistory(attempts) {
       nodes.recommendation.textContent = `Selected problem: ${title(card)}.`;
     });
     item.append(label, open, retry);
+    // A row with no id has nothing both stores and the account agree on, and
+    // deleting by anything weaker could take a different report than this one.
+    if (attempt.id) {
+      // The time as well as the day: `Try again` makes two attempts at one
+      // problem on one day, and the confirmation and the accessible name are
+      // all that tells their two Delete buttons apart.
+      const when = new Date(attempt.at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.dataset.deleteReport = "";
+      remove.textContent = "Delete";
+      remove.setAttribute("aria-label", `Delete the ${when} report for ${attempt.problemTitle}`);
+      remove.disabled = reportDeletesBlocked();
+      remove.addEventListener("click", () => deleteSavedReport(attempt, when, remove));
+      item.append(remove);
+    }
     item.append(report);
     nodes.attemptHistory.append(item);
   }

@@ -255,6 +255,60 @@ export async function clearReportHistory({ account = false, fetcher = fetch, sto
   }
 }
 
+/// One report, named by the id its copies share rather than by where it sits in
+/// a list. The list on screen is filtered and both stores hold it in their own
+/// order, so a position means a different report in each of the three.
+///
+/// Every copy goes, from both stores: `readDeviceHistory` merges them on this
+/// id, so a copy left in either one draws the attempt again on the next read.
+/// The session is rechecked for the reasons `clearReportHistory` gives, and the
+/// answers are its answers, plus "missing" when neither the account nor either
+/// store held the id. A row `migrateLegacyIds` gave an id it could not write
+/// back is one: both stores still hold it without that id, so it is drawn
+/// again on the next read, and "deleted" reported a removal that never ran.
+export async function deleteReport(id, { account = false, fetcher = fetch, storage } = {}) {
+  if (typeof id !== "string" || id === "") return "failed";
+  try {
+    const session = await sessionState(fetcher);
+    if (session === "failed") return "failed";
+    let fromAccount = false;
+    if (session === "in") {
+      const deleted = await fetcher(`/api/reports/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        signal: AbortSignal.timeout(requestTimeoutMs),
+      });
+      if (!deleted.ok) return "failed";
+      // Only a count of 0 is a miss. A 200 whose body did not parse still ran
+      // the delete, and calling that missing would hide a removal.
+      const body = await deleted.json().catch(() => null);
+      fromAccount = body?.deleted !== 0;
+    } else if (account !== false) {
+      return "failed";
+    }
+    let removed = fromAccount;
+    try {
+      storage ||= localStorage;
+      // A missing review store is left missing: it is rebuilt from the short
+      // history on its first read, and that no longer holds the report.
+      for (const key of [historyKey, reviewHistoryKey]) {
+        const stored = storedList(key, storage);
+        if (!stored) continue;
+        // Compared as `normalizeProgressEntry` spells the id, which is where
+        // the one the candidate clicked came from.
+        const kept = stored.filter((entry) => entry?.id == null || String(entry.id) !== id);
+        if (kept.length === stored.length) continue;
+        storage.setItem(key, JSON.stringify(kept));
+        removed = true;
+      }
+      return removed ? "deleted" : "missing";
+    } catch {
+      return fromAccount ? "account-deleted-local-failed" : "failed";
+    }
+  } catch {
+    return "failed";
+  }
+}
+
 function saveLocalReport(entry, storage) {
   try {
     storage ||= localStorage;
