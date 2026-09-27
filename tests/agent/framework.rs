@@ -2723,3 +2723,124 @@ fn a_rerun_after_a_tiny_edit_is_still_a_repeat() {
         "{reply}"
     );
 }
+
+/// The reported timeline with no reconnect at all, as a control: a passing
+/// run, the analysis given out loud, then every prompt that can follow it.
+/// None of them may send the candidate back to testing or ask for the
+/// analysis again, whether the model recorded it or left it in the transcript.
+#[test]
+fn the_reported_timeline_asks_for_nothing_already_done() {
+    let mut state = with_written_code(RuntimeState::default());
+    let first = run_tests(&mut state, 3, 3).generate_reply.unwrap();
+    assert!(first.contains("move to Optimizations"), "{first}");
+    state
+        .transcript
+        .push("Candidate: O(n) time and space with the map; duplicates are fine.".into());
+    let current =
+        "The latest test run executed the code on screen, so do not ask them to run tests again.";
+    let record = "record that evidence silently instead of asking them to repeat it";
+
+    // Answered but not recorded, then recorded: at every stage each prompt
+    // carries the fact that the run covers this code, and none asks for a run
+    // or for the analysis.
+    for recorded in [false, true] {
+        if recorded {
+            record_framework_evidence(
+                &mut state,
+                &json!({"phase": "optimizations", "source": "candidate_speech", "kind": "observed",
+                    "confidence": 90, "summary": "Gave O(n) time and space and a duplicate edge case."}),
+            )
+            .unwrap();
+        }
+        let prompts = [
+            ("silence", silence_nudge(&state, "", None)),
+            ("review", proactive_review(&state, "", None)),
+            ("warning", time_warning(false, &state)),
+            ("resumed", resumed_context(&state, false)),
+            ("cold", cold_restart(&state)),
+        ];
+        for (name, prompt) in &prompts {
+            assert!(
+                prompt.contains(current),
+                "{name}, recorded={recorded}: {prompt}"
+            );
+            assert!(prompt.contains(record), "{name}, recorded={recorded}");
+            assert!(!prompt.contains("narrate or test"), "{name}");
+            assert!(
+                !prompt.contains("click Run on the highest-value tests"),
+                "{name}"
+            );
+        }
+        assert_eq!(
+            prompts[2].1.contains("state time and space complexity"),
+            !recorded,
+            "the warning asks for complexity only until it is recorded"
+        );
+
+        // The briefings keep the answer itself in view.
+        assert!(prompts[3].1.contains("Candidate: O(n) time and space"));
+        assert!(prompts[4].1.contains("Candidate: O(n) time and space"));
+    }
+    let rerun = run_tests(&mut state, 3, 3).generate_reply.unwrap();
+    assert!(!rerun.contains("move to Optimizations"), "{rerun}");
+    assert!(rerun.contains("do not ask for complexity, edge cases or another run"));
+}
+
+/// The note a test result carries for the room log: whether the run earned
+/// credit and, if so, how its code compares with the previous credited run's.
+#[test]
+fn a_test_result_notes_its_credit_and_comparison() {
+    let mut state = with_written_code(RuntimeState::default());
+    let first = run_tests(&mut state, 3, 3).test_run.unwrap();
+    assert_eq!(first.credited, Some(SincePrevious::Other));
+    let rerun = run_tests(&mut state, 3, 3).test_run.unwrap();
+    assert_eq!(rerun.credited, Some(SincePrevious::Unchanged));
+
+    // Inside the reaction cooldown, with Test recorded so nothing must be
+    // heard, a rerun gets no reaction but keeps its note for the log.
+    record_framework_evidence(
+        &mut state,
+        &json!({"phase": "test", "source": "test_event", "kind": "observed",
+            "confidence": 90, "summary": "Ran the tests."}),
+    )
+    .unwrap();
+    let packet = json!({
+        "language": state.language, "passed": 3, "total": 3, "code": state.code,
+    });
+    let quick = apply_data_event(&mut state, TOPIC_TEST_RESULTS, &packet, 1.0);
+    assert!(quick.generate_reply.is_none());
+    assert_eq!(
+        quick.test_run.unwrap().credited,
+        Some(SincePrevious::Unchanged)
+    );
+
+    // A setup error earns nothing, so there is nothing to compare.
+    let setup = json!({
+        "language": state.language, "setupError": "runner unavailable", "code": state.code,
+    });
+    let failed = apply_data_event(&mut state, TOPIC_TEST_RESULTS, &setup, 100.0);
+    assert_eq!(failed.test_run.unwrap().credited, None);
+
+    // Dropped before it was judged: no note, which the log prints as such.
+    state.behavioral_round_started = true;
+    assert!(run_tests(&mut state, 3, 3).test_run.is_none());
+}
+
+/// The resumed briefing for a candidate who finished the coding steps, asked
+/// for the reply the old socket owed: the steps are named done, and the reply
+/// is requested without a word of the interruption.
+#[test]
+fn a_resumed_briefing_after_a_finished_round_asks_for_nothing_done() {
+    let mut state = with_written_code(RuntimeState::default());
+    record_coding_gate_evidence(&mut state);
+    let text = resumed_context(&state, true);
+    assert!(
+        text.contains(
+            "The coding problem is solved and tested; do not return to completed REACTO steps."
+        ),
+        "{text}"
+    );
+    assert!(text.contains("The Test and Optimizations steps are done: do not ask them to run tests again or repeat complexity or edge-case questions already answered."));
+    assert!(text.contains("was lost with the connection. Give it now"));
+    assert!(text.contains("Do not mention the interruption"));
+}

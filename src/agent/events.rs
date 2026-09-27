@@ -490,8 +490,14 @@ fn apply_test_results(
         since_last_test_reaction_seconds,
         record == TestRecord::Record || newly_unavailable,
     );
+    let note = Some(super::TestRunNote {
+        credited: credited.then_some(since_previous),
+    });
     if !decision.react {
-        return DataEventResult::default();
+        return DataEventResult {
+            test_run: note,
+            ..DataEventResult::default()
+        };
     }
 
     let all_passed =
@@ -524,6 +530,7 @@ fn apply_test_results(
                 since_previous,
             )
         }),
+        test_run: note,
         ..DataEventResult::default()
     }
 }

@@ -96,6 +96,10 @@ pub(super) struct RuntimeActivity {
     /// until its turn ends. Without this, the tail of Jim's previous sentence
     /// settles a test result he has not reacted to yet.
     pub(super) prompt_behind_turn: bool,
+    /// How many prompts have gone out in this interview, so a replacement's
+    /// log line can name the one it found still owed. The briefing that asks a
+    /// new socket for that reply is a prompt too and gets its own number.
+    pub(super) prompt_sequence: u64,
     pub(super) last_agent_speech: Instant,
     pub(super) last_nudge: Instant,
     pub(super) last_review: Instant,
@@ -191,6 +195,7 @@ impl RuntimeActivity {
             prompted_at: None,
             prompt_allows_silence: false,
             prompt_behind_turn: false,
+            prompt_sequence: 0,
             last_agent_speech: now,
             last_nudge: now,
             last_review: now,
@@ -229,6 +234,7 @@ impl RuntimeActivity {
     /// A prompt just went out: the floor is the agent's, and a reply is owed
     /// until Gemini produces something for it.
     pub(super) fn mark_prompted(&mut self, now: Instant) {
+        self.prompt_sequence += 1;
         self.prompt_behind_turn = self.floor == Floor::Speaking;
         self.mark_speaking();
         self.prompted_at = Some(now);

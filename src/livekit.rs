@@ -51,8 +51,8 @@ use ::livekit::prelude::{DataPacket, RemoteParticipant, Room, RoomEvent, RoomOpt
 
 use crate::agent::{
     INTERIM_CONTEXT_NOTES, InterimReviewInput, ModelInputKind, RuntimeState, WATCH_TICK_S,
-    apply_data_event_at, code_head, framework_progress, interim_review_prompt,
-    parse_participant_metadata, record_interim_notes, transcript_tail, unreviewed_from, with_timer,
+    apply_data_event_at, code_head, interim_review_prompt, parse_participant_metadata,
+    record_interim_notes, transcript_tail, unreviewed_from, with_timer,
 };
 use crate::config::AgentConfig;
 use crate::runtime::TOPIC_CONTROL;
@@ -103,8 +103,8 @@ mod turn;
 // room and hands one borrow of it over for the length of one Gemini event.
 pub use session::execute_tool_call;
 use session::{
-    GeminiEventContext, close_turns, cut_off_turn, handle_gemini_event, log_clock, send_model_text,
-    send_wrap_up_and_wait, set_agent_state,
+    GeminiEventContext, TestRunLine, close_turns, cut_off_turn, handle_gemini_event, log_clock,
+    prompt_fields, prompt_line, send_model_text, send_wrap_up_and_wait, set_agent_state,
 };
 
 use report::{freeze_report_prompt, generate_report_bounded, publish_report};
@@ -323,6 +323,16 @@ impl DeferredRestart {
         self.0 = false;
         true
     }
+
+    /// `take_if_due` read off the room's own state, which is how every caller
+    /// asks it, so the settled rule is read the same way at each.
+    fn take_if_settled(&mut self, activity: &RuntimeActivity, audio_playing: bool) -> bool {
+        self.take_if_due(
+            activity.floor,
+            audio_playing,
+            activity.tool_response_outstanding,
+        )
+    }
 }
 
 /// Opens a session that remembers nothing, retrying while the budget allows.
@@ -473,33 +483,21 @@ async fn replace_gemini_session(
 
     *context.gemini = session;
 
-    let debt = format!(
-        "candidate={} prompt={} tool={}",
-        context.activity.reply_in_flight(),
-        context.activity.prompted_at.is_some() && !context.activity.prompt_allows_silence,
-        context.activity.tool_response_outstanding,
-    );
-    let owed = settle_replaced_socket(context.state, context.activity, context.output_audio);
+    let (owed, debt) = hand_over(context.state, context.activity, context.output_audio);
 
     // The one line that ties a replacement to what the new socket is missing:
     // how old the checkpoint it resumed from is, what was owed, and what the
     // local record holds that the checkpoint may predate.
     eprintln!(
-        "replacement: at={} resumed={resumed} checkpoint_age={checkpoint_age} owed={owed} ({debt}) test_runs={} evidenced={} room={}",
+        "replacement: at={} resumed={resumed} checkpoint_age={checkpoint_age} owed={owed} ({debt}) {} room={}",
         log_clock(context.state),
-        context.state.test_runs,
-        framework_progress(context.state).join(","),
+        prompt_fields(context.state, context.activity),
         interview.boot.room_name
     );
     close_turns(room, context).await?;
     set_agent_state(room, context.agent_state, AGENT_STATE_LISTENING).await?;
     publish_interviewer_state(room, false).await?;
-
-    // Neither kind of replacement holds the evidence lines the next watch
-    // prompt would otherwise skip: a cold one has seen none, and a resumed one
-    // restarts from a checkpoint that may predate the latest of them.
-    context.activity.evidence_shown = None;
-    brief_replacement(
+    let spoke = brief_replacement(
         context.gemini,
         context.state,
         context.activity,
@@ -510,27 +508,55 @@ async fn replace_gemini_session(
         },
     )
     .await;
+    if spoke {
+        eprintln!(
+            "{}",
+            prompt_line(
+                context.state,
+                context.activity,
+                "kind=briefing",
+                interview.boot.room_name,
+            )
+        );
+    }
     Ok(ControlFlow::Continue(()))
 }
 
-/// Ends what the dead socket left in flight and reports whether it owed a
-/// reply.
+/// Ends what the dead socket left in flight, and reports whether the new one
+/// owes a reply and why, for the replacement log line: the candidate's turn,
+/// the number of a prompt still unanswered or `none`, and a tool continuation.
+/// Everything a replacement does to the room's own state and nothing it does
+/// to the room, so a test drives the same steps production takes.
 ///
 /// Read before `cut_off_turn` clears the pending work: a reply the old socket
 /// owed is still owed, and the replacement is the only one left to give it.
 /// Whatever was mid-flight died with the socket. The turn ids have to close
 /// for the same reason an interruption closes them: left open, the next thing
 /// either party says appends to an utterance that was cut off, and the panel
-/// and the report both read the two as one.
-fn settle_replaced_socket(
+/// and the report both read the two as one. Neither kind of replacement holds
+/// the evidence lines the next watch prompt would otherwise skip: a cold one
+/// has seen none, and a resumed one restarts from a checkpoint that may
+/// predate the latest of them.
+fn hand_over(
     state: &mut RuntimeState,
     activity: &mut RuntimeActivity,
     output_audio: &mut OutputAudio,
-) -> bool {
+) -> (bool, String) {
+    let prompt = if activity.prompted_at.is_some() && !activity.prompt_allows_silence {
+        activity.prompt_sequence.to_string()
+    } else {
+        "none".to_string()
+    };
+    let debt = format!(
+        "candidate={} prompt={prompt} tool={}",
+        activity.reply_in_flight(),
+        activity.tool_response_outstanding,
+    );
     let owed = activity.owes_reply();
     cut_off_turn(activity, output_audio);
     clear_abandoned_socket_work(state, activity);
-    owed
+    activity.evidence_shown = None;
+    (owed, debt)
 }
 
 /// How a socket was replaced, as far as the briefing sent to it cares.
@@ -543,7 +569,8 @@ enum Replacement {
     Resumed { owed: bool },
 }
 
-/// Tells a replacement socket what it cannot know on its own.
+/// Tells a replacement socket what it cannot know on its own, and reports
+/// whether the briefing asked for a reply.
 ///
 /// A resumed checkpoint is the last turn boundary the server marked resumable,
 /// so it may predate the latest test run or spoken answer; a cold one knows
@@ -554,7 +581,7 @@ async fn brief_replacement(
     state: &mut RuntimeState,
     activity: &mut RuntimeActivity,
     replacement: Replacement,
-) {
+) -> bool {
     if matches!(replacement, Replacement::Resumed { .. }) {
         // Matched literally by the soak in scripts/browser-check.cjs, which has
         // no other way to tell a resumption from a cold replacement: both leave
@@ -573,13 +600,17 @@ async fn brief_replacement(
     // would end the interview on the one write the restart exists to make, and
     // the write most likely to meet a socket that is already gone.
     match send_recovery_brief(gemini, state, replacement).await {
-        Ok(true) => activity.mark_prompted(Instant::now()),
-        Ok(false) => {}
+        Ok(true) => {
+            activity.mark_prompted(Instant::now());
+            true
+        }
+        Ok(false) => false,
         Err(error) => {
             eprintln!(
                 "connection-recovery briefing failed ({error}); waiting for the close to be reported"
             );
             keep_recovery_debt(state, activity, replacement);
+            false
         }
     }
 }
@@ -1097,17 +1128,19 @@ async fn on_watch_tick(
             context.activity.unsend_watch_prompt(context.state);
             return Ok(ControlFlow::Continue(()));
         }
+        let kind = if prompt.allows_silence {
+            "kind=review"
+        } else {
+            "kind=nudge"
+        };
         eprintln!(
-            "prompt: at={} kind={} test_runs={} evidenced={} room={}",
-            log_clock(context.state),
-            if prompt.allows_silence {
-                "review"
-            } else {
-                "nudge"
-            },
-            context.state.test_runs,
-            framework_progress(context.state).join(","),
-            interview.boot.room_name
+            "{}",
+            prompt_line(
+                context.state,
+                context.activity,
+                kind,
+                interview.boot.room_name,
+            )
         );
     }
 
@@ -1258,8 +1291,8 @@ async fn on_gemini_event(
     Ok(ControlFlow::Continue(()))
 }
 
-/// Spends a held `GoAway` if the floor has settled. Every place that hands the
-/// floor back asks this, so the settled rule is read the same way at each.
+/// Spends a held `GoAway` if the floor has settled, and names what let it go.
+/// Every place that hands the floor back asks this.
 async fn spend_deferred_restart(
     room: &Room,
     context: &mut GeminiEventContext<'_>,
@@ -1267,11 +1300,10 @@ async fn spend_deferred_restart(
     interview: InterviewContext<'_>,
     trigger: &str,
 ) -> Result<ControlFlow<()>, Box<dyn std::error::Error + Send + Sync>> {
-    if !loops.deferred_restart.take_if_due(
-        context.activity.floor,
-        context.output_audio.is_playing(),
-        context.activity.tool_response_outstanding,
-    ) {
+    if !loops
+        .deferred_restart
+        .take_if_settled(context.activity, context.output_audio.is_playing())
+    {
         return Ok(ControlFlow::Continue(()));
     }
     eprintln!(
@@ -1918,19 +1950,16 @@ async fn handle_data_packet(
     // reaction cooldown updates the record without Jim saying anything, and a
     // later prompt that describes it is otherwise unexplained.
     if topic == crate::runtime::TOPIC_TEST_RESULTS {
-        let run = context.state.last_test_run.as_ref();
-        let count = |key| {
-            run.and_then(|run| run.get(key))
-                .and_then(serde_json::Value::as_i64)
-                .unwrap_or(0)
+        let judged = TestRunLine {
+            run: context.state.last_test_run.as_ref(),
+            note: result.test_run,
+            credited_run_is_current: crate::agent::tested_code_is_current(context.state),
+            reacted: result.generate_reply.is_some(),
+            ended: context.state.ended,
         };
         eprintln!(
-            "tests: at={} passed={} total={} run_is_current={} reacted={} room={}",
+            "tests: at={} {judged} room={}",
             log_clock(context.state),
-            count("passed"),
-            count("total"),
-            crate::agent::tested_code_is_current(context.state),
-            result.generate_reply.is_some(),
             interview.boot.room_name
         );
     }
@@ -1946,11 +1975,13 @@ async fn handle_data_packet(
                 // to the prompt that asked for it. After the send, so it
                 // records a prompt that reached the socket.
                 eprintln!(
-                    "prompt: at={} topic={topic} test_runs={} evidenced={} room={}",
-                    log_clock(context.state),
-                    context.state.test_runs,
-                    framework_progress(context.state).join(","),
-                    interview.boot.room_name
+                    "{}",
+                    prompt_line(
+                        context.state,
+                        context.activity,
+                        &format!("topic={topic}"),
+                        interview.boot.room_name,
+                    )
                 );
             }
             Err(error) => {

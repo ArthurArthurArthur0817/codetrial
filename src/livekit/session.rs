@@ -20,7 +20,7 @@ use ::livekit::data_stream::api::StreamTextOptions;
 use ::livekit::prelude::Room;
 
 use crate::agent::{
-    CANDIDATE_SPEAKER, INTERVIEWER_SPEAKER, ModelInputKind, RuntimeState, SpeakerTurn,
+    CANDIDATE_SPEAKER, INTERVIEWER_SPEAKER, ModelInputKind, RuntimeState, SpeakerTurn, TestRunNote,
     framework_progress, phase_id, read_editor_text, record_framework_evidence, released_follow_ups,
     unrecorded_earlier_phases, with_timer, wrap_up,
 };
@@ -84,12 +84,94 @@ enum OutputDisposition {
     EndsTheDiscard,
 }
 
-/// Minutes and seconds since the interview started, on every line a #66
-/// timeline is read from, so the server log lines up with the interview timer
-/// a candidate reports against.
+/// Time since the interview started, on every line a repeated-step timeline
+/// is read from, so the server log lines up with the interview timer a
+/// candidate reports against. To the millisecond, because a test result, a
+/// `GoAway` and a replacement can all land inside one second, and their order
+/// is the question.
 pub(super) fn log_clock(state: &RuntimeState) -> String {
-    let seconds = state.started_at.elapsed().as_secs();
-    format!("{}:{:02}", seconds / 60, seconds % 60)
+    clock(state.started_at.elapsed())
+}
+
+/// `m:ss.mmm`, split from the reading of the clock so a test can pin it.
+pub(super) fn clock(elapsed: Duration) -> String {
+    let seconds = elapsed.as_secs();
+    format!(
+        "{}:{:02}.{:03}",
+        seconds / 60,
+        seconds % 60,
+        elapsed.subsec_millis()
+    )
+}
+
+/// What a `tests:` log line reports about one result: the counts, whether it
+/// earned credit and how it compares, whether the credited run still covers
+/// the editor, and whether a reaction was asked for. `None` is a packet
+/// dropped before it was judged, during a pause, in the behavioral round, or
+/// one that ran nothing; the counts on record are then the previous run's, so
+/// none are printed.
+pub(super) struct TestRunLine<'a> {
+    pub(super) run: Option<&'a serde_json::Value>,
+    pub(super) note: Option<TestRunNote>,
+    pub(super) credited_run_is_current: bool,
+    pub(super) reacted: bool,
+    pub(super) ended: bool,
+}
+
+impl std::fmt::Display for TestRunLine<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Some(note) = self.note else {
+            return f.write_str("outcome=dropped");
+        };
+        let count = |key| {
+            self.run
+                .and_then(|run| run.get(key))
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(0)
+        };
+        let outcome = if self.reacted {
+            "reaction_requested"
+        } else if self.ended {
+            "ended"
+        } else {
+            "cooldown"
+        };
+        write!(
+            f,
+            "passed={} total={} credited={} credited_run_is_current={} outcome={outcome}",
+            count("passed"),
+            count("total"),
+            note.credited
+                .map_or_else(|| "no".to_string(), |since| format!("{since:?}")),
+            self.credited_run_is_current,
+        )
+    }
+}
+
+/// The `prompt:` line for a prompt that reached the socket, `source` naming
+/// what sent it.
+pub(super) fn prompt_line(
+    state: &RuntimeState,
+    activity: &RuntimeActivity,
+    source: &str,
+    room: &str,
+) -> String {
+    format!(
+        "prompt: at={} {source} {} room={room}",
+        log_clock(state),
+        prompt_fields(state, activity)
+    )
+}
+
+/// The shared fields of every `prompt:` log line, after the caller's label:
+/// its number, and the progress it was sent against.
+pub(super) fn prompt_fields(state: &RuntimeState, activity: &RuntimeActivity) -> String {
+    format!(
+        "id={} test_runs={} evidenced={}",
+        activity.prompt_sequence,
+        state.test_runs,
+        framework_progress(state).join(",")
+    )
 }
 
 /// Whether an event is Gemini actually answering what it was prompted with.

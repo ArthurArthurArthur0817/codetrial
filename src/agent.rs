@@ -1810,6 +1810,20 @@ pub struct DataEventResult {
     pub pause_changed: Option<bool>,
     /// Agent-owned round transition result: `started` or `skipped`.
     pub round_changed: Option<&'static str>,
+    /// How a test result was judged, for the room log; see `TestRunNote`.
+    /// `None` is a packet dropped before it was judged. Nothing reads it to
+    /// decide anything.
+    pub test_run: Option<TestRunNote>,
+}
+
+/// The one fact about a test result only its judging knows: whether the run
+/// earned credit, and if so how its code compares with the previous credited
+/// run's. Whether a reaction followed, and whether the credited run still
+/// covers the editor, the log reads from the result and the state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TestRunNote {
+    /// `None` when the run earned no credit, so there is nothing to compare.
+    pub credited: Option<SincePrevious>,
 }
 
 /// How much conversation the report prompt may carry. A 90-minute interview
