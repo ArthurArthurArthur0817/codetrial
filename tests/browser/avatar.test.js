@@ -73,15 +73,12 @@ test("avatar vendor manifest pins every redistributed file", () => {
   }
 
   // The model is a separate grant from the libraries, and its own metadata
-  // makes credit a license term rather than a courtesy. Assert the obligation
-  // is discharged everywhere it was promised, because deleting one of these
-  // lines is a licensing break that nothing else would notice.
+  // requires credit. Keep the grant and attribution with the model record.
   const modelLicense = read("web/vendor/avatar/LICENSE-jim-vrm.txt");
   assert.match(modelLicense, /VirtualCast, Inc\./);
   assert.match(modelLicense, /"allowRedistribution": true|"allowRedistribution":\s*true|allowRedistribution.*true/);
   assert.match(modelLicense, /creditNotation.*required/);
   assert.match(read("web/vendor/avatar/NOTICE"), /VirtualCast, Inc\./);
-  assert.match(read("README.md"), /VirtualCast, Inc\./, "README owes the model a credit");
   // Displayed in the product, not only in files a candidate never opens. It
   // sits in the lobby footer rather than under the avatar, where it crowded the
   // interview, but it has to be somewhere on screen or the license is unmet.

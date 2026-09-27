@@ -4,9 +4,10 @@ Jim's browser-rendered avatar. Presentation only: Gemini Live, LiveKit audio and
 transcription, barge-in, and interviewer behavior are unchanged by anything here.
 No rendered frame is published as a LiveKit track, sent to the server, or stored.
 
-Related documents: [third-party notices](../THIRD-PARTY-NOTICES.md) for asset
-licenses and attribution; `web/vendor/avatar/README.md` for reproducible bundle
-sources.
+Related documents: [third-party notices](../THIRD-PARTY-NOTICES.md) for library
+licenses; the [model license record](../web/vendor/avatar/LICENSE-jim-vrm.txt)
+for the model's grant and attribution; `web/vendor/avatar/README.md` for
+reproducible bundle sources.
 
 ## Status
 
@@ -27,14 +28,14 @@ repo carries only its hash and its license record.
 | Texture resolution | 1024x1024 maximum |
 | glTF extensions | `VRMC_vrm`, `VRMC_springBone`, `VRMC_node_constraint`, `VRMC_materials_mtoon`, `KHR_materials_unlit`, `KHR_texture_transform`, `KHR_materials_emissive_strength` |
 
-See the [third-party notices](../THIRD-PARTY-NOTICES.md) for the model's source,
-license, attribution, and redistribution terms.
+See the [model license record](../web/vendor/avatar/LICENSE-jim-vrm.txt) for the
+model's source, attribution, and license terms.
 
 ### Where this deviates from the budget, and why that was accepted
 
 17 materials against a budget of 1 to 3, and `VRMC_springBone` physics against
-"minimal physics." The associated licensing decision is recorded in the
-[third-party notices](../THIRD-PARTY-NOTICES.md).
+"minimal physics." The model's grant is recorded in the
+[model license record](../web/vendor/avatar/LICENSE-jim-vrm.txt).
 
 Revisit the budget when a commissioned model exists, not before. If render cost
 becomes a problem, measure it first.
@@ -73,7 +74,8 @@ or KTX2, and discovering it at delivery time would mean re-vendoring the bundle
 with three more decoders for one model. The shipped model satisfies this.
 
 Document the replacement's source, license, attribution requirements, and
-redistribution rights in the [third-party notices](../THIRD-PARTY-NOTICES.md).
+redistribution rights in the
+[model license record](../web/vendor/avatar/LICENSE-jim-vrm.txt).
 
 ## Dependencies
 

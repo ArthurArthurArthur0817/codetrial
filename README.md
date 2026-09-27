@@ -41,10 +41,6 @@ Candidate video reaches Gemini only with
 `CODETRIAL_GEMINI_CANDIDATE_VIDEO_ENABLED=true`. Face-presence analysis runs in
 the browser and reports itself unavailable rather than guessing.
 
-Jim's avatar model is Seed-san by VirtualCast, Inc.; its required credit and
-license are in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md), along with
-every other bundled asset and its checksum.
-
 ## Dependencies by lifecycle
 
 | Phase | Required | Notes |
@@ -229,7 +225,7 @@ recorded rather than left implicit. See
 | [Installing a binary](docs/install.md) | Published binaries, platform notes, the config beside them |
 | [Interview length](docs/interview-length.md) | What the lobby offers and what the endpoints enforce |
 | [Integrity evidence](docs/integrity-evidence.md) | Response windows, and what CodeTrial declines to look for |
-| [Third-party notices](THIRD-PARTY-NOTICES.md) | Bundled software, model attribution, licenses, checksums |
+| [Third-party notices](THIRD-PARTY-NOTICES.md) | Bundled software, licenses, checksums |
 | [Avatar contract](docs/avatar-contract.md) | Renderer behavior, asset limits, privacy, accessibility |
 | [Provider pooling](docs/providers.md) | Spreading rooms over several LiveKit projects |
 | [Recording contract](docs/recording-contract.md) | Provisioning, consent, delivery, retention, operations |

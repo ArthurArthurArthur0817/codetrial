@@ -30,7 +30,7 @@ pins:
 
 CREDIT IS REQUIRED. "creditNotation": "required" obliges any use of this model
 to name its author. CodeTrial satisfies that by crediting VirtualCast, Inc. in
-the lobby footer of web/index.html, in README.md, in NOTICE, and here. It sat
+the lobby footer of web/index.html, in NOTICE, and here. It sat
 beneath the avatar during the interview and was moved out because it crowded
 the workspace. Moving it is fine; dropping it is not, and
 tests/browser/avatar.test.js asserts a visible credit still exists in the UI.
