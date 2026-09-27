@@ -6,6 +6,8 @@ import { reportMarkup } from "./render.js";
 import { loadPageMap } from "./problem-data.js";
 import { parseGroundingFile, retainedSelection, selectedGroundingPacket, storeGroundingPacket } from "./document-grounding.js";
 
+const requestTimeoutMs = 10_000;
+
 let problem;
 let duration;
 let interviewLoop = "coding_behavioral";
@@ -17,6 +19,14 @@ let manualDuration = false;
 let manualDifficulty = false;
 let historyReady = false;
 let historyLoad = 0;
+// Initial history may arrive after a manual pick. Later account refreshes must
+// finish before that pick can start, even if an older load completes first.
+let historyRefreshing = false;
+let loginPending = false;
+// Successful and uncertain POSTs need an account check before another login.
+// Null means no check is owed; otherwise this is "recorded" or "unknown".
+let loginResult = null;
+let deletingReports = false;
 /// The longest interview this deployment can record, which only the server
 /// knows. `Infinity` until `/api/session` answers: the duration row is live
 /// before that lands, and `/api/token` clamps anything that gets out in the
@@ -133,7 +143,7 @@ for (const card of cards) {
 }
 
 nodes.randomProblem.addEventListener("click", () => {
-  if (!historyReady) return;
+  if (!historyReady || accountUpdatePending() || deletingReports) return;
   manualProblem = false;
   roll = Math.random();
   avoidedProblem = problem?.id;
@@ -219,7 +229,7 @@ let starting = false;
 // handler threw on the next line, and the button stayed disabled on "Recording
 // GitHub..." with the interview never starting.
 start.addEventListener("click", async () => {
-  if (!problem) return;
+  if (!problem || starting || accountUpdatePending() || deletingReports) return;
   // The whole form is read here, before the sign-in round trip below, because
   // every control the candidate can still touch during it feeds this URL.
   // Reading them afterwards shipped an interview that was 45 minutes when the
@@ -249,15 +259,15 @@ start.addEventListener("click", async () => {
   }
 
   starting = true;
-  start.disabled = true;
+  syncLobbyControls();
   nodes.groundingError.textContent = "";
   if (signInFirst) {
     start.textContent = "Recording GitHub...";
-    if (!(await recordGitHubLogin(false))) {
+    if (!(await recordGitHubLogin())) {
       starting = false;
-      // Not `false`: the same round trip can leave nothing selected, and a
-      // button armed over nothing is one whose handler returns above.
-      start.disabled = !problem;
+      // The same round trip can leave nothing selected, so readiness must be
+      // recomputed instead of unconditionally enabling Start.
+      syncLobbyControls();
       setStartGate(true);
       return;
     }
@@ -274,7 +284,7 @@ start.addEventListener("click", async () => {
   } catch (error) {
     nodes.groundingError.textContent = error.message;
     starting = false;
-    start.disabled = !problem;
+    syncLobbyControls();
     setStartGate(signInFirst);
     return;
   }
@@ -356,27 +366,48 @@ window.addEventListener("pageshow", (event) => {
   // stays down and a difficulty change waits, exactly as on a first load.
   // `starting` with it: the page came back, so whatever start was on its way
   // out did not happen, and a latch left set here disables the button for good.
-  historyReady = false;
-  nodes.randomProblem.disabled = true;
   starting = false;
-  start.disabled = true;
-  nodes.deleteReports.disabled = true;
-  nodes.reportDeleteStatus.textContent = "";
-  accountHistory = null;
   refreshHistory();
 });
 
 nodes.githubLogin.addEventListener("keydown", (event) => {
-  if (event.key !== "Enter" || event.isComposing) return;
+  // Some input methods end composition before its confirming keydown. The
+  // legacy IME code remains 229 even when isComposing is already false.
+  if (event.key !== "Enter" || event.isComposing || event.keyCode === 229) return;
   event.preventDefault();
   nodes.loginLink.click();
 });
 
 nodes.loginLink.addEventListener("click", async () => {
-  nodes.loginLink.disabled = true;
-  await recordGitHubLogin(true);
-  nodes.loginLink.disabled = false;
+  if (starting || nodes.loginLink.hidden || nodes.loginLink.disabled) return;
+  loginPending = true;
+  syncLobbyControls();
+  try {
+    // Retrying an account check must not create another recorded session.
+    if (!loginResult) {
+      if (!(await recordGitHubLogin())) return;
+      loginResult = "recorded";
+    }
+    await refreshHistory();
+  } finally {
+    loginPending = false;
+    syncLobbyControls();
+  }
 });
+
+// Card selection and history completion can both re-arm Start. Keep their
+// view of the account transition in one place, including the GET-only retry.
+function syncLobbyControls() {
+  const accountBusy = accountUpdatePending();
+  start.disabled = !problem || starting || accountBusy || deletingReports;
+  nodes.loginLink.disabled = starting || loginPending || historyRefreshing || deletingReports;
+  nodes.randomProblem.disabled = !historyReady || accountBusy || deletingReports;
+  nodes.deleteReports.disabled = !historyReady || starting || accountBusy || deletingReports;
+}
+
+function accountUpdatePending() {
+  return loginPending || loginResult !== null || historyRefreshing;
+}
 
 /// The server refuses to mint a token without a session, so this only saves the
 /// candidate a round trip into a room they cannot join. The token endpoint is
@@ -406,43 +437,56 @@ refreshHistory();
 
 function refreshHistory() {
   const generation = ++historyLoad;
+  historyRefreshing = generation > 1;
+  historyReady = false;
+  nodes.reportDeleteStatus.textContent = "";
+  syncLobbyControls();
+  // A cached page may retain its selection while its account is unknown.
+  start.disabled = true;
   // A restored page can start a second load before the first one finishes.
   return loadAccount(generation).finally(() => {
-    if (generation === historyLoad) settle();
+    if (generation === historyLoad) {
+      historyRefreshing = false;
+      settle();
+    }
   });
 }
 
 /// What the lobby settles into once it knows the candidate's history: the level
 /// that history points at, a problem at that level, and a start button.
 ///
-/// Shared with the back/forward restore above rather than written twice. That
-/// path refetches the reports, so leaving it to only re-enable the button meant
-/// the checked level and the sentence explaining it went on describing history
-/// the page had already replaced.
+/// Shared by sign-in and back/forward restores. Both refetch the reports, so
+/// only re-enabling Start would leave the checked level and its explanation
+/// describing history the page had already replaced.
 function settle() {
   historyReady = true;
-  nodes.randomProblem.disabled = false;
   // The level suggestion only applies when the candidate has not already said
   // what they want. Moving their checkboxes would also hide the card they just
   // picked.
   const note = manualDifficulty || manualProblem ? "" : applySuggestedLevel();
   recommend(note);
   // `recommend` returns without touching anything when the candidate's own pick
-  // still stands, so the button the restore below held down needs releasing
+  // still stands, so the button the account refresh held down needs releasing
   // here rather than there.
-  start.disabled = !problem || starting;
-  nodes.deleteReports.disabled = false;
+  syncLobbyControls();
 }
 
 async function loadAccount(generation) {
   accountHistory = null;
+  let signedOutMessage = "Signed out";
   try {
     const session = await fetchJson("/api/session");
     if (generation !== historyLoad) return;
+    if (typeof session?.signedIn !== "boolean" ||
+        (session.signedIn && typeof session.user?.login !== "string")) {
+      throw new Error("Invalid account response");
+    }
     accountHistory = false;
     applyDurationCeiling(session.maxDurationMin);
     if (session.signedIn) {
+      loginResult = null;
       accountHistory = true;
+      nodes.loginLink.textContent = "Use GitHub";
       nodes.accountStatus.textContent = `Signed in as ${session.user.login}`;
       nodes.githubLogin.hidden = true;
       nodes.loginLink.hidden = true;
@@ -451,8 +495,18 @@ async function loadAccount(generation) {
       await renderServerHistory(generation);
       return;
     }
+    const unconfirmedLogin = loginResult !== null;
+    if (unconfirmedLogin) {
+      signedOutMessage = loginResult === "recorded"
+        ? "GitHub username recorded, but no signed-in session was found. Try signing in again."
+        : "No signed-in session was found. Try signing in again.";
+    }
+    loginResult = null;
+    nodes.loginLink.textContent = "Use GitHub";
     if (session.loginRequired) {
-      nodes.accountStatus.textContent = "Enter your GitHub username to start.";
+      nodes.accountStatus.textContent = unconfirmedLogin
+        ? signedOutMessage
+        : "Enter your GitHub username to start.";
       nodes.githubLogin.hidden = false;
       nodes.loginLink.hidden = false;
       nodes.logout.hidden = true;
@@ -465,7 +519,11 @@ async function loadAccount(generation) {
     // token either, but the editor still works offline, so do not lock the page.
   }
   if (generation !== historyLoad) return;
-  nodes.accountStatus.textContent = "Signed out";
+  if (loginResult) {
+    showAccountCheckError();
+    return;
+  }
+  nodes.accountStatus.textContent = signedOutMessage;
   nodes.githubLogin.hidden = false;
   nodes.loginLink.hidden = false;
   nodes.logout.hidden = true;
@@ -473,7 +531,18 @@ async function loadAccount(generation) {
   await renderLocalHistory(generation);
 }
 
-async function recordGitHubLogin(reload) {
+function showAccountCheckError() {
+  nodes.accountStatus.textContent = loginResult === "recorded"
+    ? "GitHub username recorded, but the account could not be refreshed."
+    : "Could not confirm the sign-in result. Retry the account check.";
+  nodes.githubLogin.hidden = true;
+  nodes.loginLink.hidden = false;
+  nodes.loginLink.textContent = "Retry account check";
+  nodes.logout.hidden = false;
+  showProgressError("Could not load account progress. Retry the account check.");
+}
+
+async function recordGitHubLogin() {
   const login = nodes.githubLogin.value.trim().replace(/^@+/, "");
   if (!/^[a-z\d](?:[a-z\d-]{0,37}[a-z\d])?$/i.test(login)) {
     nodes.accountStatus.textContent = "Enter a valid GitHub username.";
@@ -485,6 +554,7 @@ async function recordGitHubLogin(reload) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ login }),
+      signal: AbortSignal.timeout(requestTimeoutMs),
     });
     if (!response.ok) {
       // The server already said what is wrong (bad handle, rate limited, not
@@ -493,10 +563,16 @@ async function recordGitHubLogin(reload) {
       nodes.accountStatus.textContent = body?.error || "Could not record GitHub username.";
       return false;
     }
-    if (reload) window.location.reload();
     return true;
   } catch {
-    nodes.accountStatus.textContent = "Could not record GitHub username.";
+    // A timeout or dropped connection does not undo a server-side write.
+    // Invalidate reads sent before this outcome, then offer a GET-only retry.
+    loginResult = "unknown";
+    historyLoad += 1;
+    historyRefreshing = false;
+    accountHistory = null;
+    showAccountCheckError();
+    settle();
     return false;
   }
 }
@@ -529,7 +605,7 @@ async function renderLocalHistory(generation = historyLoad) {
     let entries = readDeviceHistory();
     if (entries.some((entry) =>
       !cardIds.has(pickerEntry(entry).problemId) && entry?.pageMapChecked !== true)) {
-      const pages = await loadPageMap().catch(() => null);
+      const pages = await loadHistoryPageMap();
       if (generation !== historyLoad) return;
       if (pages) {
         renameLocalHistory(pages, undefined, true);
@@ -544,14 +620,30 @@ async function renderLocalHistory(generation = historyLoad) {
   }
 }
 
+async function loadHistoryPageMap() {
+  let timer;
+  try {
+    // The shared lookup also serves the title toggle. Bound this caller's
+    // wait without cancelling the lookup for its other consumers.
+    return await Promise.race([
+      loadPageMap().catch(() => null),
+      new Promise((resolve) => { timer = setTimeout(() => resolve(null), requestTimeoutMs); }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 const deleteFailedMessage = "Could not delete saved reports. Your reports may not have been removed.";
 
 async function deleteSavedReports() {
+  if (starting || accountUpdatePending() || deletingReports) return;
   const confirmed = window.confirm(
     "Delete saved reports and progress? Recording files follow their separate retention policy. This cannot be undone.",
   );
   if (!confirmed) return;
-  nodes.deleteReports.disabled = true;
+  deletingReports = true;
+  syncLobbyControls();
   nodes.reportDeleteStatus.textContent = "";
   try {
     const result = await clearReportHistory({ account: accountHistory });
@@ -575,7 +667,8 @@ async function deleteSavedReports() {
     if (!nodes.reportDeleteStatus.textContent) showReportDeleteStatus(deleteFailedMessage);
     nodes.reportDeleteStatus.focus();
   } finally {
-    nodes.deleteReports.disabled = false;
+    deletingReports = false;
+    syncLobbyControls();
   }
 }
 
@@ -669,23 +762,16 @@ function applySuggestedLevel() {
     : `Your last two ${suggestion.from} problems did not land. `;
 }
 
-/// The only writer of `problem` and of the start button's disabled state, so
-/// the two cannot drift apart. `null` is the case where what was on screen
-/// stopped being something the candidate could have meant: picking a card by
-/// hand and then dropping its difficulty left it selected but hidden, with the
-/// button still carrying it into an interview on a level they had just cleared.
-///
-/// The button is enabled here and nowhere earlier because the recommendation
-/// waits on the report history, and a click during that wait used to build
-/// `?problem=undefined`. Callers own the sentence beside it: this only knows
-/// which problem, never why.
+/// Clearing a filtered-out card must not leave Start pointing at it, and
+/// picking another card must not bypass an account request already in flight.
+/// Callers own the explanation beside the picker; this only knows which card.
 function setProblem(card) {
   // Two buttons, not a sweep of all 150. `problem` still holds the outgoing
   // card here, which is what makes that possible.
   mark(problem?.button, false);
   mark(card?.button, true);
   problem = card;
-  start.disabled = !card || starting;
+  syncLobbyControls();
 }
 
 /// Says whether a button is the chosen one, in both the ways that answer has to
@@ -936,7 +1022,8 @@ function languageLabel(value) {
 
 
 async function fetchJson(url) {
-  const response = await fetch(url);
+  // Keep the deadline attached while the response body is being read too.
+  const response = await fetch(url, { signal: AbortSignal.timeout(requestTimeoutMs) });
   if (!response.ok) throw new Error(`${url} returned ${response.status}`);
   return response.json();
 }
