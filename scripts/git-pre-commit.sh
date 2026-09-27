@@ -90,6 +90,18 @@ if [ -n "$js" ]; then
     fi
 fi
 
+# Prettier finds .prettierrc.json and .prettierignore in the checkout above, so
+# a vendored file staged by name is skipped here as it is in the gate.
+web=$(matching '\.(html|js|mjs|cjs)$')
+if [ -n "$web" ]; then
+    if [ -x node_modules/.bin/prettier ]; then
+        # shellcheck disable=SC2086
+        run_in_work "$ROOT/node_modules/.bin/prettier" --check --log-level warn $web
+    else
+        echo "pre-commit: no prettier, run \`npm ci\` to enable it" >&2
+    fi
+fi
+
 py=$(matching '\.py$')
 if [ -n "$py" ]; then
     if have ruff; then

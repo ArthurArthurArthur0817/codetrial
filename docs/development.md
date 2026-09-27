@@ -102,7 +102,8 @@ somebody's next commit.
 
 `make hooks` installs wrappers in `.git/hooks` that resolve the active
 worktree's `scripts/git-*.sh`. The pre-commit hook
-runs `rustfmt`, ESLint, `ruff`, `shellcheck`, `shfmt` and `commentflow` over a
+runs `rustfmt`, ESLint, Prettier, `ruff`, `shellcheck`, `shfmt` and
+`commentflow` over a
 checkout of the index, so an unstaged edit neither fails a commit nor passes
 one; the commit-msg hook
 holds the subject to 50 characters and the body to 72, imperative and ASCII.
