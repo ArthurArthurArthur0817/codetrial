@@ -17,6 +17,7 @@ import { test, before, beforeEach, after } from "node:test";
 import assert from "node:assert/strict";
 
 import { functionBody, launchChromium, read, startStaticServer } from "./source.js";
+import { frameworkPhases } from "../../web/lib.js";
 
 let browser = null;
 let server = null;
@@ -194,20 +195,31 @@ const savedAttempt = (problemId) => ({
   },
 });
 
-const focusedAttempt = (problemId) => ({
+/// A graded report whose plan files `weaknesses`, most important first, under
+/// one `phase`. `assessed` adds the phase scores, whose weakness tags are what
+/// the progress panel reads; without it the report is one no rubric scored.
+const focusedAttempt = (problemId, { phase = "Test", weaknesses = ["Test boundaries"], assessed = false } = {}) => ({
   problemId,
   payload: {
     problemId,
     date: "2026-01-01T00:00:00Z",
     report: {
       codingScore: 60, communicationScore: 60, decision: "NO_HIRE", summary: "Grounded assessment.",
-      codingFeedback: { strengths: [], improvements: ["Test boundaries"] },
+      codingFeedback: { strengths: [], improvements: weaknesses },
       communicationFeedback: { strengths: [], improvements: [] },
-      improvementPlan: [{
-        phase: "Test", weakness: "Test boundaries", impact: "high", frequency: 1,
+      improvementPlan: weaknesses.map((weakness) => ({
+        phase, weakness, impact: "high", frequency: 1,
         drill: "Build a test table", durationMin: 10,
         successCriterion: "Predict each output", selfReview: ["Name a boundary"],
-      }],
+      })),
+      ...(assessed && {
+        frameworkAssessment: {
+          rubricVersion: 1,
+          phases: frameworkPhases.map((row) => ({
+            phase: row, score: row === phase ? 50 : null, weaknessTags: row === phase ? weaknesses : [],
+          })),
+        },
+      }),
     },
   },
 });
@@ -1406,6 +1418,32 @@ lobbyTest("saved reports require confirmation and clear the progress panel", asy
   assert.doesNotMatch(await page.locator("#recommendation").textContent(), /passed your last two/);
   assert.equal(await page.locator("#report-delete-status").textContent(), "Saved reports and progress were deleted.");
   assert.equal(await page.evaluate(() => document.activeElement.id), "report-delete-status");
+});
+
+lobbyTest("a phase row lists three weaknesses and folds the rest where they can still be read", async (page) => {
+  const ranked = ["Explain the algorithm before coding", "Justify time complexity", "Justify space complexity", "Name an alternative"];
+  reports = [focusedAttempt(EASY[0], { phase: "Algorithm", weaknesses: ranked, assessed: true })];
+  await lobby(page);
+  await settles(page, () => document.querySelector("#progress-weaknesses > li"));
+
+  const row = await page.evaluate(() => {
+    const item = document.querySelector("#progress-weaknesses > li");
+    const list = document.querySelector("#progress-weaknesses");
+    return {
+      note: document.getElementById(list.getAttribute("aria-describedby"))?.textContent.slice(0, 16),
+      heading: item.querySelector(":scope > p").textContent,
+      shown: [...item.querySelectorAll(":scope > ul > li")].map((node) => node.textContent),
+      summary: item.querySelector(":scope > details > summary")?.textContent,
+      folded: [...item.querySelectorAll(":scope > details > ul > li")].map((node) => node.textContent),
+    };
+  });
+  assert.deepEqual(row, {
+    note: "Each row counts ",
+    heading: "REACTO · Algorithm · flagged in 1 of 1 assessed attempt",
+    shown: ranked.slice(0, 3),
+    summary: "1 more weakness",
+    folded: ranked.slice(3),
+  }, "the report's highest-ranked weakness is shown, and the notice is not one more list item");
 });
 
 lobbyTest("a failed report deletion retains the current progress", async (page) => {

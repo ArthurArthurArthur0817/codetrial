@@ -838,6 +838,22 @@ function renderAttemptHistory(attempts) {
   }
 }
 
+// How many weaknesses a phase row lists before folding the rest away. A
+// report can file four under one phase, and a phase flagged across many
+// attempts would otherwise grow a line for every one of them.
+const MAX_WEAKNESSES_SHOWN = 3;
+
+/// One weakness per item, as text: every wording is the model's.
+function weaknessList(tags) {
+  const list = document.createElement("ul");
+  for (const tag of tags) {
+    const item = document.createElement("li");
+    item.textContent = tag;
+    list.append(item);
+  }
+  return list;
+}
+
 function renderProgress() {
   const filters = {
     difficulty: nodes.progressDifficulty.value,
@@ -900,7 +916,19 @@ function renderProgress() {
   } else {
     for (const weakness of model.weaknesses) {
       const item = document.createElement("li");
-      item.textContent = `${weakness.tag} · ${weakness.count} attempt${weakness.count === 1 ? "" : "s"}`;
+      const heading = document.createElement("p");
+      heading.textContent = `${weakness.framework} · ${weakness.phase} · flagged in ${weakness.count} of ${weakness.assessed} assessed attempt${weakness.assessed === 1 ? "" : "s"}`;
+      item.append(heading, weaknessList(weakness.tags.slice(0, MAX_WEAKNESSES_SHOWN)));
+      // Folded rather than dropped, and outside the list so the fold is not
+      // announced as one more weakness.
+      const rest = weakness.tags.slice(MAX_WEAKNESSES_SHOWN);
+      if (rest.length > 0) {
+        const more = document.createElement("details");
+        const summary = document.createElement("summary");
+        summary.textContent = `${rest.length} more weakness${rest.length === 1 ? "" : "es"}`;
+        more.append(summary, weaknessList(rest));
+        item.append(more);
+      }
       nodes.progressWeaknesses.append(item);
     }
   }
