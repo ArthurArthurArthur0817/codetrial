@@ -95,6 +95,22 @@ pub fn delete_reports(accounts: &Accounts, user_id: i64) -> rusqlite::Result<usi
         .with(|connection| connection.execute("DELETE FROM reports WHERE user_id = ?1", [user_id]))
 }
 
+/// Deletes one saved report and returns the row count, 0 or 1.
+///
+/// Matched on the owner as well as the id, because the id is whatever the
+/// client chose when it saved the report and is no secret: without the owner in
+/// the WHERE, anyone who learned one could delete somebody else's report. A
+/// report that is someone else's and one that does not exist both answer 0, so
+/// the count says nothing about ids this account does not hold.
+pub fn delete_report(accounts: &Accounts, user_id: i64, id: &str) -> rusqlite::Result<usize> {
+    accounts.with(|connection| {
+        connection.execute(
+            "DELETE FROM reports WHERE id = ?1 AND user_id = ?2",
+            (id, user_id),
+        )
+    })
+}
+
 pub fn save_report(
     accounts: &Accounts,
     user_id: i64,

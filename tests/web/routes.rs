@@ -263,6 +263,7 @@ fn router_routes_match_a_fixed_allowlist() {
         "/api/recordings/{id}",
         "/api/recordings/{id}/events",
         "/api/reports",
+        "/api/reports/{id}",
         "/api/interviews",
         "/api/interviews/{id}/consent",
         "/api/interviews/{id}/recording",

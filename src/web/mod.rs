@@ -461,6 +461,7 @@ pub(crate) fn web_router(
                 .post(save_report_handler)
                 .delete(delete_reports_handler),
         )
+        .route("/api/reports/{id}", delete(delete_report_handler))
         .fallback(web_static_handler)
         .layer(axum::middleware::from_fn_with_state(
             security_header_state(&config),
