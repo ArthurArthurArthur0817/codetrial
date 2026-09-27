@@ -5,7 +5,7 @@ const HTML_ESCAPES = {
   "&": "&amp;",
   "<": "&lt;",
   ">": "&gt;",
-  "\"": "&quot;",
+  '"': "&quot;",
   "'": "&#39;",
 };
 
@@ -33,26 +33,48 @@ export function normalize(value) {
 
 export function deepEqual(left, right) {
   if (Object.is(left, right)) return true;
-  if (Array.isArray(left) && Array.isArray(right)) return left.length === right.length && left.every((value, index) => deepEqual(normalize(value), normalize(right[index])));
+  if (Array.isArray(left) && Array.isArray(right))
+    return (
+      left.length === right.length &&
+      left.every((value, index) =>
+        deepEqual(normalize(value), normalize(right[index])),
+      )
+    );
   return false;
 }
 
 function closeNumber(left, right) {
-  return typeof left === "number" && typeof right === "number" && Math.abs(left - right) <= 1e-5;
+  return (
+    typeof left === "number" &&
+    typeof right === "number" &&
+    Math.abs(left - right) <= 1e-5
+  );
 }
 
 function sortedValues(value) {
-  return Array.isArray(value) ? [...value].sort((left, right) => String(left).localeCompare(String(right), undefined, { numeric: true })) : value;
+  return Array.isArray(value)
+    ? [...value].sort((left, right) =>
+        String(left).localeCompare(String(right), undefined, { numeric: true }),
+      )
+    : value;
 }
 
 function sortedTriplets(value) {
   if (!Array.isArray(value)) return null;
   const triplets = [];
   for (const item of value) {
-    if (!Array.isArray(item) || item.length !== 3 || !item.every(Number.isInteger)) return null;
+    if (
+      !Array.isArray(item) ||
+      item.length !== 3 ||
+      !item.every(Number.isInteger)
+    )
+      return null;
     triplets.push([...item].sort((left, right) => left - right));
   }
-  return triplets.sort((left, right) => left[0] - right[0] || left[1] - right[1] || left[2] - right[2]);
+  return triplets.sort(
+    (left, right) =>
+      left[0] - right[0] || left[1] - right[1] || left[2] - right[2],
+  );
 }
 
 function sortedIntegerRows(value, sortInner) {
@@ -60,23 +82,33 @@ function sortedIntegerRows(value, sortInner) {
   const rows = [];
   for (const item of value) {
     if (!Array.isArray(item) || !item.every(Number.isInteger)) return null;
-    rows.push(sortInner ? [...item].sort((left, right) => left - right) : [...item]);
+    rows.push(
+      sortInner ? [...item].sort((left, right) => left - right) : [...item],
+    );
   }
-  return rows.sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right), undefined, { numeric: true }));
+  return rows.sort((left, right) =>
+    JSON.stringify(left).localeCompare(JSON.stringify(right), undefined, {
+      numeric: true,
+    }),
+  );
 }
 
 function sortedAnagramGroups(value) {
   if (!Array.isArray(value)) return null;
   const groups = [];
   for (const item of value) {
-    if (!Array.isArray(item) || !item.every((word) => typeof word === "string")) return null;
+    if (!Array.isArray(item) || !item.every((word) => typeof word === "string"))
+      return null;
     groups.push([...item].sort());
   }
-  return groups.sort((left, right) => left.join("\0").localeCompare(right.join("\0")));
+  return groups.sort((left, right) =>
+    left.join("\0").localeCompare(right.join("\0")),
+  );
 }
 
 function treeFromLevelOrder(values) {
-  if (!Array.isArray(values) || !values.length || values[0] === null) return null;
+  if (!Array.isArray(values) || !values.length || values[0] === null)
+    return null;
   const root = { val: values[0], left: null, right: null };
   const queue = [root];
   let index = 1;
@@ -125,10 +157,19 @@ function isTopologicalOrder(testCase, actual) {
   const positions = new Map();
   for (let index = 0; index < actual.length; index++) {
     const course = actual[index];
-    if (!Number.isInteger(course) || course < 0 || course >= numCourses || positions.has(course)) return false;
+    if (
+      !Number.isInteger(course) ||
+      course < 0 ||
+      course >= numCourses ||
+      positions.has(course)
+    )
+      return false;
     positions.set(course, index);
   }
-  return prerequisites.every(([course, prerequisite]) => positions.get(prerequisite) < positions.get(course));
+  return prerequisites.every(
+    ([course, prerequisite]) =>
+      positions.get(prerequisite) < positions.get(course),
+  );
 }
 
 export function checkAnswer(spec, testCase, actual) {
@@ -136,12 +177,26 @@ export function checkAnswer(spec, testCase, actual) {
     const [nums, target] = testCase.input;
     if (!Array.isArray(actual) || actual.length !== 2) return false;
     const [i, j] = actual;
-    return Number.isInteger(i) && Number.isInteger(j) && i !== j && i >= 0 && j >= 0 && i < nums.length && j < nums.length && nums[i] + nums[j] === target;
+    return (
+      Number.isInteger(i) &&
+      Number.isInteger(j) &&
+      i !== j &&
+      i >= 0 &&
+      j >= 0 &&
+      i < nums.length &&
+      j < nums.length &&
+      nums[i] + nums[j] === target
+    );
   }
   if (spec.checker === "palindrome") {
     const [text] = testCase.input;
     const expected = testCase.expected;
-    return typeof actual === "string" && actual.length === expected.length && text.includes(actual) && actual === actual.split("").reverse().join("");
+    return (
+      typeof actual === "string" &&
+      actual.length === expected.length &&
+      text.includes(actual) &&
+      actual === actual.split("").reverse().join("")
+    );
   }
   if (spec.checker === "arrayBag") {
     return deepEqual(sortedValues(actual), sortedValues(testCase.expected));
@@ -150,13 +205,22 @@ export function checkAnswer(spec, testCase, actual) {
     return deepEqual(sortedTriplets(actual), sortedTriplets(testCase.expected));
   }
   if (spec.checker === "integerRows") {
-    return deepEqual(sortedIntegerRows(actual, false), sortedIntegerRows(testCase.expected, false));
+    return deepEqual(
+      sortedIntegerRows(actual, false),
+      sortedIntegerRows(testCase.expected, false),
+    );
   }
   if (spec.checker === "integerCombinations") {
-    return deepEqual(sortedIntegerRows(actual, true), sortedIntegerRows(testCase.expected, true));
+    return deepEqual(
+      sortedIntegerRows(actual, true),
+      sortedIntegerRows(testCase.expected, true),
+    );
   }
   if (spec.checker === "unorderedGroups") {
-    return deepEqual(sortedAnagramGroups(actual), sortedAnagramGroups(testCase.expected));
+    return deepEqual(
+      sortedAnagramGroups(actual),
+      sortedAnagramGroups(testCase.expected),
+    );
   }
   if (spec.checker === "balancedBst") {
     return isBalancedBst(testCase, actual);
@@ -173,7 +237,10 @@ export function checkAnswer(spec, testCase, actual) {
 export function renderValue(value) {
   let text;
   try {
-    text = value === undefined ? "undefined" : JSON.stringify(value) || String(value);
+    text =
+      value === undefined
+        ? "undefined"
+        : JSON.stringify(value) || String(value);
   } catch {
     text = String(value);
   }
@@ -192,7 +259,12 @@ export const topics = {
 };
 
 export function isAgent(participant) {
-  return Boolean(participant) && (participant.kind === "AGENT" || participant.permissions?.agent || participant.identity?.startsWith("interviewer-"));
+  return (
+    Boolean(participant) &&
+    (participant.kind === "AGENT" ||
+      participant.permissions?.agent ||
+      participant.identity?.startsWith("interviewer-"))
+  );
 }
 
 /// The interviewer among a room's remote participants, or undefined.
@@ -207,8 +279,11 @@ export function isAgent(participant) {
 /// stays true after the agent leaves, so the page waited for a report no one
 /// was going to send.
 export function roomInterviewer(participants, agentIdentity) {
-  return participants.find((participant) => participant.identity === agentIdentity)
-    || (!agentIdentity ? participants.find(isAgent) : undefined);
+  return (
+    participants.find(
+      (participant) => participant.identity === agentIdentity,
+    ) || (!agentIdentity ? participants.find(isAgent) : undefined)
+  );
 }
 
 // Only the interviewer agent may end the session. Every other participant holds
@@ -267,8 +342,25 @@ export function testPayload(summary) {
     // buffer plus the results, so a little larger than the code update before
     // it; a run too large to send is reported to the candidate by `runTests`.
     code: summary.code ?? null,
-    failures: summary.cases.filter((item) => !item.candidate && !item.pass).slice(0, 4).map((item) => ({ label: item.label, expected: item.expected, got: item.got, error: item.error || null })),
-    candidateCases: summary.cases.filter((item) => item.candidate).slice(0, CANDIDATE_CASE_LIMIT).map((item) => ({ label: item.label, input: item.input, expected: item.expected ?? null, got: item.got, error: item.error || null })),
+    failures: summary.cases
+      .filter((item) => !item.candidate && !item.pass)
+      .slice(0, 4)
+      .map((item) => ({
+        label: item.label,
+        expected: item.expected,
+        got: item.got,
+        error: item.error || null,
+      })),
+    candidateCases: summary.cases
+      .filter((item) => item.candidate)
+      .slice(0, CANDIDATE_CASE_LIMIT)
+      .map((item) => ({
+        label: item.label,
+        input: item.input,
+        expected: item.expected ?? null,
+        got: item.got,
+        error: item.error || null,
+      })),
     at: Date.now(),
   };
 }
@@ -276,7 +368,10 @@ export function testPayload(summary) {
 export function canonicalJson(value) {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
   if (value && typeof value === "object") {
-    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
+      .join(",")}}`;
   }
   return JSON.stringify(value ?? null);
 }
@@ -322,12 +417,22 @@ function codePoints(text, max) {
 }
 
 function integrityDetail(value) {
-  return codePoints(String(value).replace(INTEGRITY_DETAIL_STRIPPED, ""), INTEGRITY_DETAIL_MAX);
+  return codePoints(
+    String(value).replace(INTEGRITY_DETAIL_STRIPPED, ""),
+    INTEGRITY_DETAIL_MAX,
+  );
 }
 
-export async function integrityEventPayload(input, previous = { seq: 0, hash: "" }) {
+export async function integrityEventPayload(
+  input,
+  previous = { seq: 0, hash: "" },
+) {
   const sourceEventIds = Array.isArray(input.sourceEventIds)
-    ? input.sourceEventIds.map(String).filter((value) => /^\d+$/.test(value)).slice(0, 4).map((value) => value.slice(0, 12))
+    ? input.sourceEventIds
+        .map(String)
+        .filter((value) => /^\d+$/.test(value))
+        .slice(0, 4)
+        .map((value) => value.slice(0, 12))
     : [];
   const event = {
     seq: previous.seq + 1,
@@ -361,7 +466,9 @@ export async function integrityEventPayload(input, previous = { seq: 0, hash: ""
   if (event.sourceEventIds.length) body.sourceEventIds = event.sourceEventIds;
   const bytes = new TextEncoder().encode(canonicalJson(body));
   const digest = await crypto.subtle.digest("SHA-256", bytes);
-  event.hash = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  event.hash = [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
   return event;
 }
 
@@ -374,27 +481,60 @@ export async function integrityEventPayload(input, previous = { seq: 0, hash: ""
 export const FRAMEWORKS = {
   coding: {
     name: "REACTO",
-    scenario: "Working a problem: what was asked for at each step of the coding round",
+    scenario:
+      "Working a problem: what was asked for at each step of the coding round",
     // One clause each, written for someone reading it once while waiting for
     // the interviewer to speak. Long enough to act on, short enough that the
     // whole flow is legible before the card goes away.
     steps: [
-      { id: "repeat", label: "Repeat", hint: "say the problem back in your own words" },
-      { id: "example", label: "Example", hint: "walk one ordinary case and one edge case" },
-      { id: "algorithm", label: "Algorithm", hint: "explain the approach and its cost before you type" },
+      {
+        id: "repeat",
+        label: "Repeat",
+        hint: "say the problem back in your own words",
+      },
+      {
+        id: "example",
+        label: "Example",
+        hint: "walk one ordinary case and one edge case",
+      },
+      {
+        id: "algorithm",
+        label: "Algorithm",
+        hint: "explain the approach and its cost before you type",
+      },
       { id: "coding", label: "Coding", hint: "write what you just described" },
-      { id: "test", label: "Test", hint: "predict what should happen, then run it" },
-      { id: "optimizations", label: "Optimizations", hint: "confirm the complexity and name one improvement" },
+      {
+        id: "test",
+        label: "Test",
+        hint: "predict what should happen, then run it",
+      },
+      {
+        id: "optimizations",
+        label: "Optimizations",
+        hint: "confirm the complexity and name one improvement",
+      },
     ],
   },
   behavioral: {
     name: "STAR",
     scenario: "Recounting past work: what a behavioral answer is listened for",
     steps: [
-      { id: "situation", label: "Situation", hint: "where you were and what was going on" },
+      {
+        id: "situation",
+        label: "Situation",
+        hint: "where you were and what was going on",
+      },
       { id: "task", label: "Task", hint: "what you were responsible for" },
-      { id: "action", label: "Action", hint: "what you personally did, not the team" },
-      { id: "result", label: "Result", hint: "how it turned out, and what you took from it" },
+      {
+        id: "action",
+        label: "Action",
+        hint: "what you personally did, not the team",
+      },
+      {
+        id: "result",
+        label: "Result",
+        hint: "how it turned out, and what you took from it",
+      },
     ],
   },
 };
@@ -406,13 +546,13 @@ export const FRAMEWORKS = {
 /// literals here and in progress.js, and a phase added to one of them would have
 /// been silently unassessed by the others.
 export const frameworkPhases = Object.values(FRAMEWORKS).flatMap((framework) =>
-  framework.steps.map((step) => step.label));
+  framework.steps.map((step) => step.label),
+);
 
 /// The two closed enums the server owns (InterviewMode::parse and
 /// InterviewLoop::parse in src/agent.rs). Anything else is the default, which is
 /// what makes a legacy or hostile value safe rather than an error. Stated once
 /// here because seven modules were each restating the same ternary.
-
 
 /// The steps of one round, each marked done or not.
 ///
@@ -421,10 +561,17 @@ export const frameworkPhases = Object.values(FRAMEWORKS).flatMap((framework) =>
 /// either a version skew or someone else's idea of a step.
 export function frameworkChecklist(round, phases) {
   const framework = FRAMEWORKS[round] || FRAMEWORKS.coding;
-  const done = new Set(Array.isArray(phases) ? phases.filter((phase) => typeof phase === "string") : []);
+  const done = new Set(
+    Array.isArray(phases)
+      ? phases.filter((phase) => typeof phase === "string")
+      : [],
+  );
   return {
     name: framework.name,
-    steps: framework.steps.map((step) => ({ ...step, done: done.has(step.id) })),
+    steps: framework.steps.map((step) => ({
+      ...step,
+      done: done.has(step.id),
+    })),
   };
 }
 
@@ -443,7 +590,9 @@ export function modeLabel(value) {
 }
 
 export function loopLabel(value) {
-  return codingLoop(value) === "coding_only" ? "Coding only" : "Coding + behavioral";
+  return codingLoop(value) === "coding_only"
+    ? "Coding only"
+    : "Coding + behavioral";
 }
 
 const textEncoder = new TextEncoder();
@@ -478,19 +627,32 @@ export const SCORABLE_SCHEMAS = [1, 2];
 function reportContract(raw) {
   const keys = Object.keys(ACTIVE_CONTRACT);
   const claimed = raw?.interviewContract;
-  const wellFormed = claimed && typeof claimed === "object" && !Array.isArray(claimed)
-    && Object.keys(claimed).sort().join(",") === [...keys].sort().join(",")
-    && keys.every((key) => Number.isSafeInteger(claimed[key]) && claimed[key] >= 1 && claimed[key] <= 999);
-  const interviewContract = claimed === undefined
-    ? null
-    : wellFormed ? Object.fromEntries(keys.map((key) => [key, claimed[key]])) : null;
-  const supported = interviewContract !== null
-    && interviewContract.rubricVersion === ACTIVE_CONTRACT.rubricVersion
-    && SCORABLE_SCHEMAS.includes(interviewContract.reportSchemaVersion)
-    && interviewContract.bundleVersion >= 4
-    && interviewContract.bundleVersion <= ACTIVE_CONTRACT.bundleVersion
-    && interviewContract.livePromptVersion <= ACTIVE_CONTRACT.livePromptVersion
-    && interviewContract.reportPromptVersion <= ACTIVE_CONTRACT.reportPromptVersion;
+  const wellFormed =
+    claimed &&
+    typeof claimed === "object" &&
+    !Array.isArray(claimed) &&
+    Object.keys(claimed).sort().join(",") === [...keys].sort().join(",") &&
+    keys.every(
+      (key) =>
+        Number.isSafeInteger(claimed[key]) &&
+        claimed[key] >= 1 &&
+        claimed[key] <= 999,
+    );
+  const interviewContract =
+    claimed === undefined
+      ? null
+      : wellFormed
+        ? Object.fromEntries(keys.map((key) => [key, claimed[key]]))
+        : null;
+  const supported =
+    interviewContract !== null &&
+    interviewContract.rubricVersion === ACTIVE_CONTRACT.rubricVersion &&
+    SCORABLE_SCHEMAS.includes(interviewContract.reportSchemaVersion) &&
+    interviewContract.bundleVersion >= 4 &&
+    interviewContract.bundleVersion <= ACTIVE_CONTRACT.bundleVersion &&
+    interviewContract.livePromptVersion <= ACTIVE_CONTRACT.livePromptVersion &&
+    interviewContract.reportPromptVersion <=
+      ACTIVE_CONTRACT.reportPromptVersion;
   const unsupported = claimed !== undefined && !supported;
   return { interviewContract, unsupported };
 }
@@ -504,10 +666,23 @@ function reportContract(raw) {
 /// than in the middle of the rest.
 function reportEvidence(raw) {
   const knownEvidenceFields = new Set([
-    "atMs", "phase", "source", "kind", "confidence", "summary", "frameworkVersion",
+    "atMs",
+    "phase",
+    "source",
+    "kind",
+    "confidence",
+    "summary",
+    "frameworkVersion",
   ]);
-  const evidencePhases = new Set(frameworkPhases.map((phase) => phase.toLowerCase()));
-  const frameworkSources = new Set(["candidate_speech", "editor_snapshot", "test_event", "session_timing"]);
+  const evidencePhases = new Set(
+    frameworkPhases.map((phase) => phase.toLowerCase()),
+  );
+  const frameworkSources = new Set([
+    "candidate_speech",
+    "editor_snapshot",
+    "test_event",
+    "session_timing",
+  ]);
   const frameworkKinds = new Set(["observed", "inferred", "skipped"]);
   return (Array.isArray(raw?.frameworkEvidence) ? raw.frameworkEvidence : [])
     .map((item) => {
@@ -517,12 +692,25 @@ function reportEvidence(raw) {
       const atMs = Math.trunc(Number(item?.atMs));
       const confidence = Math.trunc(Number(item?.confidence));
       const frameworkVersion = Math.trunc(Number(item?.frameworkVersion));
-      const summary = typeof item?.summary === "string" ? boundedText(item.summary, 240).trim() : "";
-      if (!evidencePhases.has(phase) || !frameworkSources.has(source) || !frameworkKinds.has(kind)
-        || (source === "session_timing") !== (kind === "skipped")
-        || !Number.isFinite(atMs) || atMs < 0 || !Number.isFinite(confidence)
-        || confidence < 0 || confidence > 100 || !Number.isFinite(frameworkVersion)
-        || frameworkVersion < 1 || !summary) return null;
+      const summary =
+        typeof item?.summary === "string"
+          ? boundedText(item.summary, 240).trim()
+          : "";
+      if (
+        !evidencePhases.has(phase) ||
+        !frameworkSources.has(source) ||
+        !frameworkKinds.has(kind) ||
+        (source === "session_timing") !== (kind === "skipped") ||
+        !Number.isFinite(atMs) ||
+        atMs < 0 ||
+        !Number.isFinite(confidence) ||
+        confidence < 0 ||
+        confidence > 100 ||
+        !Number.isFinite(frameworkVersion) ||
+        frameworkVersion < 1 ||
+        !summary
+      )
+        return null;
       // Unknown fields round-trip, so a newer report re-saved by an older
       // client does not quietly lose what that client could not name. They
       // are also the only part of an evidence row with no size of its own,
@@ -539,11 +727,15 @@ function reportEvidence(raw) {
       // to lose either.
       let extras = null;
       for (const key of Object.keys(item)) {
-        if (!knownEvidenceFields.has(key)) (extras ??= Object.create(null))[key] = item[key];
+        if (!knownEvidenceFields.has(key))
+          (extras ??= Object.create(null))[key] = item[key];
       }
       // Spreading null spreads nothing, which is what both the common row and
       // an over-budget one want.
-      const carried = extras && textEncoder.encode(JSON.stringify(extras)).length <= 512 ? extras : null;
+      const carried =
+        extras && textEncoder.encode(JSON.stringify(extras)).length <= 512
+          ? extras
+          : null;
       return {
         ...carried,
         // A year, which no interview approaches: this is a sanity bound on a
@@ -574,21 +766,37 @@ function reportEvidence(raw) {
 function reportRounds(raw, interviewLoop) {
   const kinds = ["coding", "behavioral"];
   const codingStatuses = new Set(["complete", "incomplete"]);
-  const behavioralStatuses = new Set(["complete", "started", "skipped", "not_configured"]);
-  const rounds = Array.isArray(raw?.rounds) && raw.rounds.length === 2
-    ? raw.rounds.map((round, index) => round?.kind === kinds[index]
-      && Number.isInteger(round.budgetMin) && round.budgetMin >= 0 && round.budgetMin <= 90
-      && (index === 0 ? codingStatuses : behavioralStatuses).has(round.status)
-      ? { kind: round.kind, budgetMin: round.budgetMin, status: round.status } : null)
-    : [];
+  const behavioralStatuses = new Set([
+    "complete",
+    "started",
+    "skipped",
+    "not_configured",
+  ]);
+  const rounds =
+    Array.isArray(raw?.rounds) && raw.rounds.length === 2
+      ? raw.rounds.map((round, index) =>
+          round?.kind === kinds[index] &&
+          Number.isInteger(round.budgetMin) &&
+          round.budgetMin >= 0 &&
+          round.budgetMin <= 90 &&
+          (index === 0 ? codingStatuses : behavioralStatuses).has(round.status)
+            ? {
+                kind: round.kind,
+                budgetMin: round.budgetMin,
+                status: round.status,
+              }
+            : null,
+        )
+      : [];
   // `[].every(Boolean)` is true, so the pair has to be proved present before
   // anything reads into it. Writing the length test second cost an exception on
   // every report with no rounds at all, which is most of them.
   if (rounds.length !== 2 || !rounds.every(Boolean)) return [];
   const total = rounds[0].budgetMin + rounds[1].budgetMin;
-  const behavioralFits = interviewLoop === "coding_only"
-    ? rounds[1].budgetMin === 0 && rounds[1].status === "not_configured"
-    : rounds[1].budgetMin === 8 && rounds[1].status !== "not_configured";
+  const behavioralFits =
+    interviewLoop === "coding_only"
+      ? rounds[1].budgetMin === 0 && rounds[1].status === "not_configured"
+      : rounds[1].budgetMin === 8 && rounds[1].status !== "not_configured";
   return total >= 10 && total <= 90 && behavioralFits ? rounds : [];
 }
 
@@ -607,18 +815,30 @@ export function endReason(raw) {
 function reportDebrief(raw) {
   if (raw?.debrief === undefined) return undefined;
   const debrief = raw?.debrief;
-  if (!debrief || typeof debrief !== "object" || Array.isArray(debrief)) return null;
-  const text = (value) => typeof value === "string" ? boundedText(value, MAX_SUMMARY_TEXT) : null;
+  if (!debrief || typeof debrief !== "object" || Array.isArray(debrief))
+    return null;
+  const text = (value) =>
+    typeof value === "string" ? boundedText(value, MAX_SUMMARY_TEXT) : null;
   return {
     scenarioContract: text(debrief.scenarioContract),
     approach: text(debrief.approach),
     pitfalls: text(debrief.pitfalls),
-    hints: Array.isArray(debrief.hints) ? debrief.hints.slice(0, 3).map((hint) => ({
-      text: typeof hint?.text === "string" ? boundedText(hint.text, 400) : "",
-      given: hint?.given === true,
-    })).filter((hint) => hint.text) : [],
+    hints: Array.isArray(debrief.hints)
+      ? debrief.hints
+          .slice(0, 3)
+          .map((hint) => ({
+            text:
+              typeof hint?.text === "string" ? boundedText(hint.text, 400) : "",
+            given: hint?.given === true,
+          }))
+          .filter((hint) => hint.text)
+      : [],
     followUps: Array.isArray(debrief.followUps)
-      ? debrief.followUps.slice(0, 3).filter((item) => typeof item === "string").map((item) => boundedText(item, 400)).filter(Boolean)
+      ? debrief.followUps
+          .slice(0, 3)
+          .filter((item) => typeof item === "string")
+          .map((item) => boundedText(item, 400))
+          .filter(Boolean)
       : [],
   };
 }
@@ -626,18 +846,26 @@ function reportDebrief(raw) {
 function reportTopics(raw) {
   if (raw?.topics === undefined) return undefined;
   return Array.isArray(raw?.topics)
-    ? raw.topics.slice(0, 8).filter((topic) => typeof topic === "string").map((topic) => boundedText(topic, 80)).filter(Boolean)
+    ? raw.topics
+        .slice(0, 8)
+        .filter((topic) => typeof topic === "string")
+        .map((topic) => boundedText(topic, 80))
+        .filter(Boolean)
     : [];
 }
 
 function reportPracticeLevel(raw) {
   if (raw?.practiceLevel === undefined) return undefined;
-  return ["intern", "junior", "mid", "senior", "staff", "manager"].includes(raw?.practiceLevel)
-    ? raw.practiceLevel : null;
+  return ["intern", "junior", "mid", "senior", "staff", "manager"].includes(
+    raw?.practiceLevel,
+  )
+    ? raw.practiceLevel
+    : null;
 }
 
 export function sanitizeReport(raw) {
-  const { interviewContract, unsupported: unsupportedContract } = reportContract(raw);
+  const { interviewContract, unsupported: unsupportedContract } =
+    reportContract(raw);
   // Only what the report actually recorded. Defaulting this to "scored" put a
   // mode on every new report and made the header announce a distinction that no
   // longer exists; a report written before the split still says what it was.
@@ -647,7 +875,8 @@ export function sanitizeReport(raw) {
   // loop on a report written before loops existed describes a session that
   // never ran, the same way defaulting the mode did.
   const interviewLoop = codingLoop(raw?.interviewLoop);
-  const recordedLoop = raw?.interviewLoop === undefined ? undefined : interviewLoop;
+  const recordedLoop =
+    raw?.interviewLoop === undefined ? undefined : interviewLoop;
   const roundSummary = reportRounds(raw, interviewLoop);
   const bounded = (value, max) => {
     const number = Math.trunc(Number(value));
@@ -665,7 +894,9 @@ export function sanitizeReport(raw) {
   // every event is listed above", which is a completeness claim about a report
   // that has no idea, and the exact thing the absent branch exists to refuse.
   const count = (value) =>
-    typeof value === "number" && Number.isFinite(value) ? bounded(value, Number.MAX_SAFE_INTEGER) : null;
+    typeof value === "number" && Number.isFinite(value)
+      ? bounded(value, Number.MAX_SAFE_INTEGER)
+      : null;
   const checkpoint = (raw) => ({
     integrityChainSeq: count(raw?.integrityChainSeq),
     integrityDropped: count(raw?.integrityDropped),
@@ -676,28 +907,54 @@ export function sanitizeReport(raw) {
   });
   const codingFeedback = feedback(raw?.codingFeedback);
   const communicationFeedback = feedback(raw?.communicationFeedback);
-  const weaknesses = new Set([...codingFeedback.improvements, ...communicationFeedback.improvements]);
+  const weaknesses = new Set([
+    ...codingFeedback.improvements,
+    ...communicationFeedback.improvements,
+  ]);
   const phases = new Set(frameworkPhases);
   const plannedWeaknesses = new Set();
   const impactRank = { high: 3, medium: 2, low: 1 };
-  const candidatePlan = (Array.isArray(raw?.improvementPlan) ? raw.improvementPlan : [])
+  const candidatePlan = (
+    Array.isArray(raw?.improvementPlan) ? raw.improvementPlan : []
+  )
     .slice(0, 16)
     .map((item) => {
       const phase = typeof item?.phase === "string" ? item.phase : "";
-      const weakness = typeof item?.weakness === "string" ? boundedText(item.weakness, 400).trim() : "";
+      const weakness =
+        typeof item?.weakness === "string"
+          ? boundedText(item.weakness, 400).trim()
+          : "";
       const impact = typeof item?.impact === "string" ? item.impact : "";
-      const drill = typeof item?.drill === "string" ? boundedText(item.drill, 400).trim() : "";
-      const successCriterion = typeof item?.successCriterion === "string"
-        ? boundedText(item.successCriterion, 400).trim() : "";
+      const drill =
+        typeof item?.drill === "string"
+          ? boundedText(item.drill, 400).trim()
+          : "";
+      const successCriterion =
+        typeof item?.successCriterion === "string"
+          ? boundedText(item.successCriterion, 400).trim()
+          : "";
       const frequency = Math.trunc(Number(item?.frequency));
       const durationMin = Math.trunc(Number(item?.durationMin));
       const selfReview = Array.isArray(item?.selfReview)
-        ? item.selfReview.slice(0, 4).map((check) => boundedText(check, 240).trim()).filter(Boolean)
+        ? item.selfReview
+            .slice(0, 4)
+            .map((check) => boundedText(check, 240).trim())
+            .filter(Boolean)
         : [];
-      if (!phases.has(phase) || plannedWeaknesses.has(weakness) || !weaknesses.has(weakness)
-        || !impactRank[impact] || !Number.isFinite(frequency) || frequency < 1
-        || !Number.isFinite(durationMin) || durationMin < 1 || !drill
-        || !successCriterion || selfReview.length === 0) return null;
+      if (
+        !phases.has(phase) ||
+        plannedWeaknesses.has(weakness) ||
+        !weaknesses.has(weakness) ||
+        !impactRank[impact] ||
+        !Number.isFinite(frequency) ||
+        frequency < 1 ||
+        !Number.isFinite(durationMin) ||
+        durationMin < 1 ||
+        !drill ||
+        !successCriterion ||
+        selfReview.length === 0
+      )
+        return null;
       plannedWeaknesses.add(weakness);
       return {
         phase,
@@ -711,51 +968,74 @@ export function sanitizeReport(raw) {
       };
     })
     .filter(Boolean)
-    .sort((left, right) => impactRank[right.impact] - impactRank[left.impact]
-      || right.frequency - left.frequency)
+    .sort(
+      (left, right) =>
+        impactRank[right.impact] - impactRank[left.impact] ||
+        right.frequency - left.frequency,
+    )
     .slice(0, 8);
-  const improvementPlan = plannedWeaknesses.size === weaknesses.size
-    && [...weaknesses].every((weakness) => plannedWeaknesses.has(weakness))
-    ? candidatePlan
-    : [];
+  const improvementPlan =
+    plannedWeaknesses.size === weaknesses.size &&
+    [...weaknesses].every((weakness) => plannedWeaknesses.has(weakness))
+      ? candidatePlan
+      : [];
   const assessmentPhases = [...phases];
   const candidateAssessment = raw?.frameworkAssessment;
   const assessmentRows = Array.isArray(candidateAssessment?.phases)
-    ? candidateAssessment.phases : [];
+    ? candidateAssessment.phases
+    : [];
   const seenAssessmentPhases = new Set();
   const normalizedAssessment = new Map();
   const assessmentVersion = candidateAssessment?.rubricVersion;
-  let assessmentValid = Number.isSafeInteger(assessmentVersion) && assessmentVersion >= 1
-    && assessmentRows.length === assessmentPhases.length
-    && (!interviewContract || assessmentVersion === interviewContract.rubricVersion);
+  let assessmentValid =
+    Number.isSafeInteger(assessmentVersion) &&
+    assessmentVersion >= 1 &&
+    assessmentRows.length === assessmentPhases.length &&
+    (!interviewContract ||
+      assessmentVersion === interviewContract.rubricVersion);
   for (const item of assessmentRows) {
     const phase = typeof item?.phase === "string" ? item.phase : "";
     const score = item?.score;
-    const scoreValid = score === null
-      || (typeof score === "number" && Number.isInteger(score) && score >= 0 && score <= 100);
-    if (!phases.has(phase) || seenAssessmentPhases.has(phase) || !scoreValid
-      || !Array.isArray(item?.weaknessTags)) {
+    const scoreValid =
+      score === null ||
+      (typeof score === "number" &&
+        Number.isInteger(score) &&
+        score >= 0 &&
+        score <= 100);
+    if (
+      !phases.has(phase) ||
+      seenAssessmentPhases.has(phase) ||
+      !scoreValid ||
+      !Array.isArray(item?.weaknessTags)
+    ) {
       assessmentValid = false;
       continue;
     }
     seenAssessmentPhases.add(phase);
-    const allowedTags = new Set(improvementPlan
-      .filter((entry) => entry.phase === phase)
-      .map((entry) => entry.weakness));
-    const weaknessTags = [...new Set(item.weaknessTags
-      .filter((tag) => typeof tag === "string")
-      .map((tag) => boundedText(tag, 400).trim())
-      .filter((tag) => tag && allowedTags.has(tag)))]
-      .slice(0, 4);
+    const allowedTags = new Set(
+      improvementPlan
+        .filter((entry) => entry.phase === phase)
+        .map((entry) => entry.weakness),
+    );
+    const weaknessTags = [
+      ...new Set(
+        item.weaknessTags
+          .filter((tag) => typeof tag === "string")
+          .map((tag) => boundedText(tag, 400).trim())
+          .filter((tag) => tag && allowedTags.has(tag)),
+      ),
+    ].slice(0, 4);
     normalizedAssessment.set(phase, { phase, score, weaknessTags });
   }
-  const frameworkAssessment = assessmentValid
-    && seenAssessmentPhases.size === assessmentPhases.length
-    ? {
-      rubricVersion: assessmentVersion,
-      phases: assessmentPhases.map((phase) => normalizedAssessment.get(phase)),
-    }
-    : null;
+  const frameworkAssessment =
+    assessmentValid && seenAssessmentPhases.size === assessmentPhases.length
+      ? {
+          rubricVersion: assessmentVersion,
+          phases: assessmentPhases.map((phase) =>
+            normalizedAssessment.get(phase),
+          ),
+        }
+      : null;
   const frameworkEvidence = reportEvidence(raw);
   const debrief = reportDebrief(raw);
   const topics = reportTopics(raw);
@@ -776,7 +1056,9 @@ export function sanitizeReport(raw) {
       incomplete: true,
       summary: unsupportedContract
         ? "This report uses an unsupported or malformed interview contract and cannot be scored by this version of CodeTrial."
-        : typeof raw?.summary === "string" ? boundedText(raw.summary, MAX_SUMMARY_TEXT) : "",
+        : typeof raw?.summary === "string"
+          ? boundedText(raw.summary, MAX_SUMMARY_TEXT)
+          : "",
       integrityEvents: integrityEvents(raw?.integrityEvents),
       ...checkpoint(raw),
       hintsUsed: bounded(raw?.hintsUsed, 99),
@@ -797,7 +1079,10 @@ export function sanitizeReport(raw) {
     codingScore: score(raw?.codingScore),
     communicationScore: score(raw?.communicationScore),
     decision: raw?.decision === "HIRE" ? "HIRE" : "NO_HIRE",
-    summary: typeof raw?.summary === "string" ? boundedText(raw.summary, MAX_SUMMARY_TEXT) : "",
+    summary:
+      typeof raw?.summary === "string"
+        ? boundedText(raw.summary, MAX_SUMMARY_TEXT)
+        : "",
     codingFeedback,
     communicationFeedback,
     improvementPlan,
@@ -829,14 +1114,27 @@ function integrityEvents(events) {
   return events.slice(0, MAX_INTEGRITY_ROWS).map((event) => ({
     type: typeof event?.type === "string" ? boundedText(event.type, 40) : "",
     at: typeof event?.at === "string" ? boundedText(event.at, 40) : "",
-    severity: ["info", "warning", "high", "critical"].includes(event?.severity) ? event.severity : "info",
-    source: typeof event?.source === "string" ? boundedText(event.source, 20) : "",
-    durationMs: clamp(Math.trunc(Number(event?.durationMs) || 0), 0, 86_400_000),
+    severity: ["info", "warning", "high", "critical"].includes(event?.severity)
+      ? event.severity
+      : "info",
+    source:
+      typeof event?.source === "string" ? boundedText(event.source, 20) : "",
+    durationMs: clamp(
+      Math.trunc(Number(event?.durationMs) || 0),
+      0,
+      86_400_000,
+    ),
     seq: clamp(Math.trunc(Number(event?.seq) || 0), 0, Number.MAX_SAFE_INTEGER),
-    prevHash: typeof event?.prevHash === "string" ? boundedText(event.prevHash, 64) : "",
+    prevHash:
+      typeof event?.prevHash === "string"
+        ? boundedText(event.prevHash, 64)
+        : "",
     hash: typeof event?.hash === "string" ? boundedText(event.hash, 64) : "",
-    detail: typeof event?.detail === "string" ? boundedText(event.detail, 80) : null,
-    sourceEventIds: stringList(event?.sourceEventIds).filter((value) => /^\d+$/.test(value)).map((value) => boundedText(value, 12)),
+    detail:
+      typeof event?.detail === "string" ? boundedText(event.detail, 80) : null,
+    sourceEventIds: stringList(event?.sourceEventIds)
+      .filter((value) => /^\d+$/.test(value))
+      .map((value) => boundedText(value, 12)),
   }));
 }
 
@@ -870,13 +1168,17 @@ const MAX_SUMMARY_TEXT = 1200;
 /// Every rendered free-text field in `sanitizeReport` comes through here.
 function boundedText(value, max = MAX_REPORT_TEXT) {
   return codePoints(
-    String(value).replace(CONTROL_SEPARATOR, " ").replace(INTEGRITY_DETAIL_STRIPPED, ""),
+    String(value)
+      .replace(CONTROL_SEPARATOR, " ")
+      .replace(INTEGRITY_DETAIL_STRIPPED, ""),
     max,
   );
 }
 
 function stringList(value) {
-  return Array.isArray(value) ? value.slice(0, 4).map((item) => boundedText(item)) : [];
+  return Array.isArray(value)
+    ? value.slice(0, 4).map((item) => boundedText(item))
+    : [];
 }
 
 /// When the interview starts reading as nearly over, both to the candidate and
@@ -915,7 +1217,13 @@ export function countdown(endsAt, now) {
 /// it to localStorage and POSTed it to `/api/reports`. Whether an interviewer
 /// was ever present is a different fact from whether the connection survived,
 /// and only the first one decides this.
-export function sessionReport({ joinedRoom, passed, total, candidateTurns, reportUnreadable = false }) {
+export function sessionReport({
+  joinedRoom,
+  passed,
+  total,
+  candidateTurns,
+  reportUnreadable = false,
+}) {
   // Ahead of `joinedRoom`, which this case also satisfies while contradicting
   // it: the interviewer did return a report, and only this page's failure to
   // show it stands between the candidate and their evaluation. Told as "the
@@ -941,9 +1249,10 @@ export function sessionReport({ joinedRoom, passed, total, candidateTurns, repor
 
   return {
     incomplete: true,
-    summary: total || candidateTurns
-      ? `Offline mode recorded local activity${total ? ` and ${passed}/${total} browser test cases passed` : ""}. No live interviewer assessed it, so no personalized scores, verdict, or feedback were created.`
-      : "No interviewer joined and this session produced no evaluation. Nothing you did was assessed, and no result was recorded.",
+    summary:
+      total || candidateTurns
+        ? `Offline mode recorded local activity${total ? ` and ${passed}/${total} browser test cases passed` : ""}. No live interviewer assessed it, so no personalized scores, verdict, or feedback were created.`
+        : "No interviewer joined and this session produced no evaluation. Nothing you did was assessed, and no result was recorded.",
     hintsUsed: 0,
   };
 }
@@ -1007,21 +1316,78 @@ export function providerUiState(kind, detail = "") {
         ? "The microphone could not be connected to the live interview."
         : "The live interview provider could not be reached.";
   const states = {
-    connecting: { label: "Connecting", message: "Connecting to the live interviewer.", personalized: false, retry: false },
-    live: { label: "Live", message: "The live interviewer is connected.", personalized: true, retry: false },
-    reconnecting: { label: "Reconnecting", message: "Reconnecting to the interviewer. Keep working; your code is safe.", personalized: true, retry: false },
+    connecting: {
+      label: "Connecting",
+      message: "Connecting to the live interviewer.",
+      personalized: false,
+      retry: false,
+    },
+    live: {
+      label: "Live",
+      message: "The live interviewer is connected.",
+      personalized: true,
+      retry: false,
+    },
+    reconnecting: {
+      label: "Reconnecting",
+      message:
+        "Reconnecting to the interviewer. Keep working; your code is safe.",
+      personalized: true,
+      retry: false,
+    },
     // A different outage from the one above, and the one the candidate can act
     // on: the room is fine and the interviewer is still in it, but its own
     // session dropped and it cannot hear anything said until it is back.
-    interviewer_reconnecting: { label: "Reconnecting", message: "The interviewer is reconnecting and cannot hear you for a moment. Keep working; nothing is lost.", personalized: true, retry: false },
-    degraded: { label: "Offline", message: `${reason} You can still work the problem, but it will not create a personalized evaluation.`, personalized: false, retry: true },
-    report_generating: { label: "Preparing report", message: "Preparing your personalized report. A slow grader can take a couple of minutes.", personalized: true, retry: false },
-    report_unreadable: { label: "Report unavailable", message: "The interviewer sent a report, but this page could not display it, and reloading will not bring it back. The offline summary shows what this page recorded, and leaving the room is safe.", personalized: false, retry: false },
+    interviewer_reconnecting: {
+      label: "Reconnecting",
+      message:
+        "The interviewer is reconnecting and cannot hear you for a moment. Keep working; nothing is lost.",
+      personalized: true,
+      retry: false,
+    },
+    degraded: {
+      label: "Offline",
+      message: `${reason} You can still work the problem, but it will not create a personalized evaluation.`,
+      personalized: false,
+      retry: true,
+    },
+    report_generating: {
+      label: "Preparing report",
+      message:
+        "Preparing your personalized report. A slow grader can take a couple of minutes.",
+      personalized: true,
+      retry: false,
+    },
+    report_unreadable: {
+      label: "Report unavailable",
+      message:
+        "The interviewer sent a report, but this page could not display it, and reloading will not bring it back. The offline summary shows what this page recorded, and leaving the room is safe.",
+      personalized: false,
+      retry: false,
+    },
     // The offline summary is the other half of `report_unreadable`, so where
     // that is what failed there is nothing left to offer but the door.
-    report_undrawable: { label: "Report unavailable", message: "This page could not display the report or the offline summary of what it recorded. Nothing further is coming, and leaving the room is safe.", personalized: false, retry: false },
-    incomplete_report: { label: "Incomplete report", message: "The provider could not produce a valid personalized evaluation. No scores or verdict were created.", personalized: false, retry: true },
-    retry_ready: { label: "Retry available", message: "The report is still unavailable. Leave safely, then retry the interview when the provider recovers.", personalized: false, retry: true },
+    report_undrawable: {
+      label: "Report unavailable",
+      message:
+        "This page could not display the report or the offline summary of what it recorded. Nothing further is coming, and leaving the room is safe.",
+      personalized: false,
+      retry: false,
+    },
+    incomplete_report: {
+      label: "Incomplete report",
+      message:
+        "The provider could not produce a valid personalized evaluation. No scores or verdict were created.",
+      personalized: false,
+      retry: true,
+    },
+    retry_ready: {
+      label: "Retry available",
+      message:
+        "The report is still unavailable. Leave safely, then retry the interview when the provider recovers.",
+      personalized: false,
+      retry: true,
+    },
   };
   return states[kind] || states.degraded;
 }
@@ -1165,7 +1531,8 @@ export function responseWindows(events) {
   for (const [index, event] of replayRows(events).entries()) {
     if (event?.kind === "lifecycle") {
       const state = event.payload?.state;
-      if (state === "paused" || state === "resumed") paused = state === "paused";
+      if (state === "paused" || state === "resumed")
+        paused = state === "paused";
       // A window already open when the break started keeps the mark, which is
       // the ordinary case: the candidate pauses during their own turn and no
       // `avatar` row is written at all.
@@ -1236,7 +1603,14 @@ export function responseWindows(events) {
       // place the panel could make a false one.
       const responseWindow = event.payload?.responseWindow;
       const matched = Number.isInteger(responseWindow);
-      open = { index, at: event.at, duration: null, turn: null, paused, matched };
+      open = {
+        index,
+        at: event.at,
+        duration: null,
+        turn: null,
+        paused,
+        matched,
+      };
       windows.push(open);
       if (matched) windowsById.set(responseWindow, open);
     }

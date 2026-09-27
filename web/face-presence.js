@@ -9,7 +9,11 @@ export const FACE_SAMPLE_GAP_MS = 5000;
 
 // What a detector reports when it could not look, as distinct from looking and
 // finding nobody. The tracker never sees one of these.
-export const FACE_SAMPLE_UNAVAILABLE = { available: false, count: 0, confidence: 0 };
+export const FACE_SAMPLE_UNAVAILABLE = {
+  available: false,
+  count: 0,
+  confidence: 0,
+};
 
 // The vendored files keep the names MediaPipe asks for, so this is a join and
 // not a translation table. It used to be a table, duplicated here and in
@@ -22,9 +26,13 @@ export function faceAssetUrl(file, baseUrl = FACE_VENDOR_BASE) {
 }
 
 export function normalizeFaceResults(results = {}) {
-  const detections = Array.isArray(results.detections) ? results.detections : [];
+  const detections = Array.isArray(results.detections)
+    ? results.detections
+    : [];
   const confidence = detections.reduce((best, detection) => {
-    const score = Array.isArray(detection.score) ? detection.score[0] : detection.score;
+    const score = Array.isArray(detection.score)
+      ? detection.score[0]
+      : detection.score;
     return Math.max(best, Number.isFinite(score) ? score : 0);
   }, 0);
   return { count: detections.length, confidence };
@@ -100,9 +108,17 @@ export function createFacePresenceTracker({
       const next = faceEventType(sample.count);
       if (next === stable) {
         pending = null;
-        if (stable === "FACE_MISSING" && !severeEmitted && now - missingSince >= severeThresholdMs) {
+        if (
+          stable === "FACE_MISSING" &&
+          !severeEmitted &&
+          now - missingSince >= severeThresholdMs
+        ) {
           severeEmitted = true;
-          return { type: "FACE_MISSING_SEVERE", sample, durationMs: now - missingSince };
+          return {
+            type: "FACE_MISSING_SEVERE",
+            sample,
+            durationMs: now - missingSince,
+          };
         }
         return null;
       }
@@ -141,7 +157,11 @@ export async function createFacePresenceDetector({
         available: true,
         async detect(image) {
           const detections = await detector.detect(image);
-          return { available: true, count: detections.length, confidence: detections.length ? 1 : 0 };
+          return {
+            available: true,
+            count: detections.length,
+            confidence: detections.length ? 1 : 0,
+          };
         },
         close() {},
       };
@@ -151,25 +171,36 @@ export async function createFacePresenceDetector({
     // withholds `'unsafe-eval'`: loaded into the page, the bundle throws during
     // initialization and the preflight quietly loses its face check. The worker
     // is the one response the server grants eval to.
-    if (!Detector && scope.document && typeof scope.Worker === "function"
-      && typeof scope.createImageBitmap === "function") {
+    if (
+      !Detector &&
+      scope.document &&
+      typeof scope.Worker === "function" &&
+      typeof scope.createImageBitmap === "function"
+    ) {
       return createWorkerFaceDetector(scope);
     }
     await loadScript(scope, baseUrl);
     const FaceDetection = Detector || scope.FaceDetection;
-    if (typeof FaceDetection !== "function") return { available: false, reason: "detector_unavailable" };
-    const detector = new FaceDetection({ locateFile: (file) => faceAssetUrl(file, baseUrl) });
+    if (typeof FaceDetection !== "function")
+      return { available: false, reason: "detector_unavailable" };
+    const detector = new FaceDetection({
+      locateFile: (file) => faceAssetUrl(file, baseUrl),
+    });
     detector.setOptions?.({ model: "short", minDetectionConfidence: 0.5 });
     await detector.initialize?.();
     return {
       available: true,
       detect(image) {
         return new Promise((resolve) => {
-          detector.onResults((results) => resolve({ available: true, ...normalizeFaceResults(results) }));
+          detector.onResults((results) =>
+            resolve({ available: true, ...normalizeFaceResults(results) }),
+          );
           // A detection that threw says nothing about the candidate. Reporting
           // it as zero faces is what let a wasm load failure end a valid
           // interview fifteen seconds later.
-          Promise.resolve(detector.send({ image })).catch(() => resolve(FACE_SAMPLE_UNAVAILABLE));
+          Promise.resolve(detector.send({ image })).catch(() =>
+            resolve(FACE_SAMPLE_UNAVAILABLE),
+          );
         });
       },
       close() {
@@ -202,9 +233,15 @@ function createWorkerFaceDetector(scope) {
     const done = pending.get(result.id);
     if (!done) return;
     pending.delete(result.id);
-    done(result.type === "result"
-      ? { available: true, count: result.count, confidence: result.confidence }
-      : FACE_SAMPLE_UNAVAILABLE);
+    done(
+      result.type === "result"
+        ? {
+            available: true,
+            count: result.count,
+            confidence: result.confidence,
+          }
+        : FACE_SAMPLE_UNAVAILABLE,
+    );
   };
   worker.onerror = settleAll;
   return {

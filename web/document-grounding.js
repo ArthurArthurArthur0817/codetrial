@@ -20,9 +20,15 @@ const textLimit = 240;
 
 /// `extractPdfText` is a seam for the Node tests, which cannot run pdf.js; the
 /// browser always takes the default.
-export async function parseGroundingFile(file, kind, { extractPdfText = readPdfText } = {}) {
+export async function parseGroundingFile(
+  file,
+  kind,
+  { extractPdfText = readPdfText } = {},
+) {
   if (!file) throw new Error("Choose a .txt or .pdf file.");
-  const text = isPdf(file) ? await pdfFileText(file, extractPdfText) : await textFileText(file);
+  const text = isPdf(file)
+    ? await pdfFileText(file, extractPdfText)
+    : await textFileText(file);
   const lines = normalizeLines(text);
   if (!lines.length) throw new Error("The file contains no usable text.");
   return kind === "jd" ? parseJd(lines) : parseResume(lines);
@@ -41,9 +47,12 @@ async function textFileText(file) {
     throw new Error("Use a UTF-8 .txt file with text/plain type, or a PDF.");
   }
   if (file.size === 0) throw new Error("The file is empty.");
-  if (file.size > maxGroundingFileBytes) throw new Error("The file must be 64 KiB or smaller.");
+  if (file.size > maxGroundingFileBytes)
+    throw new Error("The file must be 64 KiB or smaller.");
   try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(await file.arrayBuffer());
+    return new TextDecoder("utf-8", { fatal: true }).decode(
+      await file.arrayBuffer(),
+    );
   } catch {
     throw new Error("The file is not valid UTF-8.");
   }
@@ -51,7 +60,8 @@ async function textFileText(file) {
 
 async function pdfFileText(file, extractPdfText) {
   if (file.size === 0) throw new Error("The file is empty.");
-  if (file.size > maxGroundingPdfBytes) throw new Error("The PDF must be 4 MiB or smaller.");
+  if (file.size > maxGroundingPdfBytes)
+    throw new Error("The PDF must be 4 MiB or smaller.");
   const bytes = new Uint8Array(await file.arrayBuffer());
 
   // The header may sit anywhere in the first kilobyte. Checked here, before
@@ -63,17 +73,24 @@ async function pdfFileText(file, extractPdfText) {
   try {
     text = await extractPdfText(bytes);
   } catch (error) {
-    if (error?.name === "PasswordException") throw new Error("The PDF is password-protected.");
+    if (error?.name === "PasswordException")
+      throw new Error("The PDF is password-protected.");
     if (error?.name === pdfReaderMissing) {
-      throw new Error("The PDF reader did not load, so PDFs cannot be read here right now. Use a .txt file instead.");
+      throw new Error(
+        "The PDF reader did not load, so PDFs cannot be read here right now. Use a .txt file instead.",
+      );
     }
     if (error?.name === pdfTooLong) {
-      throw new Error(`The PDF has ${error.pages} pages; it must have ${maxGroundingPdfPages} or fewer.`);
+      throw new Error(
+        `The PDF has ${error.pages} pages; it must have ${maxGroundingPdfPages} or fewer.`,
+      );
     }
     throw new Error("The PDF could not be read.");
   }
   if (!/\p{L}/u.test(text)) {
-    throw new Error("The PDF has no selectable text. A scanned document needs a text version.");
+    throw new Error(
+      "The PDF has no selectable text. A scanned document needs a text version.",
+    );
   }
   if (encoder.encode(text).length > maxGroundingFileBytes) {
     throw new Error("The PDF's text must be 64 KiB or smaller.");
@@ -106,10 +123,16 @@ async function readPdfText(bytes) {
   try {
     pdfjs = await import(`${pdfjsBase}pdf.min.mjs`);
   } catch (cause) {
-    throw Object.assign(new Error("pdf.js did not load", { cause }), { name: pdfReaderMissing });
+    throw Object.assign(new Error("pdf.js did not load", { cause }), {
+      name: pdfReaderMissing,
+    });
   }
   pdfjs.GlobalWorkerOptions.workerSrc = `${pdfjsBase}pdf.worker.min.mjs`;
-  const task = pdfjs.getDocument({ data: bytes, isEvalSupported: false, disableFontFace: true });
+  const task = pdfjs.getDocument({
+    data: bytes,
+    isEvalSupported: false,
+    disableFontFace: true,
+  });
   try {
     const doc = await task.promise;
 
@@ -117,12 +140,19 @@ async function readPdfText(bytes) {
     // first pages of a longer document and reporting success would leave the
     // candidate with fewer snippets and no reason for it.
     if (doc.numPages > maxGroundingPdfPages) {
-      throw Object.assign(new Error("too many pages"), { name: pdfTooLong, pages: doc.numPages });
+      throw Object.assign(new Error("too many pages"), {
+        name: pdfTooLong,
+        pages: doc.numPages,
+      });
     }
     const pages = [];
     for (let number = 1; number <= doc.numPages; number += 1) {
       const content = await (await doc.getPage(number)).getTextContent();
-      pages.push(content.items.map((item) => (item.str ?? "") + (item.hasEOL ? "\n" : "")).join(""));
+      pages.push(
+        content.items
+          .map((item) => (item.str ?? "") + (item.hasEOL ? "\n" : ""))
+          .join(""),
+      );
     }
     return pages.join("\n");
   } finally {
@@ -138,7 +168,8 @@ export function retainedSelection(selected, kind) {
   const replaced = kind === "jd" ? ["requirements"] : ["skills", "anchors"];
   const retained = { requirements: [], skills: [], anchors: [] };
   for (const group of Object.keys(retained)) {
-    if (!replaced.includes(group)) retained[group] = [...(selected[group] || [])];
+    if (!replaced.includes(group))
+      retained[group] = [...(selected[group] || [])];
   }
   return retained;
 }
@@ -146,13 +177,19 @@ export function retainedSelection(selected, kind) {
 export function selectedGroundingPacket(extracted, selected, consent) {
   const packet = {
     consentVersion: groundingConsentVersion,
-    requirements: pick(extracted.requirements, selected.requirements).map(normalizeSnippet),
+    requirements: pick(extracted.requirements, selected.requirements).map(
+      normalizeSnippet,
+    ),
     skills: pick(extracted.skills, selected.skills).map(normalizeSnippet),
     anchors: pick(extracted.anchors, selected.anchors).map(normalizeSnippet),
   };
-  const count = packet.requirements.length + packet.skills.length + packet.anchors.length;
+  const count =
+    packet.requirements.length + packet.skills.length + packet.anchors.length;
   if (!count) return null;
-  if (!consent) throw new Error("Agree to send only your selected snippets before starting.");
+  if (!consent)
+    throw new Error(
+      "Agree to send only your selected snippets before starting.",
+    );
 
   // The server rejects a list holding the same snippet twice, and rejecting it
   // means dropping every snippet in the packet, not just the repeat. `pick`
@@ -161,7 +198,9 @@ export function selectedGroundingPacket(extracted, selected, consent) {
   // an interview that quietly runs with no grounding at all.
   for (const field of ["requirements", "skills", "anchors"]) {
     if (new Set(packet[field]).size !== packet[field].length) {
-      throw new Error("Two selected snippets are identical. Remove the repeat before starting.");
+      throw new Error(
+        "Two selected snippets are identical. Remove the repeat before starting.",
+      );
     }
   }
 
@@ -169,10 +208,15 @@ export function selectedGroundingPacket(extracted, selected, consent) {
   // are normalized above rather than at the point of use: the server measures
   // what it stores, and measuring the raw selection here would be counting a
   // different string and calling it the same budget.
-  const bytes = [...packet.requirements, ...packet.skills, ...packet.anchors]
-    .reduce((total, text) => total + encoder.encode(text).length, 0);
+  const bytes = [
+    ...packet.requirements,
+    ...packet.skills,
+    ...packet.anchors,
+  ].reduce((total, text) => total + encoder.encode(text).length, 0);
   if (bytes > maxGroundingPacketBytes) {
-    throw new Error("Selected snippets are too long. Select fewer or shorter snippets.");
+    throw new Error(
+      "Selected snippets are too long. Select fewer or shorter snippets.",
+    );
   }
   return packet;
 }
@@ -192,13 +236,19 @@ function normalizeSnippet(text) {
 
 export function storeGroundingPacket(storage, packet) {
   if (!packet) {
-    try { storage.removeItem(groundingStorageKey); } catch { /* no grounding must remain usable */ }
+    try {
+      storage.removeItem(groundingStorageKey);
+    } catch {
+      /* no grounding must remain usable */
+    }
     return;
   }
   try {
     storage.setItem(groundingStorageKey, JSON.stringify(packet));
   } catch {
-    throw new Error("Selected snippets could not be stored temporarily. Clear grounding to start normally.");
+    throw new Error(
+      "Selected snippets could not be stored temporarily. Clear grounding to start normally.",
+    );
   }
 }
 
@@ -206,8 +256,14 @@ export function consumeGroundingPacket(storage) {
   let raw = null;
   try {
     raw = storage.getItem(groundingStorageKey);
-  } catch { return null; }
-  try { storage.removeItem(groundingStorageKey); } catch { return null; }
+  } catch {
+    return null;
+  }
+  try {
+    storage.removeItem(groundingStorageKey);
+  } catch {
+    return null;
+  }
   if (!raw) return null;
   try {
     const value = JSON.parse(raw);
@@ -218,8 +274,11 @@ export function consumeGroundingPacket(storage) {
 }
 
 function normalizeLines(text) {
-  return text.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, " ")
-    .split(/\r?\n/).map((line) => line.replace(/\s+/g, " ").trim()).filter(Boolean);
+  return text
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, " ")
+    .split(/\r?\n/)
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
 }
 
 // A bullet glyph is stripped on its own, because it is a list glyph and not
@@ -239,9 +298,11 @@ function normalizeLines(text) {
 // \p{Nd} rather than \d, so a full-width digit is a marker digit like an
 // ASCII one.
 function clean(line) {
-  return line.trimStart()
+  return line
+    .trimStart()
     .replace(/^(?:(?:-+|\*+)\s+|\p{Nd}+[.)]+(?=\s|\p{L}{2})\s*|•\s*)+/u, "")
-    .slice(0, textLimit).trim();
+    .slice(0, textLimit)
+    .trim();
 }
 
 // A token with no letter is digits and symbols only, wearing a list item's
@@ -266,22 +327,47 @@ function clean(line) {
 // a filter that goes by shape and keeps one keeps the other. Both are
 // dropped. A part number that names itself, "MOS 6502" or "Z80", is kept.
 function unique(values, max) {
-  return [...new Set(values.map(clean).filter((value) => /\p{L}/u.test(value)))].slice(0, max);
+  return [
+    ...new Set(values.map(clean).filter((value) => /\p{L}/u.test(value))),
+  ].slice(0, max);
 }
 
 function parseJd(lines) {
-  const marked = lines.filter((line) => /\b(require[sd]?|requirements?|must|should|experienced?|proficien(?:t|cy|cies)|knowledge|ability)\b/i.test(line));
-  return { requirements: unique(marked, limits.requirements), skills: [], anchors: [] };
+  const marked = lines.filter((line) =>
+    /\b(require[sd]?|requirements?|must|should|experienced?|proficien(?:t|cy|cies)|knowledge|ability)\b/i.test(
+      line,
+    ),
+  );
+  return {
+    requirements: unique(marked, limits.requirements),
+    skills: [],
+    anchors: [],
+  };
 }
 
 function parseResume(lines) {
-  const skillLines = lines.filter((line) => /^(skills?|technologies|stack)\s*:/i.test(line));
-  const skills = skillLines.flatMap((line) => line.replace(/^[^:]+:/, "").split(/[,;|]/));
-  const anchors = lines.filter((line) => /\b(project|experience|built|led|created|implemented|delivered|improved|reduced|increased|developed)\b/i.test(line));
-  return { requirements: [], skills: unique(skills, limits.skills), anchors: unique(anchors, limits.anchors) };
+  const skillLines = lines.filter((line) =>
+    /^(skills?|technologies|stack)\s*:/i.test(line),
+  );
+  const skills = skillLines.flatMap((line) =>
+    line.replace(/^[^:]+:/, "").split(/[,;|]/),
+  );
+  const anchors = lines.filter((line) =>
+    /\b(project|experience|built|led|created|implemented|delivered|improved|reduced|increased|developed)\b/i.test(
+      line,
+    ),
+  );
+  return {
+    requirements: [],
+    skills: unique(skills, limits.skills),
+    anchors: unique(anchors, limits.anchors),
+  };
 }
 
 function pick(values = [], indexes = []) {
-  return [...new Set(indexes)].filter((index) => Number.isInteger(index) && index >= 0 && index < values.length)
+  return [...new Set(indexes)]
+    .filter(
+      (index) => Number.isInteger(index) && index >= 0 && index < values.length,
+    )
     .map((index) => values[index]);
 }

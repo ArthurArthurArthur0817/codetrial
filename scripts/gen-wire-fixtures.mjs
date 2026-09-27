@@ -21,10 +21,13 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const FIXTURES = join(ROOT, "tests", "fixtures");
 
 const lib = await import(join(ROOT, "web", "lib.js"));
-const { ALL_LANGUAGES } = await import(join(ROOT, "web", "compiler-explorer.js"));
+const { ALL_LANGUAGES } = await import(
+  join(ROOT, "web", "compiler-explorer.js")
+);
 
 const CODE = "def match_pair(amounts, total):\n    return []\n";
-const EDITED = "def match_pair(amounts, total):\n    seen = {}\n    return []\n";
+const EDITED =
+  "def match_pair(amounts, total):\n    seen = {}\n    return []\n";
 
 // Fixed rather than Date.now(). testPayload stamps itself from the clock, so
 // the generator freezes it for the same reason it hardcodes the ISO strings
@@ -37,7 +40,10 @@ function codeUpdateCases(languages) {
     // heard as a language choice; confirming a pick nobody made is worse than
     // staying quiet.
     { name: "opening sync", payload: lib.codeUpdatePayload(CODE, "python") },
-    { name: "keystroke", payload: lib.codeUpdatePayload(EDITED, "python", AT_MS) },
+    {
+      name: "keystroke",
+      payload: lib.codeUpdatePayload(EDITED, "python", AT_MS),
+    },
     // Every tab the browser actually offers. If src/agent.rs stops recognizing
     // one, the click changes nothing and Jim never acknowledges it.
     ...languages.map((language) => ({
@@ -79,8 +85,20 @@ function testResultsCases() {
           code: EDITED,
           setupError: null,
           cases: [
-            { label: "example 1", pass: true, expected: "[0,1]", got: "[0,1]", timeMs: 3 },
-            { label: "example 2", pass: true, expected: "[1,2]", got: "[1,2]", timeMs: 2 },
+            {
+              label: "example 1",
+              pass: true,
+              expected: "[0,1]",
+              got: "[0,1]",
+              timeMs: 3,
+            },
+            {
+              label: "example 2",
+              pass: true,
+              expected: "[1,2]",
+              got: "[1,2]",
+              timeMs: 2,
+            },
           ],
         }),
       },
@@ -93,9 +111,28 @@ function testResultsCases() {
           code: EDITED,
           setupError: null,
           cases: [
-            { label: "example 1", pass: true, expected: "[0,1]", got: "[0,1]", timeMs: 3 },
-            { label: "example 2", pass: false, expected: "[1,2]", got: "[]", timeMs: 2 },
-            { label: "example 3", pass: false, expected: "[2,3]", got: "", error: "TypeError: nums is not iterable", timeMs: 1 },
+            {
+              label: "example 1",
+              pass: true,
+              expected: "[0,1]",
+              got: "[0,1]",
+              timeMs: 3,
+            },
+            {
+              label: "example 2",
+              pass: false,
+              expected: "[1,2]",
+              got: "[]",
+              timeMs: 2,
+            },
+            {
+              label: "example 3",
+              pass: false,
+              expected: "[2,3]",
+              got: "",
+              error: "TypeError: nums is not iterable",
+              timeMs: 1,
+            },
           ],
         }),
       },
@@ -132,8 +169,17 @@ function testResultsCases() {
           code: EDITED,
           setupError: null,
           cases: [
-            { label: "example 1", pass: true, expected: "[0,1]", got: "[0,1]", timeMs: 1 },
-            ...Array.from({ length: lib.CANDIDATE_CASE_LIMIT + 1 }, (_, offset) => offset + 1).map((index) => ({
+            {
+              label: "example 1",
+              pass: true,
+              expected: "[0,1]",
+              got: "[0,1]",
+              timeMs: 1,
+            },
+            ...Array.from(
+              { length: lib.CANDIDATE_CASE_LIMIT + 1 },
+              (_, offset) => offset + 1,
+            ).map((index) => ({
               label: `Your case ${index}`,
               candidate: true,
               input: `[${index}]`,
@@ -165,7 +211,8 @@ function testResultsCases() {
           language: "python",
           code: EDITED,
           runnerUnavailable: true,
-          setupError: "The test cases could not be loaded. Check your connection and run again.",
+          setupError:
+            "The test cases could not be loaded. Check your connection and run again.",
           cases: [],
         }),
       },
@@ -195,42 +242,75 @@ function testResultsCases() {
 // reproducible. Keep one detail at the 80-character bound: that is the case
 // that broke, and a fixture without it cannot catch the regression.
 const INTEGRITY_INPUTS = [
-  { type: "SESSION_START", source: "media", severity: "info", at: "2026-08-18T06:36:26.727Z" },
-  { type: "MEDIA_PREFLIGHT_PASSED", source: "preflight", severity: "info", at: "2026-08-18T06:36:26.734Z" },
   {
-    type: "INTEGRITY_HEARTBEAT", source: "media", severity: "info", at: "2026-08-18T06:36:56.812Z",
-    detail: "analyzer=source=camera;analysis=face_detect,tracking;frames=3;transport=ImageBitmap",
+    type: "SESSION_START",
+    source: "media",
+    severity: "info",
+    at: "2026-08-18T06:36:26.727Z",
   },
   {
-    type: "FACE_MISSING", source: "camera", severity: "warning", durationMs: 2000,
-    at: "2026-08-18T06:37:14.005Z", detail: "faces=0",
+    type: "MEDIA_PREFLIGHT_PASSED",
+    source: "preflight",
+    severity: "info",
+    at: "2026-08-18T06:36:26.734Z",
   },
   {
-    type: "CAMERA_RELEASED_TO_PRESENTER", source: "media", severity: "info",
-    at: "2026-08-18T06:37:41.330Z", detail: "analyzer=camera_released",
+    type: "INTEGRITY_HEARTBEAT",
+    source: "media",
+    severity: "info",
+    at: "2026-08-18T06:36:56.812Z",
+    detail:
+      "analyzer=source=camera;analysis=face_detect,tracking;frames=3;transport=ImageBitmap",
   },
   {
-    type: "CAMERA_NOT_USED", source: "camera", severity: "info",
-    at: "2026-08-18T06:37:42.330Z", detail: "declined",
+    type: "FACE_MISSING",
+    source: "camera",
+    severity: "warning",
+    durationMs: 2000,
+    at: "2026-08-18T06:37:14.005Z",
+    detail: "faces=0",
   },
   {
-    type: "INTEGRITY_HEARTBEAT", source: "media", severity: "info", at: "2026-08-18T06:38:26.901Z",
-    detail: "analyzer=source=camera;analysis=tracking;frames=1;transport=ImageBitmap",
+    type: "CAMERA_RELEASED_TO_PRESENTER",
+    source: "media",
+    severity: "info",
+    at: "2026-08-18T06:37:41.330Z",
+    detail: "analyzer=camera_released",
+  },
+  {
+    type: "CAMERA_NOT_USED",
+    source: "camera",
+    severity: "info",
+    at: "2026-08-18T06:37:42.330Z",
+    detail: "declined",
+  },
+  {
+    type: "INTEGRITY_HEARTBEAT",
+    source: "media",
+    severity: "info",
+    at: "2026-08-18T06:38:26.901Z",
+    detail:
+      "analyzer=source=camera;analysis=tracking;frames=1;transport=ImageBitmap",
   },
   // A real detector failure, which is the one event whose detail is an
   // arbitrary runtime error string: `web/face-worker.js` fills it from
   // `error.message`. Parentheses and quotes are ordinary there, and an agent
   // that drops a detail carrying them hashes different bytes from the producer.
   {
-    type: "FACE_DETECTOR_UNAVAILABLE", source: "media", severity: "warning",
+    type: "FACE_DETECTOR_UNAVAILABLE",
+    source: "media",
+    severity: "warning",
     at: "2026-08-18T06:39:02.114Z",
-    detail: "face detection unavailable: Cannot read properties of undefined (reading 'a')",
+    detail:
+      "face detection unavailable: Cannot read properties of undefined (reading 'a')",
   },
   // The mirror case: characters both sides keep, so a browser that starts
   // stripping something the agent would have accepted fails here too. One
   // fixture cannot catch a divergence in a direction it never exercises.
   {
-    type: "INTEGRITY_HEARTBEAT", source: "media", severity: "info",
+    type: "INTEGRITY_HEARTBEAT",
+    source: "media",
+    severity: "info",
     at: "2026-08-18T06:39:44.702Z",
     detail: "az AZ 09 _-=/;:,.",
   },
@@ -242,7 +322,9 @@ const INTEGRITY_INPUTS = [
   // the agent remove the identical set. If either side keeps one, the hashes
   // disagree here rather than in somebody's interview.
   {
-    type: "MEDIA_PREFLIGHT_PASSED", source: "preflight", severity: "info",
+    type: "MEDIA_PREFLIGHT_PASSED",
+    source: "preflight",
+    severity: "info",
     at: "2026-08-18T06:39:52.400Z",
     detail: `camera=FaceTime HD \u039A\u03AC\u03BC\u03B5\u03C1\u03B1 \u0645\u06CC\u200C\u0631 \u202Egnitautis\u200B (05AC:8514)`,
   },
@@ -253,9 +335,19 @@ const INTEGRITY_INPUTS = [
   // is the most divergence-prone construct in the whole hash. Five ids of
   // thirteen digits, against caps of four and twelve.
   {
-    type: "MULTIPLE_FACES", source: "camera", severity: "critical", durationMs: 4000,
-    at: "2026-08-18T06:40:11.006Z", detail: "faces=2",
-    sourceEventIds: ["1111111111111", "2222222222222", "3333333333333", "4444444444444", "5555555555555"],
+    type: "MULTIPLE_FACES",
+    source: "camera",
+    severity: "critical",
+    durationMs: 4000,
+    at: "2026-08-18T06:40:11.006Z",
+    detail: "faces=2",
+    sourceEventIds: [
+      "1111111111111",
+      "2222222222222",
+      "3333333333333",
+      "4444444444444",
+      "5555555555555",
+    ],
   },
 ];
 
@@ -276,7 +368,10 @@ async function integrityChain() {
 // to recognize.
 const languages = ALL_LANGUAGES;
 const files = {
-  "code-update.json": { topic: lib.topics.code, cases: codeUpdateCases(languages) },
+  "code-update.json": {
+    topic: lib.topics.code,
+    cases: codeUpdateCases(languages),
+  },
   "control.json": { topic: lib.topics.control, cases: controlCases() },
   "test-results.json": { topic: lib.topics.tests, cases: testResultsCases() },
   "integrity-chain.json": await integrityChain(),

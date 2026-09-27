@@ -41,7 +41,9 @@ const RECORDING_POLL_MS = 15000;
 /// of the page, and nothing left that can stop it.
 export function setRecordingPoll(on) {
   clearInterval(recordingPoll);
-  recordingPoll = on ? setInterval(pollRecordingState, RECORDING_POLL_MS) : null;
+  recordingPoll = on
+    ? setInterval(pollRecordingState, RECORDING_POLL_MS)
+    : null;
 }
 
 /// Whether the recording notice has been agreed to, or does not apply.
@@ -61,10 +63,16 @@ export async function startRecording() {
   // is over, and the answer it carries is about the start before this one.
   let terminal = false;
   try {
-    const response = await fetch(`/api/interviews/${encodeURIComponent(state.interviewId)}/recording`, {
-      method: "POST",
-    });
-    if (!response.ok) throw new Error((await response.json())?.error || "The recording could not be started.");
+    const response = await fetch(
+      `/api/interviews/${encodeURIComponent(state.interviewId)}/recording`,
+      {
+        method: "POST",
+      },
+    );
+    if (!response.ok)
+      throw new Error(
+        (await response.json())?.error || "The recording could not be started.",
+      );
     const status = await response.json();
     if (attempt === recordingAttempt) terminal = showRecordingState(status);
   } catch (error) {
@@ -75,7 +83,8 @@ export async function startRecording() {
       // and polling stops on that.
       console.warn("codetrial recording_start_failed", error);
       nodes.recordingState.hidden = false;
-      nodes.recordingState.textContent = "Checking whether the recording started.";
+      nodes.recordingState.textContent =
+        "Checking whether the recording started.";
     }
   }
   if (attempt === recordingAttempt) setRecordingPoll(!terminal);
@@ -89,7 +98,9 @@ export async function pollRecordingState() {
   // acting on a terminal one stops a poll the newer attempt is relying on.
   const attempt = recordingAttempt;
   try {
-    const response = await fetch(`/api/interviews/${encodeURIComponent(state.interviewId)}/recording`);
+    const response = await fetch(
+      `/api/interviews/${encodeURIComponent(state.interviewId)}/recording`,
+    );
     if (attempt !== recordingAttempt) return;
     if (response.ok) {
       // Parsed first and checked again: the body is a second await, and a
@@ -145,15 +156,19 @@ export function showRecordingState(status) {
     wait_for_operator: "Recording is turned off on this server.",
     // Neither of these means the recording is gone, and saying it was not kept
     // would be the opposite of true: the media may still exist.
-    delete_by_hand: "Recording deletion needs an operator. It has not been deleted yet.",
-    clear_the_row_by_hand: "Recording was deleted. Its record needs an operator.",
+    delete_by_hand:
+      "Recording deletion needs an operator. It has not been deleted yet.",
+    clear_the_row_by_hand:
+      "Recording was deleted. Its record needs an operator.",
   };
   nodes.recordingState.hidden = false;
   // The recovery wins where there is one. A recording that is `transferring`
   // with `drive_failed` is being saved and is also not delivered, and the
   // second half is the half worth saying.
   nodes.recordingState.textContent =
-    recovery[status?.recovery] || words[status?.state] || "Recording stopped and was not kept.";
+    recovery[status?.recovery] ||
+    words[status?.state] ||
+    "Recording stopped and was not kept.";
 
   // Nothing changes after a terminal state, so nothing keeps asking. Ending the
   // interview is not the end of the recording: `transferring` and `ready` both
@@ -161,8 +176,10 @@ export function showRecordingState(status) {
   // A `failed` recording whose recovery is another delivery attempt is not
   // finished: the transfer queue can still deliver it, and the candidate is the
   // person who wants to know when it does.
-  return ["ready", "deleted", "cleanup_failed"].includes(status?.state)
-    || (status?.state === "failed" && status?.recovery !== "retry_delivery");
+  return (
+    ["ready", "deleted", "cleanup_failed"].includes(status?.state) ||
+    (status?.state === "failed" && status?.recovery !== "retry_delivery")
+  );
 }
 
 /// Takes consent back, mid-interview.
@@ -177,9 +194,12 @@ export async function withdrawRecordingConsent() {
   if (!state.interviewId) return;
   nodes.withdrawConsent.disabled = true;
   try {
-    const response = await fetch(`/api/interviews/${encodeURIComponent(state.interviewId)}/consent`, {
-      method: "DELETE",
-    });
+    const response = await fetch(
+      `/api/interviews/${encodeURIComponent(state.interviewId)}/consent`,
+      {
+        method: "DELETE",
+      },
+    );
     if (!response.ok) throw new Error("The server did not accept the request.");
     // The replay stops here, not at the next refusal. The server will refuse
     // it, so this changes nothing it can see; what it changes is that a
@@ -191,10 +211,17 @@ export async function withdrawRecordingConsent() {
     // work, and a button that reports a completed action it did not perform is
     // the worst possible place to be optimistic.
     nodes.withdrawConsent.textContent = "Recording stop requested";
-    addTranscript("interviewer", "Your withdrawal is recorded. Recording will stop and the file is scheduled for deletion. Copies anyone already downloaded cannot be recalled.", true);
+    addTranscript(
+      "interviewer",
+      "Your withdrawal is recorded. Recording will stop and the file is scheduled for deletion. Copies anyone already downloaded cannot be recalled.",
+      true,
+    );
   } catch (error) {
     console.warn("codetrial withdraw_consent_failed", error);
     nodes.withdrawConsent.disabled = false;
-    setBanner("connection", "Could not stop the recording. Try again, or end the interview.");
+    setBanner(
+      "connection",
+      "Could not stop the recording. Try again, or end the interview.",
+    );
   }
 }

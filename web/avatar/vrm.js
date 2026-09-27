@@ -69,7 +69,9 @@ export async function loadVrm({ mount, bytes }) {
   // dispose, and the canvas is not in the document until further down, so the
   // catch that used to sit here could only ever rethrow.
   const renderer = new WebGLRenderer({ canvas, alpha: true, antialias: true });
-  renderer.setPixelRatio(Math.min(mount.ownerDocument.defaultView?.devicePixelRatio || 1, 2));
+  renderer.setPixelRatio(
+    Math.min(mount.ownerDocument.defaultView?.devicePixelRatio || 1, 2),
+  );
 
   const scene = new Scene();
   scene.add(new AmbientLight(0xffffff, 1.6));
@@ -124,7 +126,10 @@ export async function loadVrm({ mount, bytes }) {
     // constraints applied inside vrm.update(), after these rotations and on top
     // of them. Bone posing fixes an ordinary T-pose; it cannot fix a rigged
     // prop, and pretending otherwise is two more lines that do nothing.
-    for (const [bone, sign] of [["leftUpperArm", -1], ["rightUpperArm", 1]]) {
+    for (const [bone, sign] of [
+      ["leftUpperArm", -1],
+      ["rightUpperArm", 1],
+    ]) {
       const node = vrm.humanoid?.getNormalizedBoneNode(bone);
       if (node) node.rotation.z = sign * ARM_REST_ROTATION_Z;
     }
@@ -135,11 +140,21 @@ export async function loadVrm({ mount, bytes }) {
       vrm.scene.updateMatrixWorld(true);
       head.getWorldPosition(headPosition);
     }
-    camera.position.set(headPosition.x, headPosition.y, headPosition.z + FRAMING_DISTANCE_M);
-    camera.lookAt(headPosition.x, headPosition.y - FRAMING_DROP_M, headPosition.z);
+    camera.position.set(
+      headPosition.x,
+      headPosition.y,
+      headPosition.z + FRAMING_DISTANCE_M,
+    );
+    camera.lookAt(
+      headPosition.x,
+      headPosition.y - FRAMING_DROP_M,
+      headPosition.z,
+    );
     if (vrm.lookAt) vrm.lookAt.target = lookTarget;
 
-    const restHeadRotation = head ? { x: head.rotation.x, y: head.rotation.y, z: head.rotation.z } : null;
+    const restHeadRotation = head
+      ? { x: head.rotation.x, y: head.rotation.y, z: head.rotation.z }
+      : null;
     const clock = new Clock();
     let width = 0;
     let height = 0;
@@ -147,10 +162,15 @@ export async function loadVrm({ mount, bytes }) {
     // a forced reflow into the typing path, because the editor rewrites its
     // highlight overlay on every keystroke. The observer marks it instead.
     let needsResize = true;
-    resizeObserver = new (mount.ownerDocument.defaultView?.ResizeObserver ?? class {
-      observe() {}
-      disconnect() {}
-    })(() => { needsResize = true; });
+    resizeObserver = new (
+      mount.ownerDocument.defaultView?.ResizeObserver ??
+      class {
+        observe() {}
+        disconnect() {}
+      }
+    )(() => {
+      needsResize = true;
+    });
     resizeObserver.observe(mount);
 
     mount.appendChild(canvas);

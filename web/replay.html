@@ -1,10 +1,10 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>CodeTrial - Recordings</title>
-    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/styles.css" />
     <script type="module" src="/replay.js"></script>
   </head>
   <body>
@@ -13,11 +13,13 @@
         <div class="brand">CODETRIAL</div>
         <h1>Your recordings</h1>
         <p class="muted small">
-          Interviews this account recorded. A recording is kept for 24 hours and then deleted,
-          along with everything on this page.
+          Interviews this account recorded. A recording is kept for 24 hours and
+          then deleted, along with everything on this page.
         </p>
         <ul id="replay-list" class="replay-list"></ul>
-        <button id="replay-more" class="pill-button" type="button" hidden>Older</button>
+        <button id="replay-more" class="pill-button" type="button" hidden>
+          Older
+        </button>
         <p id="replay-empty" class="muted small" hidden>No recordings yet.</p>
       </aside>
 
@@ -59,28 +61,31 @@
                  What neither bounds is what the server says, which this page
                  prints verbatim: the recording state, and a moment's kind. -->
             <p id="replay-window-note" class="muted small" hidden>
-              A response window is the time between the interviewer finishing a turn and
-              the interviewer speaking again. It is measured from the clock of the
-              browser that recorded the interview, which can jump forward as well as
-              back, and it includes the time CodeTrial itself took to prepare the reply,
-              which is not the same on every turn. The interviewer speaks again on its
-              own after about twenty-five seconds of silence, and neither talking nor
-              typing counts as silence, so a window runs long only while the candidate
-              is working: a long window means they were busy, and a run of short windows
-              holding no transcript is what silence looks like. A window opens whenever
-              the interviewer stops speaking, which is often not the end of a question:
-              it also follows the interviewer's own prompts and reactions, a candidate
-              interrupting, a moment when the interviewer published no state at all, the
-              interviewer dropping out and coming back, and the candidate pausing the
-              interview, which is the one of those a window says on itself. Events reach
-              the server in batches and a batch can be lost, so a window can be missing,
-              doubled, shown with no candidate transcript, wrongly marked as paused, or
-              added after the interview ended. A window shows no duration when the
-              recording ended inside it, or when that clock ran backwards. Each turn
-              carries the window its stream started in, and a recording made before
-              that says so on every window it cannot place, rather than reporting a
-              question nobody answered. A long window is a place in the recording to go
-              and watch, not a finding about anybody.
+              A response window is the time between the interviewer finishing a
+              turn and the interviewer speaking again. It is measured from the
+              clock of the browser that recorded the interview, which can jump
+              forward as well as back, and it includes the time CodeTrial itself
+              took to prepare the reply, which is not the same on every turn.
+              The interviewer speaks again on its own after about twenty-five
+              seconds of silence, and neither talking nor typing counts as
+              silence, so a window runs long only while the candidate is
+              working: a long window means they were busy, and a run of short
+              windows holding no transcript is what silence looks like. A window
+              opens whenever the interviewer stops speaking, which is often not
+              the end of a question: it also follows the interviewer's own
+              prompts and reactions, a candidate interrupting, a moment when the
+              interviewer published no state at all, the interviewer dropping
+              out and coming back, and the candidate pausing the interview,
+              which is the one of those a window says on itself. Events reach
+              the server in batches and a batch can be lost, so a window can be
+              missing, doubled, shown with no candidate transcript, wrongly
+              marked as paused, or added after the interview ended. A window
+              shows no duration when the recording ended inside it, or when that
+              clock ran backwards. Each turn carries the window its stream
+              started in, and a recording made before that says so on every
+              window it cannot place, rather than reporting a question nobody
+              answered. A long window is a place in the recording to go and
+              watch, not a finding about anybody.
             </p>
             <ol id="replay-timeline" class="replay-timeline"></ol>
           </section>

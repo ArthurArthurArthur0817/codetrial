@@ -37,7 +37,9 @@ async function fetchJson(url) {
   // of requests is readable without tracing the control flow.
   for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
     try {
-      const response = await fetch(url, { headers: { accept: "application/json" } });
+      const response = await fetch(url, {
+        headers: { accept: "application/json" },
+      });
       if (response.status === 404) return null;
       // Returned, not awaited: a malformed body is the caller's problem to see,
       // not something to retry as though the request had failed.
@@ -58,18 +60,25 @@ async function fetchJson(url) {
 /// `page` is the scenario's page name from the URL; the problem it returns
 /// carries the id everything else keys on.
 export async function loadProblem(page) {
-  const named = page ? await fetchJson(`/problems/${encodeURIComponent(page)}.json`) : null;
+  const named = page
+    ? await fetchJson(`/problems/${encodeURIComponent(page)}.json`)
+    : null;
   if (named) return named;
   const pages = (await loadPageMap()) ?? {};
   if (page && Object.hasOwn(pages, page)) {
-    const aliased = await fetchJson(`/problems/${encodeURIComponent(pages[page].page)}.json`);
+    const aliased = await fetchJson(
+      `/problems/${encodeURIComponent(pages[page].page)}.json`,
+    );
     if (aliased) return aliased;
   }
   // The default is marked in the map, not named here: this module is served on
   // every load, and naming it here would carry a published id with it.
   const fallback = Object.values(pages).find((entry) => entry.default)?.page;
-  const served = fallback && (await fetchJson(`/problems/${encodeURIComponent(fallback)}.json`));
-  if (!served) throw new Error("the problem bank is missing its default problem");
+  const served =
+    fallback &&
+    (await fetchJson(`/problems/${encodeURIComponent(fallback)}.json`));
+  if (!served)
+    throw new Error("the problem bank is missing its default problem");
   // Said, not silent: a link naming an exercise the bank does not have used to
   // open a different one as though that were what it asked for.
   return page ? { ...served, requestedPage: page } : served;
@@ -103,10 +112,13 @@ export function loadPageMap() {
 export function loadJudge(id) {
   if (!id) return Promise.resolve(null);
   if (!judges.has(id)) {
-    judges.set(id, fetchJson(`/judges/${encodeURIComponent(id)}.json`).catch((error) => {
-      judges.delete(id);
-      throw error;
-    }));
+    judges.set(
+      id,
+      fetchJson(`/judges/${encodeURIComponent(id)}.json`).catch((error) => {
+        judges.delete(id);
+        throw error;
+      }),
+    );
   }
   return judges.get(id);
 }

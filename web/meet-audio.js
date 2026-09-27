@@ -12,7 +12,8 @@
 export const OUTPUT_NOTES = {
   unsupported:
     "This browser cannot choose an output device. Use the system default, or switch to Chrome.",
-  listFailed: "Output devices could not be listed. The system default is in use.",
+  listFailed:
+    "Output devices could not be listed. The system default is in use.",
   empty:
     "No output devices yet. Finish the media preflight; this list fills in once the browser grants access.",
   refused: "That output device was refused. Jim stays on the previous device.",

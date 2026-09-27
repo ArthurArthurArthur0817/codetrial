@@ -20,7 +20,11 @@ const RETRY_MS = 2000;
 // `audio: true` today, which is exactly why asking for it costs nothing and
 // stops a future default from moving under us.
 const CONSTRAINTS = {
-  audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+  audio: {
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true,
+  },
   video: true,
 };
 
@@ -55,7 +59,8 @@ export function createDevicePool({
   // `stream` stays the single owner of the tracks, because it is what the
   // candidate joins the room with. The records describe the request, not the
   // result, so nothing can disagree with the stream about what is live.
-  const trackOf = (kind) => stream?.getTracks().find((each) => each.kind === kind) ?? null;
+  const trackOf = (kind) =>
+    stream?.getTracks().find((each) => each.kind === kind) ?? null;
 
   // One timer for both devices, not one each. Each device used to schedule its
   // own retry and both called back here, so denying both prompts doubled the
@@ -72,7 +77,9 @@ export function createDevicePool({
   // candidate joins with is already handed over, so a late one would only turn
   // a device back on behind their back. Anything unclaimed is stopped.
   const claimTrack = (granted, kind) => {
-    const track = isFinished() ? null : granted.getTracks().find((each) => each.kind === kind);
+    const track = isFinished()
+      ? null
+      : granted.getTracks().find((each) => each.kind === kind);
     for (const spare of granted.getTracks()) if (spare !== track) spare.stop();
     return track;
   };
@@ -96,37 +103,44 @@ export function createDevicePool({
 
     if (device.disabled || device.pending || trackOf(device.kind)) return;
     device.pending = true;
-    void mediaDevices.getUserMedia(device.constraints).then((granted) => {
-      if (device.disabled) {
-        granted.getTracks().forEach((track) => track.stop());
-        return;
-      }
-      const track = claimTrack(granted, device.kind);
-      if (!device.accept(track)) {
-        track?.stop();
-        device.error = `no active ${device.kind} track`;
+    void mediaDevices
+      .getUserMedia(device.constraints)
+      .then((granted) => {
+        if (device.disabled) {
+          granted.getTracks().forEach((track) => track.stop());
+          return;
+        }
+        const track = claimTrack(granted, device.kind);
+        if (!device.accept(track)) {
+          track?.stop();
+          device.error = `no active ${device.kind} track`;
+          retry();
+          return;
+        }
+        device.error = null;
+        stream.addTrack(track);
+        device.onTrack();
+      })
+      .catch((error) => {
+        // Some browsers leave a DOMException's message empty and name the
+        // failure instead. Keep both: the preflight words are the candidate's
+        // only explanation, and the optional-camera path distinguishes denied
+        // permission from no device.
+        device.error =
+          [error?.name, error?.message].filter(Boolean).join(": ") ||
+          String(error);
         retry();
-        return;
-      }
-      device.error = null;
-      stream.addTrack(track);
-      device.onTrack();
-    }).catch((error) => {
-      // Some browsers leave a DOMException's message empty and name the
-      // failure instead. Keep both: the preflight words are the candidate's
-      // only explanation, and the optional-camera path distinguishes denied
-      // permission from no device.
-      device.error = [error?.name, error?.message].filter(Boolean).join(": ") || String(error);
-      retry();
-    }).finally(() => {
-      device.pending = false;
-      onChange();
-    });
+      })
+      .finally(() => {
+        device.pending = false;
+        onChange();
+      });
   };
 
   const start = () => {
     if (!supported) {
-      for (const device of Object.values(devices)) device.error = "getUserMedia is not supported";
+      for (const device of Object.values(devices))
+        device.error = "getUserMedia is not supported";
       onChange();
       return;
     }

@@ -49,7 +49,9 @@ export function readReviewHistory(storage) {
     const { retained, json } = boundedReviews(readLocalHistory(storage));
     try {
       storage.setItem(reviewHistoryKey, json);
-    } catch { /* the readable history still belongs on screen */ }
+    } catch {
+      /* the readable history still belongs on screen */
+    }
     return retained;
   } catch {
     return [];
@@ -76,7 +78,9 @@ export function readDeviceHistory(storage) {
     const reviews = readReviewHistory(storage);
     // Mutates both arrays, and writes both stores when it has anything to say.
     migrateLegacyIds(history, reviews, storage);
-    const shown = new Set(history.map((entry) => entry?.id).filter((id) => id != null));
+    const shown = new Set(
+      history.map((entry) => entry?.id).filter((id) => id != null),
+    );
     // `shown` never holds a nullish id, so a row without one is kept by the miss.
     return [...history, ...reviews.filter((entry) => !shown.has(entry?.id))];
   } catch {
@@ -106,7 +110,9 @@ function migrateLegacyIds(history, reviews, storage) {
   for (const review of reviews) {
     if (!pairable(review)) continue;
     const key = legacyKey(review);
-    const match = candidates.find((candidate) => !candidate.used && candidate.key === key);
+    const match = candidates.find(
+      (candidate) => !candidate.used && candidate.key === key,
+    );
     const id = match?.entry.id ?? review.id ?? assignedId();
     if (match) {
       match.used = true;
@@ -119,16 +125,22 @@ function migrateLegacyIds(history, reviews, storage) {
   if (historyChanged) {
     try {
       storage.setItem(historyKey, JSON.stringify(history));
-    } catch { /* the ids still apply to this read */ }
+    } catch {
+      /* the ids still apply to this read */
+    }
   }
   if (reviewsChanged) {
     try {
       const serialized = JSON.stringify(reviews);
-      if (reviews.length <= REVIEW_HISTORY_CAP
-        && new TextEncoder().encode(serialized).length <= REVIEW_HISTORY_BYTES) {
+      if (
+        reviews.length <= REVIEW_HISTORY_CAP &&
+        new TextEncoder().encode(serialized).length <= REVIEW_HISTORY_BYTES
+      ) {
         storage.setItem(reviewHistoryKey, serialized);
       }
-    } catch { /* the ids still apply to this read */ }
+    } catch {
+      /* the ids still apply to this read */
+    }
   }
 }
 
@@ -163,7 +175,8 @@ function legacyKey(entry) {
   // instead of silently becoming the object's prototype and vanishing from it.
   const stable = Object.create(null);
   for (const field of Object.keys(entry)) {
-    if (field === "id" || field === "problemId" || field === "pageMapChecked") continue;
+    if (field === "id" || field === "problemId" || field === "pageMapChecked")
+      continue;
     stable[field] = entry[field];
   }
   return JSON.stringify(stable);
@@ -182,8 +195,13 @@ function legacyKey(entry) {
 export function renameLocalHistory(pages, storage, markUnmapped = false) {
   try {
     storage ||= localStorage;
-    const history = renamedEntries(readLocalHistory(storage), pages, markUnmapped);
-    if (history.renamed) storage.setItem(historyKey, JSON.stringify(history.next));
+    const history = renamedEntries(
+      readLocalHistory(storage),
+      pages,
+      markUnmapped,
+    );
+    if (history.renamed)
+      storage.setItem(historyKey, JSON.stringify(history.next));
     const stored = storedList(reviewHistoryKey, storage);
     if (stored) {
       const reviews = renamedEntries(stored, pages, markUnmapped);
@@ -206,7 +224,12 @@ function renamedEntries(entries, pages, markUnmapped) {
   const next = entries.map((entry) => {
     const id = entry?.problemId;
     if (typeof id !== "string" || !Object.hasOwn(pages, id)) {
-      if (!markUnmapped || typeof id !== "string" || entry?.pageMapChecked === true) return entry;
+      if (
+        !markUnmapped ||
+        typeof id !== "string" ||
+        entry?.pageMapChecked === true
+      )
+        return entry;
       renamed = true;
       return { ...entry, pageMapChecked: true };
     }
@@ -216,7 +239,10 @@ function renamedEntries(entries, pages, markUnmapped) {
   return { next, renamed };
 }
 
-export async function saveReportHistory(entry, { fetcher = fetch, storage } = {}) {
+export async function saveReportHistory(
+  entry,
+  { fetcher = fetch, storage } = {},
+) {
   const local = saveLocalReport(entry, storage);
   const account = await saveAccountReport(entry, fetcher);
   return { local, account };
@@ -229,7 +255,11 @@ export async function saveReportHistory(entry, { fetcher = fetch, storage } = {}
 /// another tab leaves a copy this browser can no longer authenticate a delete
 /// for, and clearing the local half of that would report an erasure that only
 /// happened on this device.
-export async function clearReportHistory({ account = false, fetcher = fetch, storage } = {}) {
+export async function clearReportHistory({
+  account = false,
+  fetcher = fetch,
+  storage,
+} = {}) {
   try {
     const session = await sessionState(fetcher);
     if (session === "failed") return "failed";
@@ -266,7 +296,10 @@ export async function clearReportHistory({ account = false, fetcher = fetch, sto
 /// store held the id. A row `migrateLegacyIds` gave an id it could not write
 /// back is one: both stores still hold it without that id, so it is drawn
 /// again on the next read, and "deleted" reported a removal that never ran.
-export async function deleteReport(id, { account = false, fetcher = fetch, storage } = {}) {
+export async function deleteReport(
+  id,
+  { account = false, fetcher = fetch, storage } = {},
+) {
   if (typeof id !== "string" || id === "") return "failed";
   try {
     const session = await sessionState(fetcher);
@@ -295,7 +328,9 @@ export async function deleteReport(id, { account = false, fetcher = fetch, stora
         if (!stored) continue;
         // Compared as `normalizeProgressEntry` spells the id, which is where
         // the one the candidate clicked came from.
-        const kept = stored.filter((entry) => entry?.id == null || String(entry.id) !== id);
+        const kept = stored.filter(
+          (entry) => entry?.id == null || String(entry.id) !== id,
+        );
         if (kept.length === stored.length) continue;
         storage.setItem(key, JSON.stringify(kept));
         removed = true;
@@ -317,7 +352,10 @@ function saveLocalReport(entry, storage) {
     // Reading it can rebuild it, and that write is the 164 KB one: spending the
     // remaining quota on it here refused the save of a report the device had
     // room for, and the candidate was told it was gone.
-    storage.setItem(historyKey, JSON.stringify([entry, ...previous].slice(0, 20)));
+    storage.setItem(
+      historyKey,
+      JSON.stringify([entry, ...previous].slice(0, 20)),
+    );
     // The short history is what the lobby draws this report from, so a review
     // store that refuses the write costs the reopen twenty attempts from now,
     // not this save. Reporting "Report was not saved" for it told the candidate
@@ -327,8 +365,13 @@ function saveLocalReport(entry, storage) {
     // an attempt whose own review write was refused goes back in the next time
     // one lands, instead of being lost the moment it rolls past the twenty.
     try {
-      storage.setItem(reviewHistoryKey, boundedReviews(readDeviceHistory(storage)).json);
-    } catch { /* the report is on this device either way */ }
+      storage.setItem(
+        reviewHistoryKey,
+        boundedReviews(readDeviceHistory(storage)).json,
+      );
+    } catch {
+      /* the report is on this device either way */
+    }
     return "saved";
   } catch {
     return "failed";
@@ -380,7 +423,9 @@ async function saveAccountReport(entry, fetcher) {
 
 async function sessionState(fetcher) {
   try {
-    const response = await fetcher("/api/session", { signal: AbortSignal.timeout(requestTimeoutMs) });
+    const response = await fetcher("/api/session", {
+      signal: AbortSignal.timeout(requestTimeoutMs),
+    });
     if (!response.ok) return "failed";
     const session = await response.json();
     if (session.signedIn === true) return "in";

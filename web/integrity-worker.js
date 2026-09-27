@@ -44,15 +44,17 @@ export function applyFrame(state, frame) {
 
   const frameCount = state.pendingFrames.get(source);
   state.pendingFrames.set(source, 0);
-  return [{
-    source,
-    at,
-    analyses,
-    frameCount,
-    transport: frame.transport || "metadata",
-    width: frame.width || 0,
-    height: frame.height || 0,
-  }];
+  return [
+    {
+      source,
+      at,
+      analyses,
+      frameCount,
+      transport: frame.transport || "metadata",
+      width: frame.width || 0,
+      height: frame.height || 0,
+    },
+  ];
 }
 
 export function analysisDetail(output) {
@@ -63,7 +65,8 @@ function closeFrame(frame) {
   frame?.close?.();
 }
 
-const inWorker = typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope;
+const inWorker =
+  typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope;
 
 if (inWorker) {
   const state = createAnalysisState();
@@ -85,9 +88,11 @@ if (inWorker) {
     if (typeof Worker === "function") return detectFaceInClassicWorker(frame);
     faceDetectorPromise ||= createFacePresenceDetector();
     return faceDetectorPromise
-      .then((detector) => detector.available && frame
-        ? detector.detect(frame)
-        : FACE_SAMPLE_UNAVAILABLE)
+      .then((detector) =>
+        detector.available && frame
+          ? detector.detect(frame)
+          : FACE_SAMPLE_UNAVAILABLE,
+      )
       .finally(() => closeFrame(frame));
   };
 
@@ -120,9 +125,15 @@ if (inWorker) {
       const done = faceRequests.get(result.id);
       if (!done) return;
       faceRequests.delete(result.id);
-      done(result.type === "result"
-        ? { available: true, count: result.count, confidence: result.confidence }
-        : { ...FACE_SAMPLE_UNAVAILABLE, reason: result.reason });
+      done(
+        result.type === "result"
+          ? {
+              available: true,
+              count: result.count,
+              confidence: result.confidence,
+            }
+          : { ...FACE_SAMPLE_UNAVAILABLE, reason: result.reason },
+      );
     };
     // Fires when the worker script itself fails to load or throws at top level,
     // which is exactly when no reply is ever coming.
@@ -161,10 +172,11 @@ if (inWorker) {
       // Skipping the frame beats queueing it: it would be stale by the time
       // anything looked at it, and the sample rate should follow the detector
       // rather than pile work up behind it.
-      const detectDue = message.source === "camera"
-        && message.frame
-        && !faceDetectionInFlight
-        && outputs.some((output) => output.analyses.includes("face_detect"));
+      const detectDue =
+        message.source === "camera" &&
+        message.frame &&
+        !faceDetectionInFlight &&
+        outputs.some((output) => output.analyses.includes("face_detect"));
       if (detectDue) {
         // A detector that throws rather than resolving is still a detector that
         // could not look. Without this the whole handler rejects: no
@@ -202,14 +214,20 @@ if (inWorker) {
           // newer one already has. A timestamp that moves backwards would give
           // the tracker negative durations and anomalies out of nothing, so the
           // stale result is dropped rather than applied.
-          const fresh = lastFaceSampleAt === null || message.at > lastFaceSampleAt;
+          const fresh =
+            lastFaceSampleAt === null || message.at > lastFaceSampleAt;
           if (fresh) {
-            if (lastFaceSampleAt !== null && message.at - lastFaceSampleAt > FACE_SAMPLE_GAP_MS) {
+            if (
+              lastFaceSampleAt !== null &&
+              message.at - lastFaceSampleAt > FACE_SAMPLE_GAP_MS
+            ) {
               faceTracker.reset();
             }
             lastFaceSampleAt = message.at;
           }
-          const faceEvent = fresh ? faceTracker.update(sample, message.at) : null;
+          const faceEvent = fresh
+            ? faceTracker.update(sample, message.at)
+            : null;
           if (faceEvent) {
             self.postMessage({
               type: "integrity-event",
@@ -224,16 +242,21 @@ if (inWorker) {
               // detector does not expose it. The vendored MediaPipe build keeps
               // the score under two minified names, and `faces=1;confidence=0.00`
               // in an integrity record reads as a detection nobody believed.
-              detail: faceEvent.sample.confidence > 0
-                ? `faces=${faceEvent.sample.count};confidence=${faceEvent.sample.confidence.toFixed(2)}`
-                : `faces=${faceEvent.sample.count}`,
+              detail:
+                faceEvent.sample.confidence > 0
+                  ? `faces=${faceEvent.sample.count};confidence=${faceEvent.sample.confidence.toFixed(2)}`
+                  : `faces=${faceEvent.sample.count}`,
             });
           }
         }
       }
       closeFrame(message.frame);
       for (const output of outputs) {
-        self.postMessage({ type: "analysis", ...output, detail: analysisDetail(output) });
+        self.postMessage({
+          type: "analysis",
+          ...output,
+          detail: analysisDetail(output),
+        });
       }
     })();
   });

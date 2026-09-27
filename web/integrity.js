@@ -22,9 +22,15 @@ import { TRACKING_INTERVAL_MS } from "./integrity-worker.js";
 // this module is for. The page imports it for the banner text.
 export const PRESENCE_EVENTS = {
   FACE_DETECTED: { clears: true },
-  FACE_MISSING: { banner: "Stay in front of the camera: no interviewee detected." },
-  MULTIPLE_FACES: { banner: "Take the interview alone: more than one face detected." },
-  FACE_DETECTOR_UNAVAILABLE: { banner: "Face detection is not running in this browser." },
+  FACE_MISSING: {
+    banner: "Stay in front of the camera: no interviewee detected.",
+  },
+  MULTIPLE_FACES: {
+    banner: "Take the interview alone: more than one face detected.",
+  },
+  FACE_DETECTOR_UNAVAILABLE: {
+    banner: "Face detection is not running in this browser.",
+  },
   FACE_MISSING_SEVERE: {
     banner: "Interview ended automatically: away from the camera too long.",
     endsInterview: true,
@@ -40,7 +46,8 @@ let publishIntegrityEvent = () => {};
 let endInterview = () => {};
 
 export function initIntegrity(deps) {
-  ({ state, nodes, updatePresenceBanner, publishIntegrityEvent, endInterview } = deps);
+  ({ state, nodes, updatePresenceBanner, publishIntegrityEvent, endInterview } =
+    deps);
 }
 
 const INTEGRITY_HEARTBEAT_MS = 5000;
@@ -48,8 +55,16 @@ const INTEGRITY_HEARTBEAT_MS = 5000;
 export function monitorIntegrityTracks() {
   // A released camera is simply not in the stream, so this watches nothing and
   // no CAMERA_STOPPED is invented out of our own teardown.
-  watchIntegrityTrack(state.localUserStream?.getVideoTracks?.()[0], "CAMERA_STOPPED", "camera");
-  watchIntegrityTrack(state.localUserStream?.getAudioTracks?.()[0], "MICROPHONE_STOPPED", "microphone");
+  watchIntegrityTrack(
+    state.localUserStream?.getVideoTracks?.()[0],
+    "CAMERA_STOPPED",
+    "camera",
+  );
+  watchIntegrityTrack(
+    state.localUserStream?.getAudioTracks?.()[0],
+    "MICROPHONE_STOPPED",
+    "microphone",
+  );
   startIntegrityTrackStateMonitor();
 }
 
@@ -59,10 +74,18 @@ export function watchIntegrityTrack(track, stoppedType, source) {
     void publishIntegrityEvent({ type: stoppedType, source, severity: "high" });
   });
   track.addEventListener("mute", () => {
-    void publishIntegrityEvent({ type: `${source.toUpperCase()}_MUTED`, source, severity: "warning" });
+    void publishIntegrityEvent({
+      type: `${source.toUpperCase()}_MUTED`,
+      source,
+      severity: "warning",
+    });
   });
   track.addEventListener("unmute", () => {
-    void publishIntegrityEvent({ type: `${source.toUpperCase()}_UNMUTED`, source, severity: "info" });
+    void publishIntegrityEvent({
+      type: `${source.toUpperCase()}_UNMUTED`,
+      source,
+      severity: "info",
+    });
   });
 }
 
@@ -81,7 +104,8 @@ export function startIntegrityHeartbeat() {
 export function integrityHeartbeatDetail() {
   const camera = state.localUserStream?.getVideoTracks?.()[0];
   const mic = state.localUserStream?.getAudioTracks?.()[0];
-  const status = (track) => `${track?.readyState || "missing"}/${track?.enabled === false ? "off" : "on"}/${track?.muted ? "muted" : "unmuted"}`;
+  const status = (track) =>
+    `${track?.readyState || "missing"}/${track?.enabled === false ? "off" : "on"}/${track?.muted ? "muted" : "unmuted"}`;
   return `camera=${status(camera)};microphone=${status(mic)};analyzer=${state.integrityAnalysisDetail}`;
 }
 
@@ -102,7 +126,10 @@ export function startIntegrityTrackStateMonitor() {
         void publishIntegrityEvent({
           type: `${source.toUpperCase()}_STATE_CHANGED`,
           source,
-          severity: current.includes("ended") || current.includes("/off") ? "warning" : "info",
+          severity:
+            current.includes("ended") || current.includes("/off")
+              ? "warning"
+              : "info",
           detail: current,
         });
       }
@@ -122,7 +149,8 @@ export function startIntegrityWorker() {
   const worker = new Worker("/integrity-worker.js", { type: "module" });
   state.integrityWorker = worker;
   worker.onmessage = (event) => {
-    if (event.data?.type === "analysis") state.integrityAnalysisDetail = event.data.detail;
+    if (event.data?.type === "analysis")
+      state.integrityAnalysisDetail = event.data.detail;
     if (event.data?.type === "integrity-event") {
       const eventType = event.data.eventType;
       updatePresenceBanner(eventType);
@@ -147,7 +175,12 @@ export function startIntegrityWorker() {
     state.integrityAnalysisDetail = "worker_error";
   };
   state.integrityFrameSamplers = [
-    startIntegrityFrameSampler("camera", state.localUserStream?.getVideoTracks?.()[0], nodes.cameraIntegrityVideo, TRACKING_INTERVAL_MS),
+    startIntegrityFrameSampler(
+      "camera",
+      state.localUserStream?.getVideoTracks?.()[0],
+      nodes.cameraIntegrityVideo,
+      TRACKING_INTERVAL_MS,
+    ),
   ].filter(Boolean);
 }
 
@@ -194,7 +227,8 @@ export async function postIntegrityFrame(source, track, video) {
   // camera analyses while nothing has been sampled for minutes -- an integrity
   // record claiming an observation that never happened.
   if (track.muted) state.integrityAnalysisDetail = `${source}_muted`;
-  if (track.readyState !== "live" || track.muted || !state.integrityWorker) return;
+  if (track.readyState !== "live" || track.muted || !state.integrityWorker)
+    return;
   const worker = state.integrityWorker;
   const message = {
     type: "frame",

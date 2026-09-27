@@ -52,23 +52,29 @@ export function compilerType(type, language) {
   if (list) {
     const item = compilerType(list[1], language);
     if (language === "c") return `${item}*`;
-    return language === "cpp" ? `vector<${item}>` : `List<${boxedJavaType(item)}>`;
+    return language === "cpp"
+      ? `vector<${item}>`
+      : `List<${boxedJavaType(item)}>`;
   }
-  const mapped = ({ c: C_TYPES, cpp: CPP_TYPES, java: JAVA_TYPES }[language] || {})[type];
+  const mapped = ({ c: C_TYPES, cpp: CPP_TYPES, java: JAVA_TYPES }[language] ||
+    {})[type];
   if (!mapped) throw new Error(`Unsupported ${language} type: ${type}`);
   return mapped;
 }
 
 export function nativeLiteral(value, type, language) {
-  if (type.endsWith("[]")) return arrayLiteral(value, type.slice(0, -2), language);
+  if (type.endsWith("[]"))
+    return arrayLiteral(value, type.slice(0, -2), language);
   const list = type.match(/^list<(.+)>$/);
   if (list) return listLiteral(value, list[1], language);
   if (type === "string") return JSON.stringify(value);
   if (type === "character") return charLiteral(value);
   if (type === "boolean") return value ? "true" : "false";
   if (type === "integer" || type === "double") return String(value);
-  if (type === "ListNode") return helperCall("listNode", value, "integer[]", language);
-  if (type === "Node") throw new Error("Node literals require argTypes preparation");
+  if (type === "ListNode")
+    return helperCall("listNode", value, "integer[]", language);
+  if (type === "Node")
+    throw new Error("Node literals require argTypes preparation");
   if (type === "ListNode[]") return arrayLiteral(value, "ListNode", language);
   if (type === "TreeNode") return treeNodeLiteral(value, language);
   throw new Error(`Unsupported literal type: ${type}`);
@@ -78,7 +84,13 @@ export function nativeLiteral(value, type, language) {
 /// the only thing that ever removes one from it is what the harness below can
 /// generate. Frozen because it is exported: a caller that filtered it in place
 /// would change what every later caller is offered.
-export const ALL_LANGUAGES = Object.freeze(["python", "javascript", "c", "cpp", "java"]);
+export const ALL_LANGUAGES = Object.freeze([
+  "python",
+  "javascript",
+  "c",
+  "cpp",
+  "java",
+]);
 
 /// The languages that compile through Compiler Explorer rather than running in
 /// a Worker.
@@ -92,12 +104,14 @@ export const COMPILED_LANGUAGES = Object.freeze(["c", "cpp", "java"]);
 // same value, so the literal below is only reached by tests that import this
 // module directly. Read on each call rather than at import, so the setting
 // cannot be frozen by whichever page happened to load this module first.
-export const compilerExplorerBaseUrl = () => globalThis.CODETRIAL_COMPILER_EXPLORER_BASE_URL ?? "https://godbolt.org";
+export const compilerExplorerBaseUrl = () =>
+  globalThis.CODETRIAL_COMPILER_EXPLORER_BASE_URL ?? "https://godbolt.org";
 /// The one reading of "compiled runs are on", for the tabs, the runner and
 /// the toolbar disclosure alike. The server writes both globals together, so
 /// they agree, but a reader that checked only one of them could not tell.
-export const compiledTestsEnabled = () => globalThis.CODETRIAL_COMPILER_EXPLORER_ENABLED !== false
-  && Boolean(compilerExplorerBaseUrl());
+export const compiledTestsEnabled = () =>
+  globalThis.CODETRIAL_COMPILER_EXPLORER_ENABLED !== false &&
+  Boolean(compilerExplorerBaseUrl());
 
 /// Why this judge cannot be run in this language, in a sentence a candidate can
 /// read, or null when it can. The tab row disables from it and shows it as the
@@ -128,17 +142,29 @@ export function languagesFor(spec) {
 }
 
 export function generateHarness(language, spec, candidateCode) {
-  if (!COMPILED_LANGUAGES.includes(language)) throw new Error(`Unsupported harness language: ${language}`);
-  if (spec.kind === "class" && language === "c") throw new Error("Only function judges are supported for C");
-  if (spec.kind === "class") return language === "cpp" ? cppClassHarness(spec, candidateCode) : javaClassHarness(spec, candidateCode);
-  if (spec.kind !== "function") throw new Error("Only function judges are supported");
+  if (!COMPILED_LANGUAGES.includes(language))
+    throw new Error(`Unsupported harness language: ${language}`);
+  if (spec.kind === "class" && language === "c")
+    throw new Error("Only function judges are supported for C");
+  if (spec.kind === "class")
+    return language === "cpp"
+      ? cppClassHarness(spec, candidateCode)
+      : javaClassHarness(spec, candidateCode);
+  if (spec.kind !== "function")
+    throw new Error("Only function judges are supported");
   if (language === "c") return cHarness(spec, candidateCode);
-  return language === "cpp" ? cppHarness(spec, candidateCode) : javaHarness(spec, candidateCode);
+  return language === "cpp"
+    ? cppHarness(spec, candidateCode)
+    : javaHarness(spec, candidateCode);
 }
 
 export function parseCompilerResults(stdout) {
   const text = compilerText(stdout);
-  for (let index = text.lastIndexOf("{"); index >= 0; index = text.lastIndexOf("{", index - 1)) {
+  for (
+    let index = text.lastIndexOf("{");
+    index >= 0;
+    index = text.lastIndexOf("{", index - 1)
+  ) {
     try {
       const parsed = JSON.parse(text.slice(index).trim());
       if (Array.isArray(parsed.results)) return parsed;
@@ -151,15 +177,30 @@ export function parseCompilerResults(stdout) {
 }
 
 export function mapCompilerResponse(response) {
-  if (!response) return { setupError: "Compiler Explorer did not return a response." };
-  if (response.timedOut) return { setupError: "Compiler Explorer timed out before the run completed.", diagnostic: DIAGNOSTIC.timeout };
+  if (!response)
+    return { setupError: "Compiler Explorer did not return a response." };
+  if (response.timedOut)
+    return {
+      setupError: "Compiler Explorer timed out before the run completed.",
+      diagnostic: DIAGNOSTIC.timeout,
+    };
   if (response.didExecute === false) {
-    const diagnostics = compilerText(response.buildResult?.stderr || response.stderr);
-    return { setupError: diagnostics || "Compilation failed before the tests could run.", diagnostic: DIAGNOSTIC.other };
+    const diagnostics = compilerText(
+      response.buildResult?.stderr || response.stderr,
+    );
+    return {
+      setupError:
+        diagnostics || "Compilation failed before the tests could run.",
+      diagnostic: DIAGNOSTIC.other,
+    };
   }
   if (response.code && response.code !== 0) {
     const diagnostics = compilerText(response.stderr);
-    return { setupError: diagnostics || `Compiler Explorer exited with status ${response.code}.`, diagnostic: DIAGNOSTIC.runtimeSignal };
+    return {
+      setupError:
+        diagnostics || `Compiler Explorer exited with status ${response.code}.`,
+      diagnostic: DIAGNOSTIC.runtimeSignal,
+    };
   }
   return parseCompilerResults(response.stdout);
 }
@@ -212,8 +253,10 @@ ${spec.cases.map((testCase, index) => cCase(spec, testCase, index)).join("\n")}
 }
 
 function cCase(spec, testCase, index) {
-  const declarations = spec.paramTypes.map((type, paramIndex) => cDeclaration(spec, testCase, type, paramIndex)).join("\n");
-  return `  ${index ? "printf(\",\");" : ""}
+  const declarations = spec.paramTypes
+    .map((type, paramIndex) => cDeclaration(spec, testCase, type, paramIndex))
+    .join("\n");
+  return `  ${index ? 'printf(",");' : ""}
   {
 ${declarations}
     int returnSize = 0;
@@ -243,10 +286,16 @@ function cCallArgs(spec) {
     const type = spec.paramTypes[index];
     args.push(name);
     if (cNeedsSize(type)) args.push(`${name}Size`);
-    if (type.endsWith("[][]") || /^list<list<.+>>$/.test(type)) args.push(`${name}ColSize`);
+    if (type.endsWith("[][]") || /^list<list<.+>>$/.test(type))
+      args.push(`${name}ColSize`);
   });
-  if (spec.returnType.endsWith("[]") || /^list<.+>$/.test(spec.returnType)) args.push("&returnSize");
-  if (spec.returnType.endsWith("[][]") || /^list<list<.+>>$/.test(spec.returnType)) args.push("&returnColumnSizes");
+  if (spec.returnType.endsWith("[]") || /^list<.+>$/.test(spec.returnType))
+    args.push("&returnSize");
+  if (
+    spec.returnType.endsWith("[][]") ||
+    /^list<list<.+>>$/.test(spec.returnType)
+  )
+    args.push("&returnColumnSizes");
   return args;
 }
 
@@ -255,12 +304,18 @@ function cReturnDeclaration(type) {
 }
 
 function cPrintActual(spec) {
-  const name = Number.isInteger(spec.outputParam) ? spec.paramNames[spec.outputParam] : "actual";
-  const type = Number.isInteger(spec.outputParam) ? spec.paramTypes[spec.outputParam] : spec.returnType;
-  if (Number.isInteger(spec.outputPrefixParam)) return `json_int_array(stdout, ${spec.paramNames[spec.outputPrefixParam]}, actualSize);`;
+  const name = Number.isInteger(spec.outputParam)
+    ? spec.paramNames[spec.outputParam]
+    : "actual";
+  const type = Number.isInteger(spec.outputParam)
+    ? spec.paramTypes[spec.outputParam]
+    : spec.returnType;
+  if (Number.isInteger(spec.outputPrefixParam))
+    return `json_int_array(stdout, ${spec.paramNames[spec.outputPrefixParam]}, actualSize);`;
   if (spec.outputType === "linkedList") return `json_list(stdout, ${name});`;
   if (spec.outputType === "binaryTree") return `json_tree(stdout, ${name});`;
-  if (spec.outputType === "randomList") return `json_random_list(stdout, ${name});`;
+  if (spec.outputType === "randomList")
+    return `json_random_list(stdout, ${name});`;
   if (spec.outputType === "graphNode") return `json_graph(stdout, ${name});`;
   if (spec.outputType === "nextTree") return `json_next_tree(stdout, ${name});`;
   if (spec.outputType === "quadTree") return `json_quad_tree(stdout, ${name});`;
@@ -268,12 +323,18 @@ function cPrintActual(spec) {
   if (type === "integer") return `printf("%d", ${name});`;
   if (type === "double") return `printf("%.17g", ${name});`;
   if (type === "string") return `json_string(stdout, ${name});`;
-  if (type === "integer[]") return `json_int_array(stdout, ${name}, ${Number.isInteger(spec.outputParam) ? `${name}Size` : "returnSize"});`;
-  if (type === "double[]") return `json_double_array(stdout, ${name}, ${Number.isInteger(spec.outputParam) ? `${name}Size` : "returnSize"});`;
-  if (type === "string[]" || type === "list<string>") return `json_string_array(stdout, ${name}, ${Number.isInteger(spec.outputParam) ? `${name}Size` : "returnSize"});`;
-  if (type === "integer[][]" || type === "list<list<integer>>") return `json_int_matrix(stdout, ${name}, ${Number.isInteger(spec.outputParam) ? `${name}Size` : "returnSize"}, ${Number.isInteger(spec.outputParam) ? `${name}ColSize` : "returnColumnSizes"});`;
-  if (type === "character[][]") return `json_char_matrix(stdout, ${name}, ${name}Size, ${name}ColSize);`;
-  if (type === "list<list<string>>") return `json_string_matrix(stdout, ${name}, returnSize, returnColumnSizes);`;
+  if (type === "integer[]")
+    return `json_int_array(stdout, ${name}, ${Number.isInteger(spec.outputParam) ? `${name}Size` : "returnSize"});`;
+  if (type === "double[]")
+    return `json_double_array(stdout, ${name}, ${Number.isInteger(spec.outputParam) ? `${name}Size` : "returnSize"});`;
+  if (type === "string[]" || type === "list<string>")
+    return `json_string_array(stdout, ${name}, ${Number.isInteger(spec.outputParam) ? `${name}Size` : "returnSize"});`;
+  if (type === "integer[][]" || type === "list<list<integer>>")
+    return `json_int_matrix(stdout, ${name}, ${Number.isInteger(spec.outputParam) ? `${name}Size` : "returnSize"}, ${Number.isInteger(spec.outputParam) ? `${name}ColSize` : "returnColumnSizes"});`;
+  if (type === "character[][]")
+    return `json_char_matrix(stdout, ${name}, ${name}Size, ${name}ColSize);`;
+  if (type === "list<list<string>>")
+    return `json_string_matrix(stdout, ${name}, returnSize, returnColumnSizes);`;
   if (type === "ListNode") return `json_list(stdout, ${name});`;
   if (type === "TreeNode") return `json_tree(stdout, ${name});`;
   return `printf("null");`;
@@ -355,7 +416,9 @@ ${spec.cases.map((testCase) => cppClassCase(spec, testCase)).join("\n")}
 }
 
 function cppCase(spec, testCase) {
-  const declarations = spec.paramTypes.map((type, paramIndex) => cppDeclaration(spec, testCase, type, paramIndex)).join("\n");
+  const declarations = spec.paramTypes
+    .map((type, paramIndex) => cppDeclaration(spec, testCase, type, paramIndex))
+    .join("\n");
   const callArgs = callParamNames(spec).join(", ");
   const output = cppActualExpression(spec);
   const call = Number.isInteger(spec.outputPrefixParam)
@@ -383,7 +446,16 @@ function cppClassCase(spec, testCase) {
     ${spec.className} instance{${cppClassArgs(argsList[0], spec.constructorArgTypes).join(", ")}};
     vector<string> actual;
     actual.push_back("null");
-${methods.slice(1).map((method, index) => cppClassMethodCall(method, argsList[index + 1], classReturnType(spec, testCase, method, index + 1))).join("\n")}
+${methods
+  .slice(1)
+  .map((method, index) =>
+    cppClassMethodCall(
+      method,
+      argsList[index + 1],
+      classReturnType(spec, testCase, method, index + 1),
+    ),
+  )
+  .join("\n")}
     auto elapsed = chrono::duration<double, milli>(chrono::steady_clock::now() - start).count();
     results.push_back("{\\"actual\\":" + jsonFragments(actual) + ",\\"timeMs\\":" + toJson(elapsed) + "}");
   } catch (const exception& error) {
@@ -403,16 +475,20 @@ function classReturnType(spec, testCase, method, index) {
   // scripts/problem_bank/rules.py emits. The fallback reads the expected value
   // instead, and is wrong for a candidate-authored case that has none, so it
   // stays only for a judge generated before the field existed.
-  if (spec.methodReturnTypes && typeof spec.methodReturnTypes === "object") return spec.methodReturnTypes[method] || "value";
+  if (spec.methodReturnTypes && typeof spec.methodReturnTypes === "object")
+    return spec.methodReturnTypes[method] || "value";
   return testCase.expected?.[index] === null ? "void" : "value";
 }
 
 function cppClassConstructorDeclarations(spec, args) {
   if (!spec.constructorArgTypes) return [];
-  return spec.constructorArgTypes.map((type, index) => {
-    if (type === "binaryTree") return `TreeNode* constructorArg${index} = ${treeNodeLiteral(args[index], "cpp")};`;
-    return "";
-  }).filter(Boolean);
+  return spec.constructorArgTypes
+    .map((type, index) => {
+      if (type === "binaryTree")
+        return `TreeNode* constructorArg${index} = ${treeNodeLiteral(args[index], "cpp")};`;
+      return "";
+    })
+    .filter(Boolean);
 }
 
 function cppClassArgs(args, argTypes) {
@@ -433,7 +509,8 @@ function cppClassLiteral(value) {
 }
 
 function cppActualExpression(spec) {
-  if (Number.isInteger(spec.outputParam)) return spec.paramNames[spec.outputParam];
+  if (Number.isInteger(spec.outputParam))
+    return spec.paramNames[spec.outputParam];
   return "actual";
 }
 
@@ -458,7 +535,10 @@ function cppPrefixGuard(spec, lengthName) {
 /// is never read by a candidate, so the plainer form costs nothing and keeps
 /// the test runnable wherever a JDK exists.
 function javaHarness(spec, candidateCode) {
-  candidateCode = candidateCode.replace(/\bpublic\s+class\s+Solution\b/g, "class Solution");
+  candidateCode = candidateCode.replace(
+    /\bpublic\s+class\s+Solution\b/g,
+    "class Solution",
+  );
   return `import java.util.*;
 class ListNode { int val; ListNode next; ListNode() { this(0, null); } ListNode(int val) { this(val, null); } ListNode(int val, ListNode next) { this.val = val; this.next = next; } }
 class TreeNode { int val; TreeNode left; TreeNode right; TreeNode() { this(0, null, null); } TreeNode(int val) { this(val, null, null); } TreeNode(int val, TreeNode left, TreeNode right) { this.val = val; this.left = left; this.right = right; } }
@@ -501,7 +581,10 @@ ${spec.cases.map((testCase) => javaCase(spec, testCase)).join("\n")}
 }
 
 function javaClassHarness(spec, candidateCode) {
-  candidateCode = candidateCode.replace(new RegExp(`\\bpublic\\s+class\\s+${spec.className}\\b`, "g"), `class ${spec.className}`);
+  candidateCode = candidateCode.replace(
+    new RegExp(`\\bpublic\\s+class\\s+${spec.className}\\b`, "g"),
+    `class ${spec.className}`,
+  );
   return `import java.util.*;
 class ListNode { int val; ListNode next; ListNode() { this(0, null); } ListNode(int val) { this(val, null); } ListNode(int val, ListNode next) { this.val = val; this.next = next; } }
 class TreeNode { int val; TreeNode left; TreeNode right; TreeNode() { this(0, null, null); } TreeNode(int val) { this(val, null, null); } TreeNode(int val, TreeNode left, TreeNode right) { this.val = val; this.left = left; this.right = right; } }
@@ -522,7 +605,11 @@ ${spec.cases.map((testCase) => javaClassCase(spec, testCase)).join("\n")}
 }
 
 function javaCase(spec, testCase) {
-  const declarations = spec.paramTypes.map((type, paramIndex) => javaDeclaration(spec, testCase, type, paramIndex)).join("\n");
+  const declarations = spec.paramTypes
+    .map((type, paramIndex) =>
+      javaDeclaration(spec, testCase, type, paramIndex),
+    )
+    .join("\n");
   const callArgs = callParamNames(spec).join(", ");
   const call = Number.isInteger(spec.outputPrefixParam)
     ? `int outputSize = solution.${spec.entry}(${callArgs});\n      ${javaPrefixGuard(spec, "outputSize")}\n      Object actual = ${javaPrefixExpression(spec, "outputSize")};`
@@ -548,7 +635,16 @@ function javaClassCase(spec, testCase) {
       ${spec.className} instance = new ${spec.className}(${javaClassArgs(argsList[0], spec.constructorArgTypes).join(", ")});
       ArrayList<String> actual = new ArrayList<>();
       actual.add("null");
-${methods.slice(1).map((method, index) => javaClassMethodCall(method, argsList[index + 1], classReturnType(spec, testCase, method, index + 1))).join("\n")}
+${methods
+  .slice(1)
+  .map((method, index) =>
+    javaClassMethodCall(
+      method,
+      argsList[index + 1],
+      classReturnType(spec, testCase, method, index + 1),
+    ),
+  )
+  .join("\n")}
       double elapsed = (System.nanoTime() - start) / 1000000.0;
       results.add("{\\"actual\\":[" + String.join(",", actual) + "],\\"timeMs\\":" + json(elapsed) + "}");
     } catch (Throwable error) {
@@ -565,14 +661,16 @@ function javaClassMethodCall(method, args, returnType) {
 
 function javaClassArgs(args, argTypes) {
   return (args || []).map((value, index) => {
-    if (argTypes?.[index] === "binaryTree") return treeNodeLiteral(value, "java");
+    if (argTypes?.[index] === "binaryTree")
+      return treeNodeLiteral(value, "java");
     return javaClassLiteral(value);
   });
 }
 
 function javaClassLiteral(value) {
   if (typeof value === "string") return nativeLiteral(value, "string", "java");
-  if (typeof value === "boolean") return nativeLiteral(value, "boolean", "java");
+  if (typeof value === "boolean")
+    return nativeLiteral(value, "boolean", "java");
   if (Number.isInteger(value)) return nativeLiteral(value, "integer", "java");
   if (typeof value === "number") return nativeLiteral(value, "double", "java");
   if (Array.isArray(value)) return nativeLiteral(value, "integer[]", "java");
@@ -581,7 +679,8 @@ function javaClassLiteral(value) {
 }
 
 function javaActualExpression(spec) {
-  if (Number.isInteger(spec.outputParam)) return spec.paramNames[spec.outputParam];
+  if (Number.isInteger(spec.outputParam))
+    return spec.paramNames[spec.outputParam];
   return "actual";
 }
 
@@ -599,7 +698,8 @@ function javaPrefixGuard(spec, lengthName) {
 }
 
 function cppJsonExpression(spec, actualName) {
-  if (spec.outputType === "randomList") return `randomListToJson(${actualName})`;
+  if (spec.outputType === "randomList")
+    return `randomListToJson(${actualName})`;
   if (spec.outputType === "graphNode") return `graphToJson(${actualName})`;
   if (spec.outputType === "nextTree") return `nextTreeToJson(${actualName})`;
   if (spec.outputType === "quadTree") return `quadTreeToJson(${actualName})`;
@@ -607,10 +707,13 @@ function cppJsonExpression(spec, actualName) {
 }
 
 function javaJsonExpression(spec, actualName) {
-  if (spec.outputType === "randomList") return `randomListJson((Node) ${actualName})`;
+  if (spec.outputType === "randomList")
+    return `randomListJson((Node) ${actualName})`;
   if (spec.outputType === "graphNode") return `graphJson((Node) ${actualName})`;
-  if (spec.outputType === "nextTree") return `nextTreeJson((Node) ${actualName})`;
-  if (spec.outputType === "quadTree") return `quadTreeJson((Node) ${actualName})`;
+  if (spec.outputType === "nextTree")
+    return `nextTreeJson((Node) ${actualName})`;
+  if (spec.outputType === "quadTree")
+    return `quadTreeJson((Node) ${actualName})`;
   return `jsonAny(${actualName})`;
 }
 
@@ -618,15 +721,22 @@ function cppDeclaration(spec, testCase, type, index) {
   const name = spec.paramNames[index];
   const argType = spec.argTypes?.[index];
   const value = testCase.input[index];
-  if (argType === "cyclePos") return `    int ${name} = ${nativeLiteral(value, "integer", "cpp")};`;
+  if (argType === "cyclePos")
+    return `    int ${name} = ${nativeLiteral(value, "integer", "cpp")};`;
   if (argType === "linkedList") {
-    const pos = Number.isInteger(spec.cyclePosParam) ? nativeLiteral(testCase.input[spec.cyclePosParam], "integer", "cpp") : "-1";
+    const pos = Number.isInteger(spec.cyclePosParam)
+      ? nativeLiteral(testCase.input[spec.cyclePosParam], "integer", "cpp")
+      : "-1";
     return `    ListNode* ${name} = listNode(${nativeLiteral(value, "integer[]", "cpp")}, ${pos});`;
   }
-  if (argType === "randomList") return `    Node* ${name} = randomList(${randomListLiteral(value, "cpp")});`;
-  if (argType === "graphNode") return `    Node* ${name} = graphNode(${nativeLiteral(value, "integer[][]", "cpp")});`;
-  if (argType === "binaryTree") return `    TreeNode* ${name} = ${treeNodeLiteral(value, "cpp")};`;
-  if (argType === "nextTree") return `    Node* ${name} = nextTree(vector<optional<int>>{${(value || []).map((item) => item === null ? "nullopt" : String(item)).join(", ")}});`;
+  if (argType === "randomList")
+    return `    Node* ${name} = randomList(${randomListLiteral(value, "cpp")});`;
+  if (argType === "graphNode")
+    return `    Node* ${name} = graphNode(${nativeLiteral(value, "integer[][]", "cpp")});`;
+  if (argType === "binaryTree")
+    return `    TreeNode* ${name} = ${treeNodeLiteral(value, "cpp")};`;
+  if (argType === "nextTree")
+    return `    Node* ${name} = nextTree(vector<optional<int>>{${(value || []).map((item) => (item === null ? "nullopt" : String(item))).join(", ")}});`;
   if (argType === "treeNodeValue") {
     const root = spec.paramNames[spec.nodeRefRootParam ?? 0];
     return `    TreeNode* ${name} = findTreeNode(${root}, ${nativeLiteral(value, "integer", "cpp")});`;
@@ -638,15 +748,22 @@ function javaDeclaration(spec, testCase, type, index) {
   const name = spec.paramNames[index];
   const argType = spec.argTypes?.[index];
   const value = testCase.input[index];
-  if (argType === "cyclePos") return `      int ${name} = ${nativeLiteral(value, "integer", "java")};`;
+  if (argType === "cyclePos")
+    return `      int ${name} = ${nativeLiteral(value, "integer", "java")};`;
   if (argType === "linkedList") {
-    const pos = Number.isInteger(spec.cyclePosParam) ? nativeLiteral(testCase.input[spec.cyclePosParam], "integer", "java") : "-1";
+    const pos = Number.isInteger(spec.cyclePosParam)
+      ? nativeLiteral(testCase.input[spec.cyclePosParam], "integer", "java")
+      : "-1";
     return `      ListNode ${name} = listNode(${nativeLiteral(value, "integer[]", "java")}, ${pos});`;
   }
-  if (argType === "randomList") return `      Node ${name} = randomList(${randomListLiteral(value, "java")});`;
-  if (argType === "graphNode") return `      Node ${name} = graphNode(${nativeLiteral(value, "integer[][]", "java")});`;
-  if (argType === "binaryTree") return `      TreeNode ${name} = ${treeNodeLiteral(value, "java")};`;
-  if (argType === "nextTree") return `      Node ${name} = nextTree(new Integer[]{${(value || []).map((item) => item === null ? "null" : String(item)).join(", ")}});`;
+  if (argType === "randomList")
+    return `      Node ${name} = randomList(${randomListLiteral(value, "java")});`;
+  if (argType === "graphNode")
+    return `      Node ${name} = graphNode(${nativeLiteral(value, "integer[][]", "java")});`;
+  if (argType === "binaryTree")
+    return `      TreeNode ${name} = ${treeNodeLiteral(value, "java")};`;
+  if (argType === "nextTree")
+    return `      Node ${name} = nextTree(new Integer[]{${(value || []).map((item) => (item === null ? "null" : String(item))).join(", ")}});`;
   if (argType === "treeNodeValue") {
     const root = spec.paramNames[spec.nodeRefRootParam ?? 0];
     return `      TreeNode ${name} = findTreeNode(${root}, ${nativeLiteral(value, "integer", "java")});`;
@@ -658,36 +775,50 @@ function cDeclaration(spec, testCase, type, index) {
   const name = spec.paramNames[index];
   const argType = spec.argTypes?.[index];
   const value = testCase.input[index];
-  if (argType === "cyclePos") return `    int ${name} = ${nativeLiteral(value, "integer", "c")};`;
+  if (argType === "cyclePos")
+    return `    int ${name} = ${nativeLiteral(value, "integer", "c")};`;
   if (argType === "linkedList") {
     const array = cArrayDeclaration(`${name}Values`, value, "integer");
-    const pos = Number.isInteger(spec.cyclePosParam) ? nativeLiteral(testCase.input[spec.cyclePosParam], "integer", "c") : "-1";
+    const pos = Number.isInteger(spec.cyclePosParam)
+      ? nativeLiteral(testCase.input[spec.cyclePosParam], "integer", "c")
+      : "-1";
     return `${array}\n    struct ListNode* ${name} = listNodeCycle(${name}Values, ${name}ValuesSize, ${pos});\n    int ${name}Size = ${name}ValuesSize;`;
   }
-  if (argType === "linkedListArray") return cLinkedListArrayDeclaration(name, value);
-  if (argType === "binaryTree") return cTreeDeclaration(name, value, "treeNode");
-  if (argType === "nextTree") return cTreeDeclaration(name, value, "nextTree", "struct Node*");
+  if (argType === "linkedListArray")
+    return cLinkedListArrayDeclaration(name, value);
+  if (argType === "binaryTree")
+    return cTreeDeclaration(name, value, "treeNode");
+  if (argType === "nextTree")
+    return cTreeDeclaration(name, value, "nextTree", "struct Node*");
   if (argType === "treeNodeValue") {
     const root = spec.paramNames[spec.nodeRefRootParam ?? 0];
     return `    struct TreeNode* ${name} = findTreeNode(${root}, ${nativeLiteral(value, "integer", "c")});`;
   }
   if (argType === "randomList") return cRandomListDeclaration(name, value);
-  if (argType === "graphNode") return `${cMatrixDeclaration(`${name}Adjacency`, value, "integer")}\n    struct Node* ${name} = graphNode(${name}Adjacency, ${name}AdjacencySize, ${name}AdjacencyColSize);`;
-  if (type.endsWith("[][]") || /^list<list<.+>>$/.test(type)) return cMatrixDeclaration(name, value, nestedItemType(type));
-  if (type.endsWith("[]") || /^list<.+>$/.test(type)) return cArrayDeclaration(name, value, nestedItemType(type));
+  if (argType === "graphNode")
+    return `${cMatrixDeclaration(`${name}Adjacency`, value, "integer")}\n    struct Node* ${name} = graphNode(${name}Adjacency, ${name}AdjacencySize, ${name}AdjacencyColSize);`;
+  if (type.endsWith("[][]") || /^list<list<.+>>$/.test(type))
+    return cMatrixDeclaration(name, value, nestedItemType(type));
+  if (type.endsWith("[]") || /^list<.+>$/.test(type))
+    return cArrayDeclaration(name, value, nestedItemType(type));
   return `    ${compilerType(type, "c")} ${name} = ${nativeLiteral(value, type, "c")};`;
 }
 
 function callParamNames(spec) {
-  return spec.paramNames.filter((_, index) => spec.argTypes?.[index] !== "cyclePos");
+  return spec.paramNames.filter(
+    (_, index) => spec.argTypes?.[index] !== "cyclePos",
+  );
 }
 
 function arrayLiteral(value, itemType, language) {
   const values = value || [];
-  if (language === "c") return `{${values.map((item) => nativeLiteral(item, itemType, language)).join(", ")}}`;
+  if (language === "c")
+    return `{${values.map((item) => nativeLiteral(item, itemType, language)).join(", ")}}`;
   if (language === "cpp") {
-    if (itemType === "TreeNode") return `{${values.map((item) => nativeLiteral(item, itemType, language)).join(", ")}}`;
-    if (itemType === "integer" && values.some((item) => item === null)) return `{${values.map((item) => item === null ? "nullopt" : String(item)).join(", ")}}`;
+    if (itemType === "TreeNode")
+      return `{${values.map((item) => nativeLiteral(item, itemType, language)).join(", ")}}`;
+    if (itemType === "integer" && values.some((item) => item === null))
+      return `{${values.map((item) => (item === null ? "nullopt" : String(item))).join(", ")}}`;
     return `{${values.map((item) => nativeLiteral(item, itemType, language)).join(", ")}}`;
   }
   const type = compilerType(`${itemType}[]`, language);
@@ -695,16 +826,19 @@ function arrayLiteral(value, itemType, language) {
 }
 
 function javaArrayBody(values, itemType) {
-  return `{${(values || []).map((item) => {
-    if (itemType === "integer" && item === null) return "null";
-    return nativeLiteral(item, itemType, "java");
-  }).join(", ")}}`;
+  return `{${(values || [])
+    .map((item) => {
+      if (itemType === "integer" && item === null) return "null";
+      return nativeLiteral(item, itemType, "java");
+    })
+    .join(", ")}}`;
 }
 
 function listLiteral(value, itemType, language) {
   const values = value || [];
   if (language === "c") return arrayLiteral(values, itemType, language);
-  if (language === "cpp") return `{${values.map((item) => nativeLiteral(item, itemType, language)).join(", ")}}`;
+  if (language === "cpp")
+    return `{${values.map((item) => nativeLiteral(item, itemType, language)).join(", ")}}`;
   return `Arrays.asList(${values.map((item) => nativeLiteral(item, itemType, language)).join(", ")})`;
 }
 
@@ -725,9 +859,9 @@ function treeNodeLiteral(value, language) {
   if (value === null) return "null";
   const values = value || [];
   if (language === "cpp") {
-    return `treeNode(vector<optional<int>>{${values.map((item) => item === null ? "nullopt" : String(item)).join(", ")}})`;
+    return `treeNode(vector<optional<int>>{${values.map((item) => (item === null ? "nullopt" : String(item))).join(", ")}})`;
   }
-  return `treeNode(new Integer[]{${values.map((item) => item === null ? "null" : String(item)).join(", ")}})`;
+  return `treeNode(new Integer[]{${values.map((item) => (item === null ? "null" : String(item))).join(", ")}})`;
 }
 
 function charLiteral(value) {
@@ -735,7 +869,9 @@ function charLiteral(value) {
 }
 
 function cNeedsSize(type) {
-  return type.endsWith("[]") || type.endsWith("[][]") || /^list<.+>$/.test(type);
+  return (
+    type.endsWith("[]") || type.endsWith("[][]") || /^list<.+>$/.test(type)
+  );
 }
 
 function cArrayDeclaration(name, value, itemType) {
@@ -747,10 +883,14 @@ function cArrayDeclaration(name, value, itemType) {
 
 function cMatrixDeclaration(name, value, itemType) {
   const rows = value || [];
-  const rowDecls = rows.map((row, index) => cArrayDeclaration(`${name}Row${index}`, row, itemType)).join("\n");
+  const rowDecls = rows
+    .map((row, index) => cArrayDeclaration(`${name}Row${index}`, row, itemType))
+    .join("\n");
   const rowNames = rows.map((_, index) => `${name}Row${index}`);
   const rowPointers = rowNames.length ? `{${rowNames.join(", ")}}` : "{NULL}";
-  const colSizes = rows.length ? `{${rows.map((row) => (row || []).length).join(", ")}}` : "{0}";
+  const colSizes = rows.length
+    ? `{${rows.map((row) => (row || []).length).join(", ")}}`
+    : "{0}";
   const pointerType = compilerType(`${itemType}[]`, "c");
   return `${rowDecls}
     ${pointerType} ${name}[] = ${rowPointers};
@@ -760,10 +900,16 @@ function cMatrixDeclaration(name, value, itemType) {
 
 function cLinkedListArrayDeclaration(name, value) {
   const lists = value || [];
-  const declarations = lists.map((items, index) => {
-    const array = cArrayDeclaration(`${name}Values${index}`, items, "integer");
-    return `${array}\n    struct ListNode* ${name}Node${index} = listNode(${name}Values${index}, ${name}Values${index}Size);`;
-  }).join("\n");
+  const declarations = lists
+    .map((items, index) => {
+      const array = cArrayDeclaration(
+        `${name}Values${index}`,
+        items,
+        "integer",
+      );
+      return `${array}\n    struct ListNode* ${name}Node${index} = listNode(${name}Values${index}, ${name}Values${index}Size);`;
+    })
+    .join("\n");
   const nodeNames = lists.map((_, index) => `${name}Node${index}`);
   const pointers = nodeNames.length ? `{${nodeNames.join(", ")}}` : "{NULL}";
   return `${declarations}${declarations ? "\n" : ""}    struct ListNode* ${name}[] = ${pointers};\n    int ${name}Size = ${lists.length};`;
@@ -771,8 +917,8 @@ function cLinkedListArrayDeclaration(name, value) {
 
 function cTreeDeclaration(name, value, helper, type = "struct TreeNode*") {
   const values = value || [];
-  const encoded = values.map((item) => item === null ? 0 : item);
-  const nulls = values.map((item) => item === null ? "true" : "false");
+  const encoded = values.map((item) => (item === null ? 0 : item));
+  const nulls = values.map((item) => (item === null ? "true" : "false"));
   return `    int ${name}Values[] = ${encoded.length ? `{${encoded.join(", ")}}` : "{0}"};
     bool ${name}Nulls[] = ${nulls.length ? `{${nulls.join(", ")}}` : "{true}"};
     int ${name}Size = ${values.length};
@@ -780,7 +926,9 @@ function cTreeDeclaration(name, value, helper, type = "struct TreeNode*") {
 }
 
 function cRandomListDeclaration(name, value) {
-  const rows = (value || []).map(([item, random]) => `{${item}, ${random ?? -1}}`);
+  const rows = (value || []).map(
+    ([item, random]) => `{${item}, ${random ?? -1}}`,
+  );
   return `    int ${name}Values[][2] = ${rows.length ? `{${rows.join(", ")}}` : "{{0, -1}}"};
     int ${name}Size = ${(value || []).length};
     struct Node* ${name} = randomList(${name}Values, ${name}Size);`;
@@ -794,10 +942,15 @@ function nestedItemType(type) {
 }
 
 function boxedJavaType(type) {
-  return { int: "Integer", double: "Double", boolean: "Boolean", char: "Character" }[type] || type;
+  return (
+    { int: "Integer", double: "Double", boolean: "Boolean", char: "Character" }[
+      type
+    ] || type
+  );
 }
 
 function compilerText(value) {
-  if (Array.isArray(value)) return stripAnsi(value.map((item) => item.text ?? item).join(""));
+  if (Array.isArray(value))
+    return stripAnsi(value.map((item) => item.text ?? item).join(""));
   return stripAnsi(value);
 }

@@ -34,7 +34,9 @@ function livekitHttpBase(url = process.env.LIVEKIT_URL) {
   // deliberately unset, and "Cannot read properties of undefined" names
   // neither the variable nor the lane that forgot it.
   if (!String(url ?? "").trim()) throw new Error("LIVEKIT_URL is not set");
-  const [scheme, rest] = splitScheme(String(url).trim().split(/[?#]/)[0].replace(/\/+$/, ""));
+  const [scheme, rest] = splitScheme(
+    String(url).trim().split(/[?#]/)[0].replace(/\/+$/, ""),
+  );
   const authorityEnd = rest.indexOf("/");
   const authority = authorityEnd === -1 ? rest : rest.slice(0, authorityEnd);
   const path = authorityEnd === -1 ? "" : rest.slice(authorityEnd);
@@ -51,9 +53,10 @@ function livekitHttpBase(url = process.env.LIVEKIT_URL) {
 function splitScheme(url) {
   const match = url.match(/^(wss?|https?):\/\//i);
   if (!match) return ["", url];
-  const scheme = match[1].toLowerCase() === "wss" || match[1].toLowerCase() === "https"
-    ? "https://"
-    : "http://";
+  const scheme =
+    match[1].toLowerCase() === "wss" || match[1].toLowerCase() === "https"
+      ? "https://"
+      : "http://";
   return [scheme, url.slice(match[0].length)];
 }
 
@@ -62,7 +65,8 @@ function splitScheme(url) {
 /// tree stay one spelling. A minute of life rather than that function's two
 /// hours: nothing here holds a token across calls.
 function roomAdminToken(room, now = Math.floor(Date.now() / 1000)) {
-  const encode = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
+  const encode = (value) =>
+    Buffer.from(JSON.stringify(value)).toString("base64url");
   const header = encode({ alg: "HS256", typ: "JWT" });
   const payload = encode({
     iss: process.env.LIVEKIT_API_KEY,
@@ -86,20 +90,23 @@ function roomAdminToken(room, now = Math.floor(Date.now() / 1000)) {
 /// the caller reads. The SDK camel-cased them, and anything reading a new
 /// field has to use the wire name or silently get `undefined`.
 async function roomService(method, body) {
-  const response = await fetch(`${livekitHttpBase()}/twirp/livekit.RoomService/${method}`, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${roomAdminToken(body.room)}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify(body),
+  const response = await fetch(
+    `${livekitHttpBase()}/twirp/livekit.RoomService/${method}`,
+    {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${roomAdminToken(body.room)}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(body),
 
-    // Bounded, because `fetch` is not. `isolateRustAgent` gives itself two
-    // minutes to settle a room and `soakInterview` checks on a deadline of its
-    // own; a call that never answers would hold either of them past its own
-    // budget and report as a hang with no line saying which request stopped.
-    signal: AbortSignal.timeout(30000),
-  });
+      // Bounded, because `fetch` is not. `isolateRustAgent` gives itself two
+      // minutes to settle a room and `soakInterview` checks on a deadline of its
+      // own; a call that never answers would hold either of them past its own
+      // budget and report as a hang with no line saying which request stopped.
+      signal: AbortSignal.timeout(30000),
+    },
+  );
   const text = await response.text();
   if (!response.ok) {
     // Status and Twirp code both, the pair `is_participant_gone` in
@@ -121,14 +128,19 @@ async function roomService(method, body) {
   try {
     return JSON.parse(text);
   } catch (error) {
-    throw new Error(`${method} returned invalid JSON: ${error.message}: ${text.slice(0, 200)}`);
+    throw new Error(
+      `${method} returned invalid JSON: ${error.message}: ${text.slice(0, 200)}`,
+    );
   }
 }
 
 /// Protobuf JSON omits an empty repeated field, so a room with nobody in it
 /// can come back as `{}`.
 async function listRoomParticipants(roomName) {
-  return (await roomService("ListParticipants", { room: roomName })).participants ?? [];
+  return (
+    (await roomService("ListParticipants", { room: roomName })).participants ??
+    []
+  );
 }
 
 /// Already gone counts as removed, the same call `remove_room_participant` in

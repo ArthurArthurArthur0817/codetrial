@@ -12,14 +12,17 @@
 // browser and fails if the bridge stops fitting.
 self.window = self;
 self.document = {
-  createElement: (tag) => (tag === "canvas" ? new OffscreenCanvas(1, 1) : {
-    setAttribute(name, value) {
-      this[name] = value;
-    },
-    addEventListener(type, listener) {
-      this[`on${type}`] = listener;
-    },
-  }),
+  createElement: (tag) =>
+    tag === "canvas"
+      ? new OffscreenCanvas(1, 1)
+      : {
+          setAttribute(name, value) {
+            this[name] = value;
+          },
+          addEventListener(type, listener) {
+            this[`on${type}`] = listener;
+          },
+        },
   body: {
     appendChild(element) {
       try {
@@ -65,9 +68,13 @@ function ensureDetector() {
 }
 
 function normalize(results = {}) {
-  const detections = Array.isArray(results.detections) ? results.detections : [];
+  const detections = Array.isArray(results.detections)
+    ? results.detections
+    : [];
   const confidence = detections.reduce((best, detection) => {
-    const score = Array.isArray(detection.score) ? detection.score[0] : detection.score;
+    const score = Array.isArray(detection.score)
+      ? detection.score[0]
+      : detection.score;
     return Math.max(best, Number.isFinite(score) ? score : 0);
   }, 0);
   return { count: detections.length, confidence };
@@ -90,7 +97,9 @@ async function detect(message) {
     const faceDetection = await ensureDetector();
     const results = await new Promise((resolve, reject) => {
       faceDetection.onResults(resolve);
-      Promise.resolve(faceDetection.send({ image: message.frame })).catch(reject);
+      Promise.resolve(faceDetection.send({ image: message.frame })).catch(
+        reject,
+      );
     });
     self.postMessage({ type: "result", id: message.id, ...normalize(results) });
   } catch (error) {

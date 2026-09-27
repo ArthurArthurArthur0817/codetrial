@@ -97,8 +97,16 @@ import {
   withdrawRecordingConsent,
 } from "./recording-state.js";
 import { assignedId as randomId, saveReportHistory } from "./history.js";
-import { createFacePresenceDetector, facePresenceVerdict } from "./face-presence.js";
-import { COMPILED_LANGUAGES, compiledTestsEnabled, harnessGap, languagesFor } from "./compiler-explorer.js";
+import {
+  createFacePresenceDetector,
+  facePresenceVerdict,
+} from "./face-presence.js";
+import {
+  COMPILED_LANGUAGES,
+  compiledTestsEnabled,
+  harnessGap,
+  languagesFor,
+} from "./compiler-explorer.js";
 import { parseCandidateCase, runBrowserTests } from "./runners.js";
 import { mountBehavioralReview } from "./behavioral-review.js";
 import { consumeGroundingPacket } from "./document-grounding.js";
@@ -171,7 +179,9 @@ const sessionPromise = fetch("/api/session")
 // "Loading interview..." heading forever with a console error nobody sees.
 const problem = await loadProblem(params.get("problem")).catch((error) => {
   const title = document.querySelector("#problem-title");
-  if (title) title.textContent = "This interview could not load its problem. Reload the page.";
+  if (title)
+    title.textContent =
+      "This interview could not load its problem. Reload the page.";
   throw error;
 });
 // Started here and awaited nowhere: which tabs are real is a property of the
@@ -192,9 +202,14 @@ let languages = [];
 /// here mirrors the server's own and is the fallback for a URL that arrives
 /// without passing through the lobby; the answer below is what the interview
 /// actually runs on.
-let durationMin = clamp(Number.parseInt(params.get("duration") || "45", 10) || 45, 10, 90);
+let durationMin = clamp(
+  Number.parseInt(params.get("duration") || "45", 10) || 45,
+  10,
+  90,
+);
 const interviewLoop = codingLoop(params.get("loop"));
-let behavioralMinutes = interviewLoop === "coding_behavioral" ? Math.min(8, durationMin) : 0;
+let behavioralMinutes =
+  interviewLoop === "coding_behavioral" ? Math.min(8, durationMin) : 0;
 let codingMinutes = durationMin - behavioralMinutes;
 
 /// The server clamps the requested length to its range and, where it records,
@@ -206,9 +221,11 @@ let codingMinutes = durationMin - behavioralMinutes;
 /// still runs, on the length the URL named, exactly as it did before the
 /// server sent this.
 function applyGrantedDuration(granted) {
-  if (typeof granted !== "number" || !Number.isFinite(granted) || granted <= 0) return;
+  if (typeof granted !== "number" || !Number.isFinite(granted) || granted <= 0)
+    return;
   durationMin = granted;
-  behavioralMinutes = interviewLoop === "coding_behavioral" ? Math.min(8, durationMin) : 0;
+  behavioralMinutes =
+    interviewLoop === "coding_behavioral" ? Math.min(8, durationMin) : 0;
   codingMinutes = durationMin - behavioralMinutes;
   // The budget is on screen by now: `bindEvents` wrote it during setup, from
   // the length the URL asked for. Leaving it there would put the old number in
@@ -219,9 +236,10 @@ function applyGrantedDuration(granted) {
 /// One place, because it is written twice: once during setup and again when the
 /// server answers with a length the request did not get.
 function renderRoundPlan() {
-  nodes.roundPlanSummary.textContent = interviewLoop === "coding_only"
-    ? `Coding-only loop · ${codingMinutes} minute coding budget.`
-    : `Coding + behavioral loop · ${codingMinutes} minute coding budget · ${behavioralMinutes} minute behavioral reserve.`;
+  nodes.roundPlanSummary.textContent =
+    interviewLoop === "coding_only"
+      ? `Coding-only loop · ${codingMinutes} minute coding budget.`
+      : `Coding + behavioral loop · ${codingMinutes} minute coding budget · ${behavioralMinutes} minute behavioral reserve.`;
 }
 /// Read once, through `storageArea`: at module scope a blocked `sessionStorage`
 /// would otherwise stop the whole page from loading.
@@ -366,7 +384,6 @@ const nodes = {
 // with a handle.
 let jimAudio = null;
 
-
 // Before `init`, because the queue's first producer is inside it. The bindings
 // are handed over rather than re-derived: one `state` object, one `nodes` map.
 initReplay({ state, nodes, recordingEnabled, consentVersion, replayVersion });
@@ -459,8 +476,12 @@ function applyEditorEdit(next) {
   let head = 0;
   while (previous[head] === next.value[head]) head += 1;
   let tail = 0;
-  while (tail < Math.min(previous.length, next.value.length) - head
-    && previous[previous.length - 1 - tail] === next.value[next.value.length - 1 - tail]) tail += 1;
+  while (
+    tail < Math.min(previous.length, next.value.length) - head &&
+    previous[previous.length - 1 - tail] ===
+      next.value[next.value.length - 1 - tail]
+  )
+    tail += 1;
   const inserted = next.value.slice(head, next.value.length - tail);
   editor.setSelectionRange(head, previous.length - tail);
   let rewritten;
@@ -494,7 +515,10 @@ function bindEvents() {
   nodes.forceReport.addEventListener("click", showReport);
   nodes.leaveRoom.addEventListener("click", leaveRoom);
   nodes.run.addEventListener("click", runTests);
-  nodes.candidateCaseAdd.addEventListener("click", () => void addCandidateCase());
+  nodes.candidateCaseAdd.addEventListener(
+    "click",
+    () => void addCandidateCase(),
+  );
   // One delegated listener for the whole list, registered once here rather
   // than in renderCandidateCases: the list element survives every render, so
   // registering there would stack a handler per render and one click would
@@ -507,7 +531,9 @@ function bindEvents() {
     const button = event.target.closest("[data-remove-case]");
     if (!button || !removeCaseArmed) return;
     removeCaseArmed = false;
-    requestAnimationFrame(() => { removeCaseArmed = true; });
+    requestAnimationFrame(() => {
+      removeCaseArmed = true;
+    });
     removeCandidateCase(Number(button.dataset.removeCase));
   });
   void initializeCandidateCases();
@@ -519,20 +545,28 @@ function bindEvents() {
   // it published a wrong camera status for the whole interview.
   nodes.meetPresentation.checked = readStored(MEET_PRESENTATION_KEY) === "1";
   nodes.meetPresentation.addEventListener("change", () => {
-    writeStored(MEET_PRESENTATION_KEY, nodes.meetPresentation.checked ? "1" : "0");
+    writeStored(
+      MEET_PRESENTATION_KEY,
+      nodes.meetPresentation.checked ? "1" : "0",
+    );
   });
   // Device labels and ids stay blank until a getUserMedia grant, so the list
   // built at load is stale by the time anyone opens the panel.
   nodes.meetMode.addEventListener("toggle", () => {
     if (nodes.meetMode.open) void refreshAudioOutputs();
   });
-  navigator.mediaDevices?.addEventListener?.("devicechange", () => void refreshAudioOutputs());
+  navigator.mediaDevices?.addEventListener?.(
+    "devicechange",
+    () => void refreshAudioOutputs(),
+  );
   nodes.resultsToggle.addEventListener("click", () => {
     nodes.resultsBody.hidden = !nodes.resultsBody.hidden;
     nodes.resultsChevron.textContent = nodes.resultsBody.hidden ? "^" : "v";
   });
   for (const button of document.querySelectorAll("[data-language]")) {
-    button.addEventListener("click", () => setLanguage(button.dataset.language));
+    button.addEventListener("click", () =>
+      setLanguage(button.dataset.language),
+    );
   }
   // The overlay does not scroll on its own; it follows the textarea.
   nodes.editor.addEventListener("scroll", () => {
@@ -557,29 +591,60 @@ function bindEvents() {
     tabLeavesEditor = false;
     if (!indents) return;
     event.preventDefault();
-    applyEditorEdit(indentSelection(nodes.editor.value, nodes.editor.selectionStart, nodes.editor.selectionEnd, event.shiftKey));
+    applyEditorEdit(
+      indentSelection(
+        nodes.editor.value,
+        nodes.editor.selectionStart,
+        nodes.editor.selectionEnd,
+        event.shiftKey,
+      ),
+    );
   });
   nodes.editor.addEventListener("beforeinput", (event) => {
-    if (applyingProgrammaticEdit || event.isComposing || !event.cancelable) return;
+    if (applyingProgrammaticEdit || event.isComposing || !event.cancelable)
+      return;
     if (event.inputType === "insertLineBreak") {
       event.preventDefault();
-      applyEditorEdit(indentNewline(nodes.editor.value, nodes.editor.selectionStart, nodes.editor.selectionEnd, state.language));
+      applyEditorEdit(
+        indentNewline(
+          nodes.editor.value,
+          nodes.editor.selectionStart,
+          nodes.editor.selectionEnd,
+          state.language,
+        ),
+      );
       return;
     }
     if (isBracketOpenerKeystroke(event)) {
       event.preventDefault();
-      applyEditorEdit(insertBracketPair(nodes.editor.value, nodes.editor.selectionStart, nodes.editor.selectionEnd, event.data));
+      applyEditorEdit(
+        insertBracketPair(
+          nodes.editor.value,
+          nodes.editor.selectionStart,
+          nodes.editor.selectionEnd,
+          event.data,
+        ),
+      );
       return;
     }
     if (isBracketCloserKeystroke(event)) {
-      const skip = typeOverCloser(nodes.editor.value, nodes.editor.selectionStart, nodes.editor.selectionEnd, event.data);
+      const skip = typeOverCloser(
+        nodes.editor.value,
+        nodes.editor.selectionStart,
+        nodes.editor.selectionEnd,
+        event.data,
+      );
       if (!skip) return;
       event.preventDefault();
       applyEditorEdit(skip);
       return;
     }
     if (isBackspaceKeystroke(event)) {
-      const removal = deleteEmptyPair(nodes.editor.value, nodes.editor.selectionStart, nodes.editor.selectionEnd);
+      const removal = deleteEmptyPair(
+        nodes.editor.value,
+        nodes.editor.selectionStart,
+        nodes.editor.selectionEnd,
+      );
       if (!removal) return;
       event.preventDefault();
       applyEditorEdit(removal);
@@ -605,7 +670,10 @@ function bindEvents() {
     // left it out of the editor replay, so only an edit some flush overtook
     // inside its window was ever recorded, and a recording showed the starter
     // beside test results for a buffer it never contained.
-    codePublishTimer = setTimeout(flushPendingEditorPublish, CODE_PUBLISH_DEBOUNCE_MS);
+    codePublishTimer = setTimeout(
+      flushPendingEditorPublish,
+      CODE_PUBLISH_DEBOUNCE_MS,
+    );
   });
   nodes.report.addEventListener("click", (event) => {
     if (event.target.closest("#done")) window.location.assign("/");
@@ -621,7 +689,11 @@ async function signInRequired() {
   if (!session || session.signedIn || !session.loginRequired) return false;
   nodes.audioCheck.hidden = true;
   nodes.agentState.textContent = "Sign in required";
-  addTranscript("interviewer", "Enter your GitHub username on the home page to start an interview.", true);
+  addTranscript(
+    "interviewer",
+    "Enter your GitHub username on the home page to start an interview.",
+    true,
+  );
   window.location.replace("/");
   return true;
 }
@@ -634,16 +706,27 @@ async function signInRequired() {
 /// moves on -- were hard to find among nine assignments that never branch.
 function paintPreflight(state, hint) {
   nodes.audioStatus.textContent = hint || state.message;
-  nodes.audioOutputState.textContent = state.steps.output ? "Confirmed" : "play a short tone.";
+  nodes.audioOutputState.textContent = state.steps.output
+    ? "Confirmed"
+    : "play a short tone.";
   nodes.cameraState.textContent = state.cameraSkipped
     ? `Not used (${state.cameraSkipReason}).`
-    : state.steps.camera ? "Ready" : "grant access and keep video on.";
-  nodes.audioStatus.classList.toggle("critical", ["mic-error", "camera-error", "face-error", "browser"].includes(state.blocker));
+    : state.steps.camera
+      ? "Ready"
+      : "grant access and keep video on.";
+  nodes.audioStatus.classList.toggle(
+    "critical",
+    ["mic-error", "camera-error", "face-error", "browser"].includes(
+      state.blocker,
+    ),
+  );
   nodes.audioStepOutput.classList.toggle("done", state.steps.output);
   nodes.audioStepMic.classList.toggle("done", state.steps.mic);
   nodes.audioStepCamera.classList.toggle("done", state.steps.camera);
   nodes.audioHeard.disabled = state.steps.output;
-  nodes.audioHeard.textContent = state.steps.output ? "Confirmed" : "I heard it";
+  nodes.audioHeard.textContent = state.steps.output
+    ? "Confirmed"
+    : "I heard it";
 }
 
 /// Resolves once the candidate has proven output, microphone, and camera.
@@ -752,7 +835,6 @@ function runAudioCheck() {
       }
     };
 
-
     const finish = () => {
       if (!sampleReadiness().ready) return;
       finished = true;
@@ -860,7 +942,6 @@ function runAudioCheck() {
   });
 }
 
-
 async function connect(preflight, presenting = false) {
   setAgentStateLabel(providerUiState("connecting").label);
   try {
@@ -871,15 +952,26 @@ async function connect(preflight, presenting = false) {
     // The gate the Start button enforces, restated where it is load bearing.
     // The button is UI; this is the function that actually asks the server to
     // write consent down, and it must not be reachable without one.
-    if (!consentGiven()) throw new Error("Agree to the recording notice before starting.");
+    if (!consentGiven())
+      throw new Error("Agree to the recording notice before starting.");
     const interviewId = await recordConsent();
     state.interviewId = interviewId;
     const response = await fetch("/api/token", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ problemId: problem.page, durationMin, interviewId, interviewLoop, interviewProfile, ...(interviewGrounding ? { interviewGrounding } : {}) }),
+      body: JSON.stringify({
+        problemId: problem.page,
+        durationMin,
+        interviewId,
+        interviewLoop,
+        interviewProfile,
+        ...(interviewGrounding ? { interviewGrounding } : {}),
+      }),
     });
-    if (!response.ok) throw new Error((await response.json()).error || "Failed to create a session.");
+    if (!response.ok)
+      throw new Error(
+        (await response.json()).error || "Failed to create a session.",
+      );
     const connection = await response.json();
     // Before the room, and before anything that reads the length: the replay's
     // opening lifecycle event carries the round split, and a split computed
@@ -899,7 +991,12 @@ async function connect(preflight, presenting = false) {
       await startRecording();
       // First event of the replay, so a template that joins late knows the
       // interview was already running rather than inferring it from silence.
-      recordReplay("lifecycle", { state: "started", interviewLoop, codingMinutes, behavioralMinutes });
+      recordReplay("lifecycle", {
+        state: "started",
+        interviewLoop,
+        codingMinutes,
+        behavioralMinutes,
+      });
       // The problem was rendered in the lobby, before this interview existed,
       // so its heading was dropped. Without this the recording shows a blank
       // title for the whole interview.
@@ -931,11 +1028,13 @@ async function connect(preflight, presenting = false) {
     // is a "come back in a few minutes" rather than a "your interview is now a
     // simulation" - so say it, and keep the practice editor underneath it.
     setBanner("connection", degraded.message);
-    addTranscript("interviewer", "Offline mode is ready. Talk through your approach and run tests when you are ready.", true);
+    addTranscript(
+      "interviewer",
+      "Offline mode is ready. Talk through your approach and run tests when you are ready.",
+      true,
+    );
   }
 }
-
-
 
 // The replay: what the candidate was looking at, sent to the server so the
 // recording template can render it and the replay page can play it back. The
@@ -956,14 +1055,17 @@ async function connectLiveKit(connection, preflight, presenting = false) {
   if (!livekit?.Room) throw new Error("LiveKit browser SDK is unavailable.");
   const room = new livekit.Room({ adaptiveStream: true, dynacast: true });
 
-  room.on(livekit.RoomEvent.DataReceived, (payload, participant, kind, topic) => {
-    if (topic === topics.control && isAgent(participant)) {
-      receiveControl(payload);
-      return;
-    }
-    if (!acceptsReport(topic, participant)) return;
-    void receiveReport(room, payload);
-  });
+  room.on(
+    livekit.RoomEvent.DataReceived,
+    (payload, participant, kind, topic) => {
+      if (topic === topics.control && isAgent(participant)) {
+        receiveControl(payload);
+        return;
+      }
+      if (!acceptsReport(topic, participant)) return;
+      void receiveReport(room, payload);
+    },
+  );
   room.on(livekit.RoomEvent.ParticipantAttributesChanged, updateAgentState);
   room.on(livekit.RoomEvent.ParticipantConnected, updateAgentState);
   // Both of these were missing, and the pill showed "Waiting" through a whole
@@ -1001,17 +1103,23 @@ async function connectLiveKit(connection, preflight, presenting = false) {
     // the one it lost, so the candidate who ended the interview was left
     // waiting on an overlay for a report that could not arrive.
     state.room = null;
-    setBanner("connection", providerUiState("degraded", "The interview connection dropped.").message);
+    setBanner(
+      "connection",
+      providerUiState("degraded", "The interview connection dropped.").message,
+    );
     console.warn("codetrial room_disconnected");
   });
   // The participant is needed to tell Jim from any other remote audio, so both
   // handlers take the full signature rather than just the track.
-  room.on(livekit.RoomEvent.TrackSubscribed, (track, publication, participant) =>
-    playRemoteAudio(track, participant));
+  room.on(
+    livekit.RoomEvent.TrackSubscribed,
+    (track, publication, participant) => playRemoteAudio(track, participant),
+  );
   room.on(livekit.RoomEvent.TrackUnsubscribed, dropRemoteAudio);
   if (typeof room.registerTextStreamHandler === "function") {
     room.registerTextStreamHandler(topics.transcript, (reader, participant) =>
-      consumeTranscript(room, reader, participant));
+      consumeTranscript(room, reader, participant),
+    );
   }
 
   await room.connect(connection.serverUrl, connection.token);
@@ -1031,7 +1139,11 @@ async function connectLiveKit(connection, preflight, presenting = false) {
   nodes.mic.textContent = "Mic on";
   updateAgentState();
   monitorIntegrityTracks();
-  await publishIntegrityEvent({ type: "SESSION_START", source: "media", severity: "info" });
+  await publishIntegrityEvent({
+    type: "SESSION_START",
+    source: "media",
+    severity: "info",
+  });
   // The camera is named, not judged. Nothing here can tell a virtual camera
   // from a real one: `devices.js` asks for `video: true` with no device id, so
   // Chrome opens whatever is default, and a virtual camera satisfies the face
@@ -1079,8 +1191,19 @@ async function connectLiveKit(connection, preflight, presenting = false) {
 
 function cameraSkipReasonFor(error) {
   const words = String(error || "").toLowerCase();
-  if (words.includes("not found") || words.includes("notfound") || words.includes("no camera")) return "no_device";
-  if (words.includes("permission") || words.includes("denied") || words.includes("not allowed") || words.includes("notallowed")) return "denied";
+  if (
+    words.includes("not found") ||
+    words.includes("notfound") ||
+    words.includes("no camera")
+  )
+    return "no_device";
+  if (
+    words.includes("permission") ||
+    words.includes("denied") ||
+    words.includes("not allowed") ||
+    words.includes("notallowed")
+  )
+    return "denied";
   return "declined";
 }
 
@@ -1106,7 +1229,9 @@ async function publishPreflightTracks(room, preflight) {
   const livekit = window.LivekitClient;
   const source = livekit?.Track?.Source || {};
   for (const track of preflight.userStream?.getAudioTracks?.() || []) {
-    await room.localParticipant.publishTrack(track, { source: source.Microphone });
+    await room.localParticipant.publishTrack(track, {
+      source: source.Microphone,
+    });
   }
   // A camera handed to Meet is already out of the stream, so this loop is
   // empty and LiveKit never holds the device open for the interview.
@@ -1124,7 +1249,6 @@ function setLocalAudioEnabled(enabled) {
     track.enabled = enabled;
   }
 }
-
 
 function stopLocalMedia() {
   stopIntegrityWorker();
@@ -1144,7 +1268,9 @@ async function receiveReport(room, payload) {
   let renderAttempted = false;
   let endRecorded = false;
   try {
-    state.report = sanitizeReport(JSON.parse(new TextDecoder().decode(payload)));
+    state.report = sanitizeReport(
+      JSON.parse(new TextDecoder().decode(payload)),
+    );
     if (state.report.incomplete) {
       setBanner("session", providerUiState("incomplete_report").message);
     }
@@ -1164,12 +1290,18 @@ async function receiveReport(room, payload) {
       // back on this page's countdown is a guess, and the wrong one whenever a
       // suspended tab drifted past its deadline before the interviewer closed
       // a finished session; kept only for a report from an older agent.
-      const reason = state.report.endReason
-        || (Date.now() >= state.endsAt ? "time_up" : "interviewer_ended");
+      const reason =
+        state.report.endReason ||
+        (Date.now() >= state.endsAt ? "time_up" : "interviewer_ended");
       recordReplay("lifecycle", { state: "ended", reason });
       endRecorded = true;
     }
-    recordReplay("lifecycle", { state: "rounds_final", interviewLoop, rounds: state.report.rounds, interviewContract: state.report.interviewContract });
+    recordReplay("lifecycle", {
+      state: "rounds_final",
+      interviewLoop,
+      rounds: state.report.rounds,
+      interviewContract: state.report.interviewContract,
+    });
     void flushReplay();
     state.phase = "report";
     setLocalAudioEnabled(false);
@@ -1206,7 +1338,10 @@ async function receiveReport(room, payload) {
     // has to go with it: `endInterview` returns on any phase but "live", so
     // the phase forced below leaves it enabled and inert.
     if (!endRecorded && state.phase === "live") {
-      recordReplay("lifecycle", { state: "ended", reason: Date.now() >= state.endsAt ? "time_up" : "interviewer_ended" });
+      recordReplay("lifecycle", {
+        state: "ended",
+        reason: Date.now() >= state.endsAt ? "time_up" : "interviewer_ended",
+      });
       void flushReplay();
       nodes.end.disabled = true;
     }
@@ -1228,7 +1363,12 @@ async function receiveReport(room, payload) {
 // them play the same track into the shared tab, audibly doubled, while
 // setSinkId only ever reaches the newest.
 function playRemoteAudio(track, participant) {
-  if (track.kind !== "audio" || typeof track.attach !== "function" || !isCurrentAgent(participant)) return;
+  if (
+    track.kind !== "audio" ||
+    typeof track.attach !== "function" ||
+    !isCurrentAgent(participant)
+  )
+    return;
   const element = jimAudio ?? document.createElement("audio");
   track.attach(element);
   element.autoplay = true;
@@ -1270,7 +1410,10 @@ function dropRemoteAudio(track) {
 async function consumeTranscript(room, reader, participant) {
   const attrs = reader.info?.attributes || {};
   const id = attrs["lk.segment_id"] || reader.info?.id || randomId();
-  const speaker = participant?.identity === room.localParticipant.identity ? "you" : "interviewer";
+  const speaker =
+    participant?.identity === room.localParticipant.identity
+      ? "you"
+      : "interviewer";
   if (speaker === "interviewer" && !isCurrentAgent(participant)) return;
   const responseWindow = responseWindowIndex();
   const final = attrs["lk.transcription_final"] === "true";
@@ -1308,9 +1451,11 @@ async function toggleMicrophone() {
       });
     }
   } else if (state.room) {
-    await state.room.localParticipant.setMicrophoneEnabled(state.micEnabled).catch(() => {
-      state.micEnabled = !state.micEnabled;
-    });
+    await state.room.localParticipant
+      .setMicrophoneEnabled(state.micEnabled)
+      .catch(() => {
+        state.micEnabled = !state.micEnabled;
+      });
   }
   nodes.mic.textContent = state.micEnabled ? "Mic on" : "Muted";
 }
@@ -1377,7 +1522,10 @@ function setLanguage(language) {
   // The flush, as the input debounce uses its own: one place resets the
   // three-state machine, and the switch leaves carrying the buffer it was made
   // with whichever way it ends.
-  codePublishTimer = setTimeout(flushPendingLanguagePublish, CODE_PUBLISH_DEBOUNCE_MS);
+  codePublishTimer = setTimeout(
+    flushPendingLanguagePublish,
+    CODE_PUBLISH_DEBOUNCE_MS,
+  );
 }
 
 /// One banner element, several owners, ranked. Each owner keeps its own slot,
@@ -1386,8 +1534,20 @@ function setLanguage(language) {
 /// another branch. The two-owner version this replaces needed a boolean lock, a
 /// deferred-text field that only one of the two owners got, and a lock-breaking
 /// special case for session-ending events.
-const BANNER_RANK = { session: 5, connection: 4, interviewer: 3, reconnect: 2, face: 1 };
-const banners = { session: "", connection: "", interviewer: "", reconnect: "", face: "" };
+const BANNER_RANK = {
+  session: 5,
+  connection: 4,
+  interviewer: 3,
+  reconnect: 2,
+  face: 1,
+};
+const banners = {
+  session: "",
+  connection: "",
+  interviewer: "",
+  reconnect: "",
+  face: "",
+};
 
 function setBanner(source, text) {
   if (!nodes.presenceBanner) return;
@@ -1404,9 +1564,11 @@ function updatePresenceBanner(eventType) {
   if (!entry) return;
   // A session-ending event is the last thing the candidate will be told, so it
   // outranks the interviewer notice rather than sitting behind it.
-  setBanner(entry.endsInterview ? "session" : "face", entry.clears ? "" : entry.banner || "");
+  setBanner(
+    entry.endsInterview ? "session" : "face",
+    entry.clears ? "" : entry.banner || "",
+  );
 }
-
 
 /// A repaint, not a clock. The remaining seconds used to be decremented once per
 /// firing, so a hidden or minimised tab, which browsers throttle to roughly one
@@ -1443,14 +1605,25 @@ function tickTimer() {
     // after it, so nothing has to be caught. The flag makes it happen once, and
     // `applyPause` releases it, because a publish the agent drops while paused
     // has announced nothing.
-    if (interviewLoop === "coding_behavioral" && !state.roundTransitionSent
-      && tick.remaining <= behavioralMinutes * 60) {
+    if (
+      interviewLoop === "coding_behavioral" &&
+      !state.roundTransitionSent &&
+      tick.remaining <= behavioralMinutes * 60
+    ) {
       state.roundTransitionSent = true;
       // No remainingSeconds: the agent decides the round boundary from its own
       // clock, and a number on the wire that nothing reads is one the next
       // reader assumes is checked.
-      publish(topics.control, { type: "round_transition", round: "behavioral" });
-      recordReplay("lifecycle", { state: "round_reserve_started", round: "behavioral", remainingSeconds: tick.remaining, interviewLoop });
+      publish(topics.control, {
+        type: "round_transition",
+        round: "behavioral",
+      });
+      recordReplay("lifecycle", {
+        state: "round_reserve_started",
+        round: "behavioral",
+        remainingSeconds: tick.remaining,
+        interviewLoop,
+      });
     }
     if (tick.urgent && !state.timeWarningSent) {
       state.timeWarningSent = true;
@@ -1497,7 +1670,10 @@ function renderFrameworkProgress() {
   const { name, steps } = frameworkChecklist(frameworkRound, frameworkPhases);
   nodes.frameworkProgress.hidden = false;
   nodes.frameworkProgress.innerHTML = steps
-    .map((step) => `<li class="${step.done ? "done" : ""}"><span aria-hidden="true">${step.done ? "&#10003;" : "&#183;"}</span>${escapeHtml(step.label)}</li>`)
+    .map(
+      (step) =>
+        `<li class="${step.done ? "done" : ""}"><span aria-hidden="true">${step.done ? "&#10003;" : "&#183;"}</span>${escapeHtml(step.label)}</li>`,
+    )
     .join("");
   nodes.frameworkProgress.setAttribute("aria-label", `${name} steps`);
 }
@@ -1510,11 +1686,13 @@ function renderFrameworkProgress() {
 function showFrameworkHint() {
   nodes.frameworkHintTitle.textContent = "Jim is listening.";
   nodes.frameworkHintBody.innerHTML = Object.values(FRAMEWORKS)
-    .map((framework) => `
+    .map(
+      (framework) => `
       <table>
         <caption>${escapeHtml(framework.name)}<span>${escapeHtml(framework.scenario)}</span></caption>
         <tbody>${framework.steps.map((step) => `<tr><th scope="row">${escapeHtml(step.label)}</th><td>${escapeHtml(step.hint)}</td></tr>`).join("")}</tbody>
-      </table>`)
+      </table>`,
+    )
     .join("");
   nodes.frameworkHint.hidden = false;
   globalThis.clearTimeout(frameworkHintTimer);
@@ -1528,18 +1706,37 @@ function receiveControl(bytes) {
     const message = JSON.parse(new TextDecoder().decode(bytes));
     if (message.type === "pause_state" && typeof message.paused === "boolean") {
       applyPause(message.paused);
-    } else if (message.type === "interviewer_state" && typeof message.reconnecting === "boolean") {
+    } else if (
+      message.type === "interviewer_state" &&
+      typeof message.reconnecting === "boolean"
+    ) {
       // Gemini caps how long one connection lasts, so this arrives several
       // times in a normal interview. It is the only notice the candidate gets
       // that the interviewer went deaf: the agent stays in the room across it,
       // so every other signal the page watches says nothing happened.
-      setBanner("reconnect", message.reconnecting ? providerUiState("interviewer_reconnecting").message : "");
-    } else if (message.type === "framework_state" && Array.isArray(message.phases)) {
+      setBanner(
+        "reconnect",
+        message.reconnecting
+          ? providerUiState("interviewer_reconnecting").message
+          : "",
+      );
+    } else if (
+      message.type === "framework_state" &&
+      Array.isArray(message.phases)
+    ) {
       frameworkPhases = message.phases;
       renderFrameworkProgress();
-    } else if (message.type === "round_state" && message.round === "behavioral"
-      && ["started", "skipped"].includes(message.status)) {
-      recordReplay("lifecycle", { state: "round_transition", round: "behavioral", status: message.status, interviewLoop });
+    } else if (
+      message.type === "round_state" &&
+      message.round === "behavioral" &&
+      ["started", "skipped"].includes(message.status)
+    ) {
+      recordReplay("lifecycle", {
+        state: "round_transition",
+        round: "behavioral",
+        status: message.status,
+        interviewLoop,
+      });
       if (message.status === "started") {
         nodes.editor.disabled = true;
         nodes.run.disabled = true;
@@ -1600,7 +1797,6 @@ function applyPause(paused) {
   tickTimer();
 }
 
-
 async function runTests() {
   flushPendingCodePublish();
   state.runningTests = true;
@@ -1611,7 +1807,7 @@ async function runTests() {
   if (nodes.candidateCaseInput.value.trim()) {
     // Only a refusal stops the run. A sixth case the cap turned away is not a
     // reason to withhold the judge's cases and the five already added.
-    if (await addCandidateCase() === "refused") {
+    if ((await addCandidateCase()) === "refused") {
       state.runningTests = false;
       updateRunAvailability();
       nodes.run.textContent = "Run tests";
@@ -1619,7 +1815,13 @@ async function runTests() {
       return;
     }
   }
-  const summary = await runBrowserTests(problem.page, currentCode(), state.language, setTestStatus, state.candidateCases);
+  const summary = await runBrowserTests(
+    problem.page,
+    currentCode(),
+    state.language,
+    setTestStatus,
+    state.candidateCases,
+  );
   state.latestSummary = summary;
   state.testStatus = finalRunnerStatus(summary, state.testStatus);
   renderResults(summary);
@@ -1627,7 +1829,8 @@ async function runTests() {
   // buffer past the data channel's limit, a dropped link) has to say so: the
   // candidate sees results the interviewer never received.
   publish(topics.tests, testPayload(summary))?.catch(() => {
-    nodes.resultsLabel.textContent = "Test results (not sent to the interviewer; run again)";
+    nodes.resultsLabel.textContent =
+      "Test results (not sent to the interviewer; run again)";
   });
   recordReplay("tests", {
     passed: summary.passed,
@@ -1636,18 +1839,27 @@ async function runTests() {
   });
   if (!state.room) {
     addTranscript("you", "I ran the tests.", true);
-    addTranscript("interviewer", summary.setupError ? "I could not run that yet. Check the setup error and keep going." : `${summary.passed}/${summary.total} tests passed. Explain what changed.`, true);
+    addTranscript(
+      "interviewer",
+      summary.setupError
+        ? "I could not run that yet. Check the setup error and keep going."
+        : `${summary.passed}/${summary.total} tests passed. Explain what changed.`,
+      true,
+    );
   }
   state.runningTests = false;
   updateRunAvailability();
   nodes.run.textContent = "Run tests";
 }
 
-
 async function initializeCandidateCases() {
   try {
-    const saved = JSON.parse(readStored(candidateCaseStorageKey, tabStorage) || "[]");
-    state.candidateCases = Array.isArray(saved) ? saved.slice(0, CANDIDATE_CASE_LIMIT) : [];
+    const saved = JSON.parse(
+      readStored(candidateCaseStorageKey, tabStorage) || "[]",
+    );
+    state.candidateCases = Array.isArray(saved)
+      ? saved.slice(0, CANDIDATE_CASE_LIMIT)
+      : [];
   } catch {
     state.candidateCases = [];
   }
@@ -1656,7 +1868,8 @@ async function initializeCandidateCases() {
   // A placeholder rather than a value: `runTests` adds whatever the input
   // holds, so a prefilled value became a case the candidate never wrote.
   const spec = await judgePromise;
-  if (spec?.cases?.[0]?.input) nodes.candidateCaseInput.placeholder = JSON.stringify(spec.cases[0].input);
+  if (spec?.cases?.[0]?.input)
+    nodes.candidateCaseInput.placeholder = JSON.stringify(spec.cases[0].input);
 }
 
 /// Answers "added", "full" or "refused", and writes the status line itself.
@@ -1689,11 +1902,17 @@ async function addCandidateCaseNow() {
     const expectedText = nodes.candidateCaseExpected.value.trim();
     const expected = expectedText ? JSON.parse(expectedText) : undefined;
     if (expected === null && spec.checker === "palindrome") {
-      throw new Error("A palindrome expectation must be a string, or leave it blank to observe the result.");
+      throw new Error(
+        "A palindrome expectation must be a string, or leave it blank to observe the result.",
+      );
     }
     const testCase = { input, ...(expectedText ? { expected } : {}) };
     state.candidateCases.push(testCase);
-    writeStored(candidateCaseStorageKey, JSON.stringify(state.candidateCases), tabStorage);
+    writeStored(
+      candidateCaseStorageKey,
+      JSON.stringify(state.candidateCases),
+      tabStorage,
+    );
     nodes.candidateCaseInput.value = "";
     nodes.candidateCaseExpected.value = "";
     nodes.candidateCaseStatus.textContent = "Case added.";
@@ -1707,7 +1926,10 @@ async function addCandidateCaseNow() {
 
 function renderCandidateCases() {
   nodes.candidateCaseList.innerHTML = state.candidateCases
-    .map((testCase, index) => `<li><span>Your case ${index + 1}: ${escapeHtml(JSON.stringify(testCase.input))}</span> <button type="button" data-remove-case="${index}" aria-label="Remove case ${index + 1}">Remove</button></li>`)
+    .map(
+      (testCase, index) =>
+        `<li><span>Your case ${index + 1}: ${escapeHtml(JSON.stringify(testCase.input))}</span> <button type="button" data-remove-case="${index}" aria-label="Remove case ${index + 1}">Remove</button></li>`,
+    )
     .join("");
   // An empty list announces nothing, so a page that never had a case keeps
   // the live region blank; removeCandidateCase writes the count itself, which
@@ -1731,11 +1953,18 @@ function removeCandidateCase(index) {
   // reason rather than queued. The guard lives here rather than in the click
   // listener so a caller that is not the button gets it too.
   if (state.runningTests) {
-    nodes.candidateCaseStatus.textContent = "Wait for the test run to finish before removing a case.";
+    nodes.candidateCaseStatus.textContent =
+      "Wait for the test run to finish before removing a case.";
     return;
   }
-  state.candidateCases = state.candidateCases.filter((_, current) => current !== index);
-  writeStored(candidateCaseStorageKey, JSON.stringify(state.candidateCases), tabStorage);
+  state.candidateCases = state.candidateCases.filter(
+    (_, current) => current !== index,
+  );
+  writeStored(
+    candidateCaseStorageKey,
+    JSON.stringify(state.candidateCases),
+    tabStorage,
+  );
   renderCandidateCases();
   // renderCandidateCases leaves the status alone on an empty list, so the
   // removal path writes the count itself and a removal down to zero is still
@@ -1747,13 +1976,19 @@ function removeCandidateCase(index) {
   // The placeholder web/interview.html ships in #results-body; keep the
   // sentence identical.
   nodes.resultsBody.innerHTML = `<p class="muted small">Run the test cases any time - Jim sees your results too.</p>`;
-  const remaining = nodes.candidateCaseList.querySelectorAll("[data-remove-case]");
-  (remaining[Math.min(index, remaining.length - 1)] || nodes.candidateCaseAdd).focus();
+  const remaining =
+    nodes.candidateCaseList.querySelectorAll("[data-remove-case]");
+  (
+    remaining[Math.min(index, remaining.length - 1)] || nodes.candidateCaseAdd
+  ).focus();
 }
 
 function updateRunAvailability() {
-  nodes.run.disabled = state.runningTests || state.paused || codingClosed()
-    || !languages.includes(state.language);
+  nodes.run.disabled =
+    state.runningTests ||
+    state.paused ||
+    codingClosed() ||
+    !languages.includes(state.language);
 }
 
 function firstRunnerStatus(language) {
@@ -1896,7 +2131,9 @@ function endInterview(reason) {
   // banner then tells them to end the interview for their report, and ending
   // it sent the request to nobody and hid the offline summary for the whole
   // escape wait.
-  const reportComing = Boolean(roomInterviewer(roomParticipants(), state.agentIdentity));
+  const reportComing = Boolean(
+    roomInterviewer(roomParticipants(), state.agentIdentity),
+  );
   nodes.forceReport.hidden = reportComing;
   startEndingClock();
   if (reportComing) {
@@ -1906,23 +2143,32 @@ function endInterview(reason) {
     // invites the candidate to walk out on a report that is still coming, and
     // leaving never saves it. REPORT_ESCAPE_WAIT_MS has to clear both, and
     // says where that is checked.
-    endingEscape = [setTimeout(() => {
-      if (state.phase === "ending") nodes.endingDetail.textContent = providerUiState("report_generating").message;
-    }, 8000), setTimeout(() => {
-      if (state.phase === "ending") {
-        nodes.endingDetail.textContent = providerUiState("retry_ready").message;
-        nodes.leaveRoom.hidden = false;
-        // Offered beside leaving, not instead of it. Past this point the report
-        // is not coming, and the two ways out are not equivalent: leaving
-        // navigates away and the session is gone, while the offline summary is
-        // built from what this page already holds. A candidate who has just sat
-        // through a whole interview should not have to pick "leave" to find out
-        // there was another option.
-        nodes.forceReport.hidden = false;
-      }
-    }, REPORT_ESCAPE_WAIT_MS)];
+    endingEscape = [
+      setTimeout(() => {
+        if (state.phase === "ending")
+          nodes.endingDetail.textContent =
+            providerUiState("report_generating").message;
+      }, 8000),
+      setTimeout(() => {
+        if (state.phase === "ending") {
+          nodes.endingDetail.textContent =
+            providerUiState("retry_ready").message;
+          nodes.leaveRoom.hidden = false;
+          // Offered beside leaving, not instead of it. Past this point the report
+          // is not coming, and the two ways out are not equivalent: leaving
+          // navigates away and the session is gone, while the offline summary is
+          // built from what this page already holds. A candidate who has just sat
+          // through a whole interview should not have to pick "leave" to find out
+          // there was another option.
+          nodes.forceReport.hidden = false;
+        }
+      }, REPORT_ESCAPE_WAIT_MS),
+    ];
   }
-  publish(topics.control, endInterviewPayload(reason, currentCode(), state.language));
+  publish(
+    topics.control,
+    endInterviewPayload(reason, currentCode(), state.language),
+  );
   if (!reportComing) setTimeout(showReport, 300);
 }
 
@@ -1976,23 +2222,34 @@ async function showReport() {
   // communication on the strength of being greeted.
   const candidateTurns = state.transcript
     .values()
-    .filter((row) => row.speaker !== "interviewer" && row.text.trim())
-    .length;
+    .filter((row) => row.speaker !== "interviewer" && row.text.trim()).length;
 
   // `state.joinedRoom`, not `state.room`: whether an interviewer was ever
   // present is a different fact from whether the connection survived, and only
   // the first one decides if this browser may score anybody. The rule and the
   // failure it came from live in `sessionReport`.
-  state.report = { ...sessionReport({
-    joinedRoom: state.joinedRoom,
-    passed,
-    total,
-    candidateTurns,
-    reportUnreadable: state.reportUnreadable,
-  }), interviewLoop, rounds: [
-    { kind: "coding", budgetMin: codingMinutes, status: total > 0 && passed === total ? "complete" : "incomplete" },
-    { kind: "behavioral", budgetMin: behavioralMinutes, status: interviewLoop === "coding_only" ? "not_configured" : "skipped" },
-  ] };
+  state.report = {
+    ...sessionReport({
+      joinedRoom: state.joinedRoom,
+      passed,
+      total,
+      candidateTurns,
+      reportUnreadable: state.reportUnreadable,
+    }),
+    interviewLoop,
+    rounds: [
+      {
+        kind: "coding",
+        budgetMin: codingMinutes,
+        status: total > 0 && passed === total ? "complete" : "incomplete",
+      },
+      {
+        kind: "behavioral",
+        budgetMin: behavioralMinutes,
+        status: interviewLoop === "coding_only" ? "not_configured" : "skipped",
+      },
+    ],
+  };
   const saving = saveHistory();
   try {
     renderReport();
@@ -2024,7 +2281,9 @@ function reportRenderFailed(error, { offlineSummary }) {
   stopEndingEscape();
   nodes.report.hidden = true;
   nodes.ending.hidden = false;
-  nodes.endingDetail.textContent = providerUiState(offlineSummary ? "report_unreadable" : "report_undrawable").message;
+  nodes.endingDetail.textContent = providerUiState(
+    offlineSummary ? "report_unreadable" : "report_undrawable",
+  ).message;
   nodes.leaveRoom.hidden = false;
   nodes.forceReport.hidden = !offlineSummary;
 }
@@ -2063,13 +2322,26 @@ function saveHistory() {
   // The interview id travels with the report so the replay page can put the
   // two beside each other. Reports are keyed by their own id and recordings by
   // theirs, and without this the only thing relating them is the clock.
-  const entry = { id: randomId(), date: new Date().toISOString(), interviewId: state.interviewId, problemId: problem.page, problemTitle: problem.title, difficulty: problem.difficulty, language: state.language, durationMin, interviewLoop, report: state.report };
+  const entry = {
+    id: randomId(),
+    date: new Date().toISOString(),
+    interviewId: state.interviewId,
+    problemId: problem.page,
+    problemTitle: problem.title,
+    difficulty: problem.difficulty,
+    language: state.language,
+    durationMin,
+    interviewLoop,
+    report: state.report,
+  };
   return saveReportHistory(entry);
 }
 
 function downloadReport() {
   const markdown = buildMarkdown();
-  const url = URL.createObjectURL(new Blob([markdown], { type: "text/markdown" }));
+  const url = URL.createObjectURL(
+    new Blob([markdown], { type: "text/markdown" }),
+  );
   const anchor = document.createElement("a");
   anchor.href = url;
   // Named for the scenario the candidate saw: the id is the published slug.
@@ -2117,7 +2389,10 @@ function publish(topic, payload) {
 
 function sendData(topic, payload) {
   return state.room.localParticipant
-    .publishData(new TextEncoder().encode(JSON.stringify(payload)), { reliable: true, topic })
+    .publishData(new TextEncoder().encode(JSON.stringify(payload)), {
+      reliable: true,
+      topic,
+    })
     .catch((error) => {
       // `end_interview` travels this path, and it is the only signal that
       // produces a real report. Swallowing its failure left the candidate on
@@ -2131,23 +2406,29 @@ function sendData(topic, payload) {
 function flushPendingPublishes() {
   if (!state.room || !state.connected) return;
   const queued = pendingPublishes.splice(0, pendingPublishes.length);
-  for (const { topic, payload } of queued) void sendData(topic, payload).catch(() => {});
+  for (const { topic, payload } of queued)
+    void sendData(topic, payload).catch(() => {});
 }
 
 async function publishIntegrityEvent(input) {
-  state.integrityPublish = state.integrityPublish.then(async () => {
-    if (!state.room) return;
-    const event = await integrityEventPayload(input, state.integrityChain);
-    await state.room.localParticipant.publishData(new TextEncoder().encode(JSON.stringify(event)), {
-      reliable: true,
-      topic: topics.integrity,
+  state.integrityPublish = state.integrityPublish
+    .then(async () => {
+      if (!state.room) return;
+      const event = await integrityEventPayload(input, state.integrityChain);
+      await state.room.localParticipant.publishData(
+        new TextEncoder().encode(JSON.stringify(event)),
+        {
+          reliable: true,
+          topic: topics.integrity,
+        },
+      );
+      state.integrityChain = { seq: event.seq, hash: event.hash };
+    })
+    .catch((error) => {
+      // The chain cannot resynchronize, so a dropped event costs every later one.
+      // Worth a line rather than a shrug.
+      console.warn("codetrial integrity_publish_failed", error);
     });
-    state.integrityChain = { seq: event.seq, hash: event.hash };
-  }).catch((error) => {
-    // The chain cannot resynchronize, so a dropped event costs every later one.
-    // Worth a line rather than a shrug.
-    console.warn("codetrial integrity_publish_failed", error);
-  });
   return state.integrityPublish;
 }
 
@@ -2169,8 +2450,10 @@ function updateAgentState() {
     // candidate to hold a thought for it would be worse than telling them
     // nothing.
     if (state.sawAgent) {
-      setBanner("interviewer",
-        "The interviewer disconnected. Nothing you typed is lost; end the interview to get your report.");
+      setBanner(
+        "interviewer",
+        "The interviewer disconnected. Nothing you typed is lost; end the interview to get your report.",
+      );
     }
     // `endInterview` decides once whether a report is coming, and the
     // interviewer can leave a moment later: the agent leaves the room right
@@ -2178,7 +2461,12 @@ function updateAgentState() {
     // leaves without publishing at all. The overlay covers the banner above,
     // so a candidate already waiting learns none of this and sits out the
     // whole escape wait for a report with nobody left to send it.
-    if (state.sawAgent && state.phase === "ending" && !state.reportUnreadable && !deliveryGrace) {
+    if (
+      state.sawAgent &&
+      state.phase === "ending" &&
+      !state.reportUnreadable &&
+      !deliveryGrace
+    ) {
       stopEndingEscape();
       deliveryGrace = globalThis.setTimeout(() => {
         // A report that landed in the grace moved the phase on, and one that
@@ -2196,7 +2484,10 @@ function updateAgentState() {
     // from "somebody is here and isAgent does not recognise them", and no
     // server log can answer that question for the browser.
     if (state.sawAgent) {
-      console.warn("codetrial no_interviewer", participants.map((each) => each.identity));
+      console.warn(
+        "codetrial no_interviewer",
+        participants.map((each) => each.identity),
+      );
     }
     // Deliberately NOT muting the mouth here. Not finding an agent participant
     // is exactly the condition that pinned Jim's jaw shut for whole interviews,
@@ -2224,8 +2515,15 @@ function updateAgentState() {
   // the mouth must not, because a missing attribute is not a claim of silence.
   const published = agent?.attributes?.["lk.agent.state"];
   const value = published || "listening";
-  const labels = { listening: "Listening", thinking: "Thinking...", speaking: "Speaking" };
-  setAgentStateLabel(labels[value] || providerUiState("live").label, value === "listening");
+  const labels = {
+    listening: "Listening",
+    thinking: "Thinking...",
+    speaking: "Speaking",
+  };
+  setAgentStateLabel(
+    labels[value] || providerUiState("live").label,
+    value === "listening",
+  );
   // The same three published states the pill shows. The generic Live fallback
   // is availability only. `questioning`, `encouraging`, and
   // `challenging` wait for src/agent.rs to publish lk.avatar.state; inventing
@@ -2265,11 +2563,17 @@ function setAgentStateLabel(label, ready = false) {
 /// it would change when the paint lands, so it is not folded in here.
 function paintEditor() {
   const code = currentCode();
-  nodes.editorHighlight.firstElementChild.innerHTML = highlight(code, state.language);
+  nodes.editorHighlight.firstElementChild.innerHTML = highlight(
+    code,
+    state.language,
+  );
   const lines = code.split("\n").length;
   if (lines !== paintedLineCount) {
     paintedLineCount = lines;
-    nodes.editorLines.textContent = Array.from({ length: lines }, (_, index) => index + 1).join("\n");
+    nodes.editorLines.textContent = Array.from(
+      { length: lines },
+      (_, index) => index + 1,
+    ).join("\n");
   }
 }
 

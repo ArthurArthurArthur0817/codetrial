@@ -38,7 +38,8 @@ export function updateCaptions(speaker, text, id = null) {
     // so far on a stream of its own, so one that lands out of order is a
     // shorter copy of what is already on screen, and taking it would rewind the
     // reveal to a few characters and replay the line.
-    if (text.length > interviewerCaption.text.length) interviewerCaption.text = text;
+    if (text.length > interviewerCaption.text.length)
+      interviewerCaption.text = text;
     if (!interviewerCaption.timer) paceInterviewerCaption();
     return;
   }
@@ -54,7 +55,10 @@ export function updateCaptions(speaker, text, id = null) {
 
 export function paceInterviewerCaption() {
   const caption = interviewerCaption;
-  caption.shown = Math.min(caption.text.length, caption.shown + CAPTION_CHARS_PER_TICK);
+  caption.shown = Math.min(
+    caption.text.length,
+    caption.shown + CAPTION_CHARS_PER_TICK,
+  );
   nodes.captionsText.textContent = `[Jim]: ${captionWindow(caption.text.slice(0, caption.shown), CAPTION_MAX_CHARS)}`;
   showCaptions();
   if (caption.shown < caption.text.length) {
