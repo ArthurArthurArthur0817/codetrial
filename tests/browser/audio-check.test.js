@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 import {
   MIC_CONFIRM_FRAMES,
   MIC_SILENT_PEAK,
+  cameraErrorKind,
   mediaReadiness,
   outputUsable,
   peakLevel,
@@ -244,11 +245,11 @@ test("a refused camera reports the camera as the reason and stays closed", () =>
   const state = mediaReadiness({
     ...passingMedia,
     cameraReady: false,
-    cameraError: "NotReadableError",
+    cameraError: "NotAllowedError",
   });
   assert.equal(state.ready, false);
   assert.equal(state.blocker, "camera-error");
-  assert.match(state.message, /Camera unavailable: NotReadableError/);
+  assert.match(state.message, /Camera unavailable: NotAllowedError/);
   // Un-ticked, and only it: a camera failure is not evidence about the mic.
   assert.equal(state.steps.camera, false);
   assert.equal(state.steps.mic, true);
@@ -261,7 +262,7 @@ test("a refused camera reports the camera as the reason and stays closed", () =>
   const late = mediaReadiness({
     ...passingMedia,
     cameraReady: true,
-    cameraError: "NotReadableError",
+    cameraError: "no active video track",
   });
   assert.equal(
     late.steps.camera,
@@ -269,6 +270,77 @@ test("a refused camera reports the camera as the reason and stays closed", () =>
     "an error un-ticks the step on its own",
   );
   assert.equal(late.blocker, "camera-error");
+});
+
+// A camera that cannot be opened is usually held by another program, not
+// refused, so the advice must not send the candidate to permission settings.
+// Each spelling is fed on its own, so dropping any one of them from the
+// classifier fails here.
+test("a busy camera names the other app instead of asking for access", () => {
+  for (const cameraError of [
+    "NotReadableError",
+    "TrackStartError",
+    "AbortError",
+    "Could not start video source",
+    "Starting video failed",
+    "Device in use",
+    "no active video track",
+  ]) {
+    const busy = mediaReadiness({
+      ...passingMedia,
+      cameraReady: false,
+      cameraError,
+    });
+    assert.equal(busy.blocker, "camera-error", cameraError);
+    assert.match(busy.message, /another app/, cameraError);
+    assert.match(busy.message, /picks it up again by itself/, cameraError);
+    assert.match(busy.message, /stops watching and recording/, cameraError);
+    assert.doesNotMatch(busy.message, /Grant access/, cameraError);
+  }
+
+  // A denied permission is still a permission problem.
+  const denied = mediaReadiness({
+    ...passingMedia,
+    cameraReady: false,
+    cameraError: "NotAllowedError: Permission denied",
+  });
+  assert.match(denied.message, /Grant access, then test again\./);
+  assert.doesNotMatch(denied.message, /another app/);
+});
+
+// One classifier drives both the advice above and the reason a skipped camera
+// is recorded under, so each spelling is pinned here. Before it existed the
+// skip path knew no busy spelling and recorded a busy camera as declined.
+test("camera errors sort into what the candidate can do about them", () => {
+  const cases = {
+    busy: [
+      "NotReadableError",
+      "NotReadableError: Could not start video source",
+      "TrackStartError",
+      "AbortError: Starting video failed",
+      "Device in use",
+      "no active video track",
+    ],
+    denied: [
+      "NotAllowedError",
+      "NotAllowedError: Permission denied",
+      "PermissionDeniedError",
+      "Permission dismissed",
+      "not allowed",
+    ],
+    no_device: [
+      "NotFoundError",
+      "DevicesNotFoundError",
+      "Requested device not found",
+      "No camera",
+    ],
+    other: ["OverconstrainedError", "", null, undefined],
+  };
+  for (const [kind, errors] of Object.entries(cases)) {
+    for (const error of errors) {
+      assert.equal(cameraErrorKind(error), kind, String(error));
+    }
+  }
 });
 
 // The ladder is ordered, and the order is the claim: a candidate with two

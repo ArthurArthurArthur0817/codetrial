@@ -90,7 +90,7 @@ export function mediaReadiness({
       steps,
       ready: false,
       blocker: "camera-error",
-      message: `Camera unavailable: ${cameraError}. Grant access, then test again.`,
+      message: `Camera unavailable: ${cameraError}. ${cameraErrorAdvice(cameraError)}`,
     };
   }
   if (faceError && !cameraSkipped) {
@@ -133,6 +133,46 @@ export function mediaReadiness({
     blocker: null,
     message: "Media checks passed. You can start the interview.",
   };
+}
+
+/// Sorts a camera error into what the candidate can do about it, so the advice
+/// here and the reason `interview.js` records for a skipped camera cannot
+/// disagree about the same error.
+///
+/// A missing device and a refused permission are checked first, so an error
+/// that names either is never reported as a busy camera. `busy` is a camera
+/// the browser holds a grant for but cannot start, which is not a permission
+/// problem. On Windows a device is exclusive, so a meeting or recording app
+/// with its video on (Zoom, OBS, Teams) makes Chromium fail with
+/// `NotReadableError` ("Could not start video source", "Device in use", or
+/// `TrackStartError` in older builds) and Firefox with `AbortError: Starting
+/// video failed`. The preflight's own "no active video track" is the same
+/// situation seen later: the grant stands but the track stopped, for example
+/// behind a privacy shutter or with the device unplugged. Anything else is
+/// `other`.
+const NO_CAMERA = /not ?found|no camera/i;
+const DENIED_CAMERA = /permission|denied|not ?allowed/i;
+const BUSY_CAMERA =
+  /NotReadableError|TrackStartError|AbortError|could not start video source|starting video failed|device in use|no active video track/i;
+
+export function cameraErrorKind(error) {
+  const words = String(error || "");
+  if (NO_CAMERA.test(words)) return "no_device";
+  if (DENIED_CAMERA.test(words)) return "denied";
+  if (BUSY_CAMERA.test(words)) return "busy";
+  return "other";
+}
+
+/// "Grant access" sends a busy camera to settings that are already right. The
+/// pool retries a failed device every RETRY_MS, so the check recovers on its
+/// own once the camera is free; there is no button to press. Ticking the
+/// presentation box hands the camera back to the other app after Start, but
+/// it also stops the camera being watched and recorded, so the advice says so.
+function cameraErrorAdvice(cameraError) {
+  if (cameraErrorKind(cameraError) === "busy") {
+    return 'The camera is allowed but will not start: another app (for example Zoom, OBS or Teams) may be using it, or it is covered or unplugged. Free it and this check picks it up again by itself. If that app needs the camera during the interview, pass this check first, then tick "I will present this interview in Google Meet", start the interview, and turn that app\'s video back on; CodeTrial then stops watching and recording the camera.';
+  }
+  return "Grant access, then test again.";
 }
 
 export function videoTrackReady(track) {
