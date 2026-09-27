@@ -20,6 +20,15 @@ if [ "$(uname -s)" != Linux ] || [ "$(uname -m)" != x86_64 ]; then
     exit 1
 fi
 
+parent=$(dirname "$destination")
+mkdir -p "$parent"
+
+# Two builds starting on a fresh checkout would otherwise both miss the stamp,
+# and the second would delete the compiler the first is already running. The
+# lock is held until exit, so the stamp is read only by whoever owns it.
+exec 9> "$parent/.clang.lock"
+flock 9
+
 # The stamp is written last, so a present stamp means a complete unpack of this
 # revision and a rerun costs nothing.
 stamp=$destination/.revision
@@ -28,8 +37,6 @@ if [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$revision" ]; then
     exit 0
 fi
 
-parent=$(dirname "$destination")
-mkdir -p "$parent"
 archive=$(mktemp)
 staging=$(mktemp -d "$parent/.clang.XXXXXX")
 trap 'rm -rf "$archive" "$staging"' EXIT HUP INT TERM

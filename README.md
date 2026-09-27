@@ -51,7 +51,7 @@ the browser and reports itself unavailable rather than guessing.
 
 On Linux x86_64, `make` downloads the checksum-pinned WebRTC compiler into
 `target/clang` and uses it unless `CXX` is already set (requires `curl`,
-`sha256sum`, and `tar` with xz support). Plain `cargo` needs it named:
+`sha256sum`, `flock`, and `tar` with xz support). Plain `cargo` needs it named:
 `CXX="$PWD/target/clang/bin/clang++" cargo build`, or `CXX` set to an installed
 Clang 21+ compiler.
 
