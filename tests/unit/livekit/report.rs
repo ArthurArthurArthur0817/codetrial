@@ -163,6 +163,9 @@ fn report_error_note_never_carries_the_google_api_key() {
         note.contains("503 Service Unavailable"),
         "the reason still has to be readable: {note}"
     );
+    // The cause leads, and the runner's own vocabulary stays in the log.
+    assert!(note.starts_with("HTTP status server error"), "{note}");
+    assert!(!note.contains("LiveKit runner"), "{note}");
 }
 
 #[test]
@@ -225,12 +228,10 @@ fn report_helpers_use_report_topic_prompt_state_and_error_note() {
     assert!(prompt.contains("Latest test run (run #1, python): 1/2 cases passed."));
     assert!(packet.reliable);
     assert_eq!(packet.topic.as_deref(), Some(TOPIC_REPORT));
-    assert!(
-        payload["summary"]
-            .as_str()
-            .unwrap()
-            .contains("Final editor state: 13 bytes of python")
-    );
+    // The cause reaches the card; the editor size is for the log.
+    let summary = payload["summary"].as_str().unwrap();
+    assert!(summary.contains(": model unavailable. "), "{summary}");
+    assert!(!summary.contains("13 bytes"), "{summary}");
     assert_eq!(payload["hintsUsed"], 2);
     assert_eq!(report["integrityEvents"][0]["type"], "SESSION_START");
 
@@ -744,4 +745,10 @@ fn a_frozen_report_prompt_is_counted_and_a_missed_deadline_still_reports() {
     .unwrap();
     let payload: serde_json::Value = serde_json::from_slice(&packet.payload).unwrap();
     assert_eq!(payload["incomplete"], true, "{payload}");
+    // The whole generation's deadline, not a claim that Gemini never answered.
+    let summary = payload["summary"].as_str().unwrap();
+    assert!(
+        summary.contains(": Report generation did not finish within 125s. "),
+        "{summary}"
+    );
 }

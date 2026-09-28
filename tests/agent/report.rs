@@ -389,6 +389,25 @@ fn a_report_that_could_not_be_produced_is_not_a_rejection() {
     );
     assert_eq!(report["hintsUsed"], serde_json::json!(2));
 
+    // Advice the candidate can take, whatever the cause. The key and the logs
+    // are the operator's, and a 503 has nothing to do with the key.
+    assert!(
+        summary.contains("Try the interview again later"),
+        "{summary}"
+    );
+    assert!(!summary.contains("GOOGLE_API_KEY"), "{summary}");
+
+    // A cause that ends its own sentence is not given a second full stop.
+    let summary =
+        fallback_report(0, "Gemini unavailable (status=503): Try again later.")["summary"]
+            .as_str()
+            .unwrap()
+            .to_string();
+    assert!(
+        summary.contains("Try again later. Your session"),
+        "{summary}"
+    );
+
     // One flag, not two. `error: true` used to travel beside `incomplete` and
     // reached no consumer, because the browser's sanitizer dropped it.
     assert!(report.get("error").is_none(), "{report}");

@@ -94,10 +94,27 @@ fn report_packet(
             )),
             boot.problem,
         ),
-        Err(error) => final_report(
+
+        // `Elapsed` Displays as "deadline has elapsed", which does not say
+        // whose deadline. Not "Gemini did not answer" either: the deadline
+        // covers the repairs and the retry waits too, so it also runs out on a
+        // Gemini that answered every time with something unusable.
+        Err(_) => final_report(
             None,
             state.hints_used,
-            Some(&report_error_note(boot, state, reason, &error, api_key)),
+            Some(&report_error_note(
+                boot,
+                state,
+                reason,
+                &std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    format!(
+                        "Report generation did not finish within {}s",
+                        REPORT_TIMEOUT.as_secs()
+                    ),
+                ),
+                api_key,
+            )),
             boot.problem,
         ),
     };
@@ -303,6 +320,12 @@ fn report_prompt_text(
 /// card, so `api_key` is not decoration: an error carrying a credentialed URL
 /// would otherwise hand the server's Google key to whoever is taking the
 /// interview.
+///
+/// The note is the cause and nothing else. The runner's exit reason, the model,
+/// the problem id and the size of the editor used to lead it, so a candidate
+/// met a sentence about a "Rust LiveKit runner" before the 503 that was the
+/// whole story, and none of it was anything they could act on. It is what an
+/// operator correlates on, so it goes to the log beside the cause.
 fn report_error_note(
     boot: &RuntimeBootstrap<'_>,
     state: &RuntimeState,
@@ -311,13 +334,15 @@ fn report_error_note(
     api_key: &GeminiKeys,
 ) -> String {
     let detail = api_key.redact(&error.to_string());
-    format!(
-        "Rust LiveKit runner ended ({reason}) but Gemini report generation failed for model {} on {}. Final editor state: {} bytes of {}. Error: {detail}",
+    eprintln!(
+        "codetrial report_failed room={} runner_ended={reason:?} model={} problem={} editor_bytes={} language={} error={detail:?}",
+        boot.room_name,
         boot.report_model,
         boot.problem.id,
         state.code.len(),
         state.language
-    )
+    );
+    detail
 }
 
 fn report_data_packet(report: serde_json::Value) -> Result<DataPacket, serde_json::Error> {
