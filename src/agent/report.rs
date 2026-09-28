@@ -106,11 +106,17 @@ pub fn fallback_report(hints_used: u32, note: &str) -> serde_json::Value {
     // it. At 240 the boilerplate about the runner and the editor filled the
     // budget and the actual cause was cut off mid-word, so a lost report said
     // only that it was lost.
+    //
+    // The advice is the one thing true of every cause. It used to send the
+    // candidate to the agent logs and GOOGLE_API_KEY, which a candidate cannot
+    // read and which a 503, the usual cause, has nothing to do with; the note
+    // already names a rejected credential when that is what happened.
     let note = note.chars().take(600).collect::<String>();
+    let note = note.trim_end().trim_end_matches('.');
     serde_json::json!({
         "incomplete": true,
         "summary": format!(
-            "The automatic evaluation could not be completed: {note}. Your session ran end-to-end, but no scores were produced, so nothing here is an assessment of your work. Check the agent logs and GOOGLE_API_KEY, then try again."
+            "The automatic evaluation could not be completed: {note}. Your session ran end-to-end, but no scores were produced, so nothing here is an assessment of your work. Try the interview again later; if this keeps happening, whoever runs this server can find the cause in the agent logs."
         ),
         "improvementPlan": [],
         "frameworkAssessment": null,

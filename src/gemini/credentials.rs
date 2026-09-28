@@ -271,6 +271,13 @@ impl std::fmt::Display for ApiFailure {
         if self.status == 0 {
             return formatter.write_str("Gemini connection or setup failed");
         }
+
+        // Not "rejected": a 5xx is Google saying it could not serve anyone just
+        // then, and the report note that carries this is the one place the
+        // candidate learns that trying later is the whole remedy.
+        if self.status >= 500 {
+            return write!(formatter, "Gemini unavailable (status={})", self.status);
+        }
         write!(
             formatter,
             "Gemini request rejected (status={})",
@@ -323,10 +330,32 @@ impl ApiFailure {
         } else {
             None
         };
+
+        // Google names the fault in the body, "The model is overloaded" being
+        // the usual one, and a bare status left the reader to guess between an
+        // overload and an outage. Bounded and flattened to one line, since it
+        // is outside text on its way into a log line and a report card. Only a
+        // message with something in it, or the card reads "(status=503):."
+        // where the status-only wording would have done.
+        let detail = (status >= 500)
+            .then(|| body["error"]["message"].as_str())
+            .flatten()
+            .map(|message| {
+                message
+                    .trim()
+                    .chars()
+                    .map(|c| if c.is_control() { ' ' } else { c })
+                    .take(200)
+                    .collect::<String>()
+                    .trim_end()
+                    .to_string()
+            })
+            .filter(|message| !message.is_empty())
+            .map(|message| format!("Gemini unavailable (status={status}): {message}"));
         Self {
             status,
             credential,
-            detail: None,
+            detail,
         }
     }
 }

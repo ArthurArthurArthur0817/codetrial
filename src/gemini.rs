@@ -67,8 +67,10 @@ pub(crate) const FIRST_OPEN_LIMIT: Duration = CONNECT_TIMEOUT.saturating_add(SET
 /// the retry that followed was not recovering from an upstream fault, it was
 /// racing the same latency again with the budget already spent.
 const REPORT_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(20);
-/// Between transport attempts. What is being waited out is a 503 or a rate
-/// limit, which clears in about that long.
+/// The first wait between transport attempts, doubled for each call after it.
+/// A flat second spent the whole pool on a 503 inside five seconds of a
+/// deadline twenty-five times that long, so an overload that took ten seconds
+/// to clear cost the candidate their report with most of the clock unspent.
 const REPORT_RETRY_BACKOFF: Duration = Duration::from_secs(1);
 /// The idle-window note-taker's one attempt. Shorter than the report's, because
 /// this is spending a pause in someone's interview rather than a deadline they
@@ -572,7 +574,13 @@ impl ReportTransport for ReportCalls<'_> {
         &mut self,
         prompt: &str,
     ) -> impl Future<Output = Result<String, Box<dyn std::error::Error + Send + Sync>>> + Send {
-        generate_report_transport(self.keys, &self.url, prompt, &mut self.budget)
+        generate_report_transport(
+            self.keys,
+            &self.url,
+            prompt,
+            &mut self.budget,
+            REPORT_RETRY_BACKOFF,
+        )
     }
 }
 
@@ -745,8 +753,13 @@ async fn generate_report_transport(
     url: &str,
     prompt: &str,
     budget: &mut ReportCallBudget,
+    first_backoff: Duration,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let mut api_key = keys.select_report()?;
+
+    // Counted here rather than read off the budget, which the repair loop
+    // spends too: a first 503 after two repairs is still a first 503.
+    let mut failures = 0;
     loop {
         let call = budget.spend()?;
         let error = match generate_report_once(&api_key, url, prompt).await {
@@ -772,11 +785,12 @@ async fn generate_report_transport(
         let Some(next) = next else {
             return Err(io::Error::other(detail).into());
         };
+        failures += 1;
 
         // A new key has not failed anything, so it is not made to wait out the
         // old one's backoff.
         let backoff = if next == api_key {
-            REPORT_RETRY_BACKOFF
+            report_retry_backoff(first_backoff, failures)
         } else {
             Duration::ZERO
         };
@@ -793,6 +807,12 @@ async fn generate_report_transport(
         };
         api_key = next;
     }
+}
+
+/// The wait after the `failure`th transport failure of one call, counting from
+/// one.
+fn report_retry_backoff(first: Duration, failure: u32) -> Duration {
+    first * (1u32 << failure.saturating_sub(1).min(8))
 }
 
 /// The size limit and the parse, before any rule is checked: a runaway

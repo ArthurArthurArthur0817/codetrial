@@ -217,15 +217,36 @@ async fn report_failover_preserves_the_live_key_and_resumption_handle() {
     server.abort();
 }
 
+type TransportFixture = (
+    Result<String, Box<dyn std::error::Error + Send + Sync>>,
+    Vec<String>,
+    usize,
+);
+
+/// With no backoff, since only the tests that time a wait need one, and the
+/// rest would otherwise sleep through every retry they script.
 async fn report_failover_fixture(
     prefix: &str,
     statuses: Vec<u16>,
     single_key: bool,
-) -> (
-    Result<String, Box<dyn std::error::Error + Send + Sync>>,
-    Vec<String>,
-    usize,
-) {
+) -> TransportFixture {
+    report_transport_fixture(
+        prefix,
+        statuses,
+        single_key,
+        ReportCallBudget::new(),
+        Duration::ZERO,
+    )
+    .await
+}
+
+async fn report_transport_fixture(
+    prefix: &str,
+    statuses: Vec<u16>,
+    single_key: bool,
+    mut budget: ReportCallBudget,
+    backoff: Duration,
+) -> TransportFixture {
     let config = live_config(&[(
         "GOOGLE_API_KEYS",
         &format!("{prefix}-first,{prefix}-second"),
@@ -262,8 +283,7 @@ async fn report_failover_fixture(
     let server = tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
-    let mut budget = ReportCallBudget::new();
-    let result = generate_report_transport(&keys, &url, "prompt", &mut budget).await;
+    let result = generate_report_transport(&keys, &url, "prompt", &mut budget, backoff).await;
     server.abort();
     let seen = requests.lock().unwrap().clone();
     (result, seen, budget.remaining)
@@ -366,7 +386,8 @@ async fn a_key_ruled_out_during_the_backoff_is_not_retried() {
     let url = format!("http://{}/", listener.local_addr().unwrap());
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let mut budget = ReportCallBudget::new();
-    let result = generate_report_transport(&keys, &url, "prompt", &mut budget).await;
+    let result =
+        generate_report_transport(&keys, &url, "prompt", &mut budget, REPORT_RETRY_BACKOFF).await;
     server.abort();
     assert_eq!(result.unwrap(), "report");
     assert_eq!(
@@ -379,8 +400,14 @@ async fn a_key_ruled_out_during_the_backoff_is_not_retried() {
 #[tokio::test]
 async fn a_sole_rejected_key_reports_the_rejection_after_one_call() {
     let started = std::time::Instant::now();
-    let (result, seen, remaining) =
-        report_failover_fixture("report-sole-rejected", vec![401], true).await;
+    let (result, seen, remaining) = report_transport_fixture(
+        "report-sole-rejected",
+        vec![401],
+        true,
+        ReportCallBudget::new(),
+        REPORT_RETRY_BACKOFF,
+    )
+    .await;
     assert_eq!(
         result.unwrap_err().to_string(),
         "Gemini credential rejected"
@@ -395,14 +422,58 @@ async fn a_sole_rejected_key_reports_the_rejection_after_one_call() {
 #[tokio::test]
 async fn moving_to_a_backup_skips_the_backoff() {
     let started = std::time::Instant::now();
-    let (result, seen, _) =
-        report_failover_fixture("report-no-backoff", vec![429, 200], false).await;
+    let (result, seen, _) = report_transport_fixture(
+        "report-no-backoff",
+        vec![429, 200],
+        false,
+        ReportCallBudget::new(),
+        REPORT_RETRY_BACKOFF,
+    )
+    .await;
     assert_eq!(result.unwrap(), "report");
     assert_eq!(
         seen,
         ["report-no-backoff-first", "report-no-backoff-second"]
     );
     assert!(started.elapsed() < REPORT_RETRY_BACKOFF);
+}
+
+/// The repair loop spends the same budget, so indexing the wait on calls made
+/// put a first 503 after two repairs at four times the first wait.
+#[tokio::test]
+async fn a_first_transport_failure_after_repairs_waits_the_first_backoff() {
+    let backoff = Duration::from_millis(300);
+    let mut budget = ReportCallBudget::new();
+    budget.spend().unwrap();
+    budget.spend().unwrap();
+    let started = std::time::Instant::now();
+    let (result, seen, remaining) = report_transport_fixture(
+        "report-after-repairs",
+        vec![503, 200],
+        true,
+        budget,
+        backoff,
+    )
+    .await;
+    let elapsed = started.elapsed();
+    assert_eq!(result.unwrap(), "report");
+    assert_eq!(seen.len(), 2);
+    assert_eq!(remaining, MAX_REPORT_HTTP_ATTEMPTS - 4);
+    assert!(elapsed >= backoff && elapsed < backoff * 2, "{elapsed:?}");
+
+    // And the second failure of the same call waits twice as long.
+    let backoff = Duration::from_millis(100);
+    let started = std::time::Instant::now();
+    let (result, _, _) = report_transport_fixture(
+        "report-doubling",
+        vec![503, 503, 200],
+        true,
+        ReportCallBudget::new(),
+        backoff,
+    )
+    .await;
+    assert_eq!(result.unwrap(), "report");
+    assert!(started.elapsed() >= backoff * 3, "{:?}", started.elapsed());
 }
 
 #[tokio::test]
@@ -801,14 +872,28 @@ fn report_network_budget_covers_every_repair_and_retry_per_generation() {
     );
 
     // The deadline has to pay for the pool it hands out. A budget the clock
-    // cannot fund is calls that are promised and then cut off mid-flight.
-    let worst_case =
-        (REPORT_ATTEMPT_TIMEOUT + REPORT_RETRY_BACKOFF) * MAX_REPORT_HTTP_ATTEMPTS as u32;
+    // cannot fund is calls that are promised and then cut off mid-flight. The
+    // last call has no wait after it, so the backoffs are the ones before it.
+    let worst_case = REPORT_ATTEMPT_TIMEOUT * MAX_REPORT_HTTP_ATTEMPTS as u32
+        + (1..MAX_REPORT_HTTP_ATTEMPTS)
+            .map(|failure| report_retry_backoff(REPORT_RETRY_BACKOFF, failure as u32))
+            .sum::<Duration>();
     assert!(
         worst_case < crate::livekit::REPORT_TIMEOUT,
         "{worst_case:?} of calls against a {:?} deadline",
         crate::livekit::REPORT_TIMEOUT
     );
+}
+
+/// Doubling, from the flat wait the tests that race the first retry measure
+/// against. The pool used to be spent on a 503 in five seconds.
+#[test]
+fn report_retry_backoff_doubles_from_the_first_wait() {
+    let first = REPORT_RETRY_BACKOFF;
+    assert_eq!(report_retry_backoff(first, 1), first);
+    assert_eq!(report_retry_backoff(first, 2), first * 2);
+    assert_eq!(report_retry_backoff(first, 4), first * 8);
+    assert_eq!(report_retry_backoff(Duration::ZERO, 4), Duration::ZERO);
 }
 
 #[test]

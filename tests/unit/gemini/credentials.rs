@@ -22,7 +22,7 @@ fn failure_messages_distinguish_transport_status_and_credentials() {
     for (status, expected) in [
         (0, "Gemini connection or setup failed"),
         (400, "Gemini request rejected (status=400)"),
-        (503, "Gemini request rejected (status=503)"),
+        (503, "Gemini unavailable (status=503)"),
         (401, "Gemini credential rejected"),
         (429, "Gemini quota exhausted"),
     ] {
@@ -31,6 +31,38 @@ fn failure_messages_distinguish_transport_status_and_credentials() {
             expected
         );
     }
+}
+
+/// The body's own reason survives a 5xx, on one line, because it is what
+/// tells an overload from an outage.
+#[test]
+fn an_unavailable_gemini_keeps_the_reason_it_gave() {
+    let body = json!({"error": {"code": 503, "status": "UNAVAILABLE",
+        "message": "The model is overloaded.\nPlease try again later."}});
+    assert_eq!(
+        ApiFailure::from_response(503, &body).to_string(),
+        "Gemini unavailable (status=503): The model is overloaded. Please try again later."
+    );
+    let long = json!({"error": {"message": "x".repeat(1_000)}});
+    assert!(ApiFailure::from_response(500, &long).to_string().len() < 260);
+
+    // Nothing usable in the body falls back to the status alone rather than
+    // ending on a colon.
+    for message in ["", "   ", "\n\t"] {
+        let body = json!({"error": {"message": message}});
+        assert_eq!(
+            ApiFailure::from_response(503, &body).to_string(),
+            "Gemini unavailable (status=503)"
+        );
+    }
+
+    // Below 500 a message is not an outage's reason, so it is not quoted as
+    // one.
+    let body = json!({"error": {"message": "Invalid JSON payload received."}});
+    assert_eq!(
+        ApiFailure::from_response(400, &body).to_string(),
+        "Gemini request rejected (status=400)"
+    );
 }
 
 #[test]
