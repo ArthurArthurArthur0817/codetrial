@@ -7,6 +7,29 @@ set -u
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 
+# The Python under scripts/ and tests/ needs 3.9: dict union and
+# functools.cache. A distribution's python3 can be older than that while a newer
+# one sits beside it, and running the old one fails every Python gate on the
+# interpreter rather than on the code, so the first suitable one is taken:
+# python3 itself, then the newest versioned name. PYTHON names one outright.
+python_ok()
+{
+    "$1" -c 'import sys; sys.exit(sys.version_info < (3, 9))' > /dev/null 2>&1
+}
+if [ -z "${PYTHON:-}" ]; then
+    for candidate in python3 python3.14 python3.13 python3.12 python3.11 \
+        python3.10 python3.9; do
+        if python_ok "$candidate"; then
+            PYTHON=$candidate
+            break
+        fi
+    done
+fi
+if [ -z "${PYTHON:-}" ]; then
+    echo "no Python 3.9+ found; the Python gates will fail. Set PYTHON to one." >&2
+    PYTHON=python3
+fi
+
 failed=""
 
 # What this run did not check, collected as it goes and printed at the end.
@@ -257,11 +280,23 @@ gate fmt cargo fmt --check --manifest-path "$ROOT/Cargo.toml"
 # tool; overlapping with the fmt gate above costs nothing and reads better when
 # it is `cargo fmt` alone that drifted.
 gate indent "$ROOT/scripts/indent.sh" --check
+
+# webrtc-sys needs Clang 21+ on Linux, and without one clippy and cargo-test
+# fail on a build script rather than on anything this tree did. The Makefile's
+# default, for a run that did not come through `make check`: a caller's own CXX
+# wins, and the pinned one is a no-op once it is on disk. Here rather than at
+# the top, so the gates above it report before a first run's download, and a
+# fetch that fails leaves CXX unset for the build to say why.
+if [ -z "${CXX:-}" ] && [ "$(uname -sm)" = "Linux x86_64" ] \
+    && sh "$ROOT/scripts/fetch-clang.sh" "$ROOT/target/clang" > /dev/null; then
+    CXX=$ROOT/target/clang/bin/clang++
+    export CXX
+fi
 gate clippy cargo clippy --locked --all-targets --manifest-path "$ROOT/Cargo.toml" -- -D warnings
 gate release-msrv release_msrv_matches
 gate cargo-test cargo test --locked --manifest-path "$ROOT/Cargo.toml"
 
-gate gen-problems python3 "$ROOT/scripts/gen-problems.py" --check
+gate gen-problems "$PYTHON" "$ROOT/scripts/gen-problems.py" --check
 
 # Each unittest suite runs its cases across a thread pool.
 # `scripts/run-python-tests.py` carries the measurement and the isolation a
@@ -269,17 +304,17 @@ gate gen-problems python3 "$ROOT/scripts/gen-problems.py" --check
 # in a copy that drifts. Still one gate per suite, so a failure names which one.
 unittest_gate()
 {
-    python3 "$ROOT/scripts/run-python-tests.py" "$@"
+    "$PYTHON" "$ROOT/scripts/run-python-tests.py" "$@"
 }
 
 gate gen-problems-tests unittest_gate "$ROOT/tests/test_gen_problems.py"
-gate gen-problem-cards python3 "$ROOT/scripts/gen-problem-cards.py" --check
+gate gen-problem-cards "$PYTHON" "$ROOT/scripts/gen-problem-cards.py" --check
 gate wire-fixtures node "$ROOT/scripts/gen-wire-fixtures.mjs" --check
 gate recording-fixtures node "$ROOT/scripts/gen-recording-fixtures.mjs" --check
 gate recording-provision-check-tests unittest_gate "$ROOT/tests/test_recording_provision_check.py"
 gate recording-integration-harness-tests unittest_gate "$ROOT/tests/test_recording_integration_harness.py"
-gate study-plan-guards python3 "$ROOT/scripts/check-study-plan-guards.py"
-gate calibration-fixtures python3 "$ROOT/scripts/gen-calibration-fixtures.py" --check
+gate study-plan-guards "$PYTHON" "$ROOT/scripts/check-study-plan-guards.py"
+gate calibration-fixtures "$PYTHON" "$ROOT/scripts/gen-calibration-fixtures.py" --check
 gate calibration-tests unittest_gate "$ROOT/tests/test_calibrate_framework.py"
 gate browser-tests browser_tests
 gate eslint eslint_gate
