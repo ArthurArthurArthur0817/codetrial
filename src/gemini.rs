@@ -1177,9 +1177,13 @@ fn redact_api_keys(text: &str, api_keys: &[String]) -> String {
 
 /// The tools the live interviewer is offered, public so the behaviour check in
 /// `tests/interview_behavior.rs` offers a text model exactly the same ones.
-pub fn live_tool_declarations() -> Value {
-    json!([
-        {
+///
+/// A coding-only session is not offered `end_interview` at all: only the
+/// timer or the candidate ends it, and a tool the platform always refuses
+/// only invites a goodbye before the refusal arrives.
+pub fn live_tool_declarations(interview_loop: crate::agent::InterviewLoop) -> Value {
+    let mut tools = vec![
+        json!({
             "name": TOOL_READ_EDITOR,
             "description": "The editor's language and numbered code, the latest test run and the minutes left.",
             "parameters": {
@@ -1188,8 +1192,8 @@ pub fn live_tool_declarations() -> Value {
                     "fromLine": { "type": "INTEGER", "description": "The line to start from, when a cut answer names one." }
                 }
             }
-        },
-        {
+        }),
+        json!({
             "name": TOOL_LOG_HINT,
             "description": "Record a hint: requested true before one they asked for, then give the clue it returns with their editor; requested false after any other.",
             "parameters": {
@@ -1199,8 +1203,8 @@ pub fn live_tool_declarations() -> Value {
                 },
                 "required": ["requested"]
             }
-        },
-        {
+        }),
+        json!({
             "name": TOOL_RECORD_FRAMEWORK_EVIDENCE,
             "description": "Record REACTO or STAR evidence present in their speech, an editor snapshot or a test event.",
 
@@ -1219,12 +1223,15 @@ pub fn live_tool_declarations() -> Value {
                 },
                 "required": ["phase", "source", "kind", "confidence", "summary"]
             }
-        },
-        {
+        }),
+    ];
+    if interview_loop != crate::agent::InterviewLoop::CodingOnly {
+        tools.push(json!({
             "name": TOOL_END_INTERVIEW,
             "description": "Close an interview with nothing left to ask. The platform speaks the closing, so say no goodbye first."
-        }
-    ])
+        }));
+    }
+    Value::Array(tools)
 }
 
 /// `resume` carries a handle from a previous connection's
@@ -1260,7 +1267,7 @@ fn live_setup_message(boot: &RuntimeBootstrap<'_>, resume: Option<&str>) -> Valu
                     { "text": boot.instructions }
                 ]
             },
-            "tools": [{ "functionDeclarations": live_tool_declarations() }],
+            "tools": [{ "functionDeclarations": live_tool_declarations(boot.interview_loop) }],
             "inputAudioTranscription": {},
             "outputAudioTranscription": {},
             "realtimeInputConfig": {
