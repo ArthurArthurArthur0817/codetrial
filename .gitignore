@@ -55,6 +55,10 @@ web/vendor/pyodide/*.js
 web/vendor/pyodide/*.wasm
 web/vendor/pyodide/*.zip
 web/vendor/pyodide/*.json
+# Tree-sitter's runtime and grammars are fetched and checksum-pinned too.
+web/vendor/tree-sitter/tree-sitter.js
+web/vendor/tree-sitter/tree-sitter.wasm
+web/vendor/tree-sitter-*/*.wasm
 # And pdf.js, pinned in web/vendor/pdfjs/SHA256SUMS: 1.7 MB of minified API
 # and worker, the same argument at a smaller size.
 web/vendor/pdfjs/*.mjs

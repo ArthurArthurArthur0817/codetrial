@@ -2,11 +2,11 @@ import { tokenize } from "./tokenizer.js";
 
 const INDENT = "    ";
 
-function lastCodeCharacter(value, start, language) {
+function lastCodeCharacter(value, start, language, parse) {
   const prefix = value.slice(0, start);
   const lineStart = prefix.lastIndexOf("\n") + 1;
   let last = "";
-  for (const token of tokenize(prefix, language).tokens) {
+  for (const token of tokenize(prefix, language, parse).tokens) {
     if (token.end <= lineStart || token.kind === "comment") continue;
     const text = prefix.slice(Math.max(token.start, lineStart), token.end);
     if (token.kind !== "code") {
@@ -21,11 +21,11 @@ function lastCodeCharacter(value, start, language) {
 
 const BRACKET_PAIRS = { "(": ")", "{": "}", "[": "]" };
 
-export function indentNewline(value, start, end, language) {
+export function indentNewline(value, start, end, language, parse) {
   const lineStart = start === 0 ? 0 : value.lastIndexOf("\n", start - 1) + 1;
   const before = value.slice(lineStart, start);
   const indentation = before.match(/^[ \t]*/)[0];
-  const opener = lastCodeCharacter(value, start, language);
+  const opener = lastCodeCharacter(value, start, language, parse);
   const closer = BRACKET_PAIRS[opener];
   const nested = Boolean(closer) || (language === "python" && opener === ":");
   const innerIndent = indentation + (nested ? INDENT : "");

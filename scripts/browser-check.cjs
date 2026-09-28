@@ -42,6 +42,14 @@ function interviewUrl(problemId) {
 
 async function checkEditorNewlines(page) {
   const editor = page.getByLabel("Code editor");
+  await page.evaluate(async () => {
+    const { prepareLanguage } = await import("/syntax-parser.js");
+    await Promise.all(
+      ["c", "cpp", "java", "javascript", "python"].map((language) =>
+        prepareLanguage(language),
+      ),
+    );
+  });
   const cases = [
     {
       name: "existing indentation",
@@ -121,8 +129,20 @@ async function checkEditorNewlines(page) {
     {
       name: "JavaScript multiline template contains block opener",
       language: "JavaScript",
-      value: 'const text = `\n/*\n`;\n    if (ready) {',
-      expected: 'const text = `\n/*\n`;\n    if (ready) {\n        ',
+      value: "const text = `\n/*\n`;\n    if (ready) {",
+      expected: "const text = `\n/*\n`;\n    if (ready) {\n        ",
+    },
+    {
+      name: "unfinished JavaScript template",
+      language: "JavaScript",
+      value: "const text = `\n/*\n  {",
+      expected: "const text = `\n/*\n  {\n  ",
+    },
+    {
+      name: "unfinished Python triple-quoted string",
+      language: "Python 3",
+      value: 'text = """\n#:\n  if ready:',
+      expected: 'text = """\n#:\n  if ready:\n  ',
     },
     {
       name: "JavaScript regex contains block opener",
@@ -131,16 +151,45 @@ async function checkEditorNewlines(page) {
       expected: String.raw`const re = /\/*/;` + "\n    if (ready) {\n        ",
     },
     {
+      name: "regexp after function declaration",
+      language: "JavaScript",
+      value:
+        String.raw`function f() {} /\/*/.test(value);` + "\n    if (ready) {",
+      expected:
+        String.raw`function f() {} /\/*/.test(value);` +
+        "\n    if (ready) {\n        ",
+    },
+    {
+      name: "division after private property",
+      language: "JavaScript",
+      value:
+        "class A { #return = 4; f() { return this.#return / 2; } }\n    if (ready) {",
+      expected:
+        "class A { #return = 4; f() { return this.#return / 2; } }\n    if (ready) {\n        ",
+    },
+    {
       name: "C++ raw string contains block opener",
       language: "C++",
       value: 'auto text = R"tag(\n/*\n)tag";\n    if (ready) {',
       expected: 'auto text = R"tag(\n/*\n)tag";\n    if (ready) {\n        ',
     },
     {
+      name: "unfinished C++ raw string",
+      language: "C++",
+      value: 'auto text = R"tag(\n/*\n  {',
+      expected: 'auto text = R"tag(\n/*\n  {\n  ',
+    },
+    {
       name: "Java text block contains block opener",
       language: "Java",
       value: 'String text = """\n/*\n""";\n    if (ready) {',
       expected: 'String text = """\n/*\n""";\n    if (ready) {\n        ',
+    },
+    {
+      name: "unfinished Java text block",
+      language: "Java",
+      value: 'String text = """\n/*\n  {',
+      expected: 'String text = """\n/*\n  {\n  ',
     },
     {
       name: "Python ignores block comment syntax",

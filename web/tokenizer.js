@@ -1,7 +1,46 @@
-const CONTROL_PARENS = new Set(["if", "while", "for", "with", "switch", "catch"]);
+import { parseSyntax } from "./syntax-parser.js";
+
+const SYNTAX_REGIONS = {
+  python: { strings: new Set(["string"]) },
+  javascript: {
+    strings: new Set(["string"]),
+    regexp: "regex",
+    template: "template_string",
+    comments: new Set(["comment", "html_comment", "hash_bang_line"]),
+  },
+  c: { strings: new Set(["string_literal", "char_literal"]) },
+  cpp: {
+    strings: new Set(["string_literal", "char_literal", "raw_string_literal"]),
+  },
+  java: {
+    strings: new Set(["string_literal", "character_literal"]),
+    comments: new Set(["line_comment", "block_comment"]),
+  },
+};
+
+const CONTROL_PARENS = new Set([
+  "if",
+  "while",
+  "for",
+  "with",
+  "switch",
+  "catch",
+]);
 const EXPRESSION_KEYWORDS = new Set([
-  "return", "throw", "case", "delete", "void", "typeof", "new", "yield", "await",
-  "in", "of", "instanceof", "else", "do",
+  "return",
+  "throw",
+  "case",
+  "delete",
+  "void",
+  "typeof",
+  "new",
+  "yield",
+  "await",
+  "in",
+  "of",
+  "instanceof",
+  "else",
+  "do",
 ]);
 const BLOCK_KEYWORDS = new Set(["else", "do", "try", "finally"]);
 const CPP_RAW_START = /^(?:u8|u|U|L)?R"([^\s()\\]{0,16})\(/;
@@ -11,39 +50,72 @@ const IDENTIFIER_PART = /[$_\u200c\u200d\p{ID_Continue}]/u;
 const TEMPLATE = "`";
 
 const C_LIKE = {
-  lineComment: "//", quotes: "\"'", lineContinuation: true,
-  scanners: [scanLineComment, scanBlockComment, scanQuotedString, scanPlainCode],
+  lineComment: "//",
+  quotes: "\"'",
+  lineContinuation: true,
+  scanners: [
+    scanLineComment,
+    scanBlockComment,
+    scanQuotedString,
+    scanPlainCode,
+  ],
 };
 // Scanner order matters: more specific lexical constructs must be checked
 // before the generic code scanner.
 const LANGUAGES = {
   python: {
-    lineComment: "#", quotes: "\"'", lineContinuation: true,
-    scanners: [scanLineComment, scanPythonTripleString, scanQuotedString, scanPlainCode],
+    lineComment: "#",
+    quotes: "\"'",
+    lineContinuation: true,
+    scanners: [
+      scanLineComment,
+      scanPythonTripleString,
+      scanQuotedString,
+      scanPlainCode,
+    ],
   },
   javascript: {
     ...C_LIKE,
     scanners: [
-      scanInterpolationClose, scanLineComment, scanBlockComment, scanTemplateStart,
-      scanQuotedString, scanJavaScriptRegexp, scanJavaScriptCode,
+      scanInterpolationClose,
+      scanLineComment,
+      scanBlockComment,
+      scanTemplateStart,
+      scanQuotedString,
+      scanJavaScriptRegexp,
+      scanJavaScriptCode,
     ],
   },
   c: C_LIKE,
   cpp: {
     ...C_LIKE,
-    scanners: [scanLineComment, scanBlockComment, scanCppRawString, scanCppNumber,
-      scanQuotedString, scanPlainCode],
+    scanners: [
+      scanLineComment,
+      scanBlockComment,
+      scanCppRawString,
+      scanCppNumber,
+      scanQuotedString,
+      scanPlainCode,
+    ],
   },
   java: {
-    ...C_LIKE, lineContinuation: false,
-    scanners: [scanLineComment, scanBlockComment, scanJavaTextBlock, scanQuotedString,
-      scanPlainCode],
+    ...C_LIKE,
+    lineContinuation: false,
+    scanners: [
+      scanLineComment,
+      scanBlockComment,
+      scanJavaTextBlock,
+      scanQuotedString,
+      scanPlainCode,
+    ],
   },
 };
 
 function newlineWidth(code, at) {
   if (code[at] === "\r") return code[at + 1] === "\n" ? 2 : 1;
-  return code[at] === "\n" || code[at] === "\u2028" || code[at] === "\u2029" ? 1 : 0;
+  return code[at] === "\n" || code[at] === "\u2028" || code[at] === "\u2029"
+    ? 1
+    : 0;
 }
 
 // Append a token range, merging it with the previous token when both ranges
@@ -110,8 +182,11 @@ function scanQuotedString(scan) {
 
 function scanPythonTripleString(scan) {
   const quote = scan.code[scan.index];
-  if ((quote !== '"' && quote !== "'") ||
-      !scan.code.startsWith(quote.repeat(3), scan.index)) return null;
+  if (
+    (quote !== '"' && quote !== "'") ||
+    !scan.code.startsWith(quote.repeat(3), scan.index)
+  )
+    return null;
   return { end: quotedEnd(scan, quote, 3, true), kind: "string" };
 }
 
@@ -130,7 +205,10 @@ function scanCppRawString(scan) {
   if (!/[RuUL]/.test(code[index])) return null;
   const opening = CPP_RAW_START.exec(code.slice(index, index + 24));
   if (!opening) return null;
-  const closing = code.indexOf(")" + opening[1] + '"', index + opening[0].length);
+  const closing = code.indexOf(
+    ")" + opening[1] + '"',
+    index + opening[0].length,
+  );
   if (closing === -1) scan.endContext = "string";
   return {
     end: closing === -1 ? code.length : closing + opening[1].length + 2,
@@ -144,8 +222,12 @@ function scanCppNumber(scan) {
   let at = index + 1;
   while (at < code.length) {
     if (/[\w.]/.test(code[at])) at += 1;
-    else if (code[at] === "'" && /[0-9a-fA-F]/.test(code[at + 1] || "") &&
-             /[0-9a-fA-F]/.test(code[at - 1])) at += 1;
+    else if (
+      code[at] === "'" &&
+      /[0-9a-fA-F]/.test(code[at + 1] || "") &&
+      /[0-9a-fA-F]/.test(code[at - 1])
+    )
+      at += 1;
     else break;
   }
   return { end: at, kind: "code" };
@@ -154,6 +236,7 @@ function scanCppNumber(scan) {
 function scanTemplateStart(scan) {
   if (scan.code[scan.index] !== TEMPLATE) return null;
   scan.js.frames.push({ kind: "template" });
+  if (scan.index + 1 === scan.code.length) scan.endContext = "string";
   return { end: scan.index + 1, kind: "string" };
 }
 
@@ -177,14 +260,20 @@ function scanTemplateText(scan) {
       return { end: at + 2 };
     } else at += 1;
   }
-  if (at === code.length && frames.at(-1)?.kind === "template") scan.endContext = "string";
+  if (at === code.length && frames.at(-1)?.kind === "template")
+    scan.endContext = "string";
   return { end: at, kind: "string" };
 }
 
 function scanInterpolationClose(scan) {
   const { frames } = scan.js;
   const frame = frames.at(-1);
-  if (frame?.kind !== "interpolation" || frame.depth || scan.code[scan.index] !== "}") return null;
+  if (
+    frame?.kind !== "interpolation" ||
+    frame.depth ||
+    scan.code[scan.index] !== "}"
+  )
+    return null;
   frames.pop();
   return { end: scan.index + 1, kind: "code" };
 }
@@ -192,6 +281,13 @@ function scanInterpolationClose(scan) {
 function scanJavaScriptRegexp(scan) {
   const { code, index, js } = scan;
   if (code[index] !== "/" || !js.expectRegexp) return null;
+  // A parsed slash outside an ERROR node is division unless the grammar
+  // supplied a regexp region, which the main loop consumes first.
+  if (
+    scan.syntax &&
+    !scan.errors.some(({ start, end }) => start <= index && index < end)
+  )
+    return null;
   let at = index + 1;
   let characterClass = false;
   let closed = false;
@@ -297,31 +393,62 @@ function scanPlainCode(scan) {
   return { end: scan.index + 1, kind: "code" };
 }
 
-export function tokenize(code, language) {
+function scanFallback(code, language, syntax = null) {
   if (!Object.hasOwn(LANGUAGES, language))
     throw new RangeError("Unsupported language: " + language);
   const rules = LANGUAGES[language];
   const scan = {
     // index is the next source position; tokens are ranges; endContext records
     // an unfinished comment or literal.
-    code, rules, index: 0, tokens: [], endContext: "code",
+    code,
+    rules,
+    index: 0,
+    tokens: [],
+    endContext: "code",
+    syntax,
+    errors: syntax?.errors ?? [],
     // Distinguish division from regexps and template text from interpolation code.
-    js: language === "javascript" ? {
-      // Frames track templates; interpolation depth counts inner braces.
-      frames: [],
-      expectRegexp: true,
-      // True after if/while/etc.; at (, parens keeps it for the matching ).
-      controlParen: false,
-      // True after . so obj.return does not treat return as a keyword.
-      propertyName: false,
-      // True after if (...), else, or =>; { then opens a block, not an object.
-      blockNext: false,
-      parens: [], braces: [],
-    } : null,
+    js:
+      language === "javascript"
+        ? {
+            // Frames track templates; interpolation depth counts inner braces.
+            frames: [],
+            expectRegexp: true,
+            // True after if/while/etc.; at (, parens keeps it for the matching ).
+            controlParen: false,
+            // True after . so obj.return does not treat return as a keyword.
+            propertyName: false,
+            // True after if (...), else, or =>; { then opens a block, not an object.
+            blockNext: false,
+            parens: [],
+            braces: [],
+          }
+        : null,
   };
+  let regionIndex = 0;
   while (scan.index < code.length) {
-    const scanners = scan.js?.frames.at(-1)?.kind === "template" ?
-      [scanTemplateText] : rules.scanners;
+    while (syntax?.regions[regionIndex]?.end <= scan.index) regionIndex += 1;
+    const region = syntax?.regions[regionIndex];
+    if (region?.start === scan.index) {
+      emit(scan.tokens, region.start, region.end, region.kind);
+      if (scan.js && region.kind !== "comment") {
+        scan.js.expectRegexp = false;
+        scan.js.propertyName = false;
+      }
+      if (
+        region.kind === "comment" &&
+        region.end === code.length &&
+        !code.startsWith("/*", region.start)
+      )
+        scan.endContext = "lineComment";
+      scan.index = region.end;
+      regionIndex += 1;
+      continue;
+    }
+    const scanners =
+      scan.js?.frames.at(-1)?.kind === "template"
+        ? [scanTemplateText]
+        : rules.scanners;
     let result;
     for (const scanner of scanners) {
       // A scanner examines the source at scan.index.
@@ -333,4 +460,84 @@ export function tokenize(code, language) {
     scan.index = result.end;
   }
   return { tokens: scan.tokens, endContext: scan.endContext };
+}
+
+function syntaxRegions(language, root) {
+  const rules = SYNTAX_REGIONS[language];
+  const regions = [];
+  const errors = [];
+  function visit(node) {
+    if (node.type === "ERROR") {
+      errors.push({ start: node.startIndex, end: node.endIndex });
+    } else if (rules.comments?.has(node.type) || node.type === "comment") {
+      regions.push({
+        start: node.startIndex,
+        end: node.endIndex,
+        kind: "comment",
+      });
+    } else if (rules.strings.has(node.type)) {
+      regions.push({
+        start: node.startIndex,
+        end: node.endIndex,
+        kind: "string",
+      });
+    } else if (node.type === rules.regexp) {
+      regions.push({
+        start: node.startIndex,
+        end: node.endIndex,
+        kind: "regexp",
+      });
+    } else if (node.type === rules.template) {
+      let start = node.startIndex;
+      for (const child of node.namedChildren) {
+        if (child.type !== "template_substitution") continue;
+        regions.push({ start, end: child.startIndex, kind: "string" });
+        visit(child);
+        start = child.endIndex;
+      }
+      regions.push({ start, end: node.endIndex, kind: "string" });
+    } else {
+      for (const child of node.namedChildren) visit(child);
+    }
+  }
+  visit(root);
+  regions.sort((a, b) => a.start - b.start);
+  return { regions, errors };
+}
+
+function fromSyntaxTree(code, syntax) {
+  const { regions } = syntax;
+  const tokens = [];
+  let at = 0;
+  for (const region of regions) {
+    emit(tokens, at, region.start, "code");
+    emit(tokens, region.start, region.end, region.kind);
+    at = region.end;
+  }
+  emit(tokens, at, code.length, "code");
+  const last = regions.at(-1);
+  const lineComment =
+    last?.kind === "comment" &&
+    last.end === code.length &&
+    !code.startsWith("/*", last.start);
+  return { tokens, endContext: lineComment ? "lineComment" : "code" };
+}
+
+export function tokenize(code, language, parse = parseSyntax) {
+  if (!Object.hasOwn(LANGUAGES, language))
+    return {
+      tokens: code.length ? [{ start: 0, end: code.length, kind: "code" }] : [],
+      endContext: "code",
+    };
+  const tree = parse(code, language);
+  if (!tree) return scanFallback(code, language);
+  try {
+    const syntax = syntaxRegions(language, tree.rootNode);
+    // The scanner fills gaps around valid nodes when typing leaves an ERROR.
+    return tree.rootNode.hasError
+      ? scanFallback(code, language, syntax)
+      : fromSyntaxTree(code, syntax);
+  } finally {
+    tree.delete();
+  }
 }
