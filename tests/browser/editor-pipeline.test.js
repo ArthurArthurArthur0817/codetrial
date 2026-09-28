@@ -88,6 +88,29 @@ test("typing an opening bracket auto-closes it, in a real browser", async (t) =>
   }
 });
 
+test("an opener typed before existing text is inserted alone, in a real browser", async (t) => {
+  const ctx = await editorPage(t);
+  if (!ctx) return;
+  const { page, errors } = ctx;
+  try {
+    await page.keyboard.type("a+b)");
+    await page.keyboard.press("Home");
+    await page.keyboard.type("(");
+    assert.deepEqual(await caretState(page), {
+      value: "(a+b)",
+      start: 1,
+      end: 1,
+    });
+    assert.deepEqual(
+      errors,
+      [],
+      `typing "(" before text threw in the browser: ${errors[0]}`,
+    );
+  } finally {
+    await page.close();
+  }
+});
+
 test("closing a pair by hand types over the closer instead of doubling it, in a real browser", async (t) => {
   const ctx = await editorPage(t);
   if (!ctx) return;
