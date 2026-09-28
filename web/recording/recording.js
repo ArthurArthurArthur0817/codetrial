@@ -419,9 +419,9 @@ function schedulePoll() {
 function startAvatar() {
   avatar = createAvatar({
     mount: nodes.jimAvatar,
-    loadModel: async () => {
+    loadModel: async (signal) => {
       const { loadAvatarModel } = await import("/avatar/model.js");
-      return loadAvatarModel(nodes.jimAvatar);
+      return loadAvatarModel(nodes.jimAvatar, signal);
     },
   });
   void avatar.ready.then((rendered) => {

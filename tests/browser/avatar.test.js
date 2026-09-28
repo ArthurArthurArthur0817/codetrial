@@ -194,7 +194,7 @@ test("avatar dom contract", () => {
   // the rule used to be copied into both entry points and pinned in one.
   const loader = functionBody(read("web/avatar/model.js"), "loadAvatarModel");
   assert.ok(
-    loader.indexOf("loadModelBytes()") < loader.indexOf('import("./vrm.js")'),
+    loader.indexOf("loadModelBytes(") < loader.indexOf('import("./vrm.js")'),
     "the model must be fetched before the renderer bundle is imported",
   );
   assert.doesNotMatch(script, /^import .*avatar\/vrm\.js/m);
@@ -617,12 +617,30 @@ test("avatar canvas has an accessible name", () => {
   );
 });
 
+test("the page covers the avatar stage for the whole preflight", () => {
+  // The stage draws nothing and is inert while covered; the stage tests drive
+  // that directly, so this pins only the page's side: covered from start-up,
+  // uncovered once the preflight resolves, and never the other way round.
+  const page = read("web/interview.js");
+  const covered = page.indexOf("setStageCovered(true)");
+  const uncovered = page.indexOf("setStageCovered(false)");
+  assert.ok(covered >= 0 && uncovered >= 0, "both sides are called");
+  assert.ok(
+    covered < page.indexOf("startAvatar();") &&
+      page.indexOf("await runAudioCheck()") < uncovered,
+    "covered before the avatar starts, uncovered after the preflight",
+  );
+});
+
 test("avatar stops rendering while the page is hidden", () => {
   const script = interviewSource();
+  // The pause itself is exercised in avatar-stage.test.js; this only pins
+  // that the hidden check comes before the next frame is requested.
   const pump = functionBody(script, "pumpAvatar");
-  assert.match(
-    pump,
-    /if \(document\.hidden\) \{\s*avatarFrame = null;\s*return;\s*\}/,
+  assert.ok(
+    pump.indexOf("document.hidden") >= 0 &&
+      pump.indexOf("document.hidden") <
+        pump.indexOf("requestAnimationFrame(pumpAvatar)"),
     "a hidden page stops asking for frames rather than asking and returning early",
   );
   const resume = functionBody(script, "resumeAvatar");
@@ -778,7 +796,7 @@ test("avatar analyser reads Jim and never the candidate", () => {
   // stray hosted agent or a second participant is not the interviewer.
   assert.match(
     functionBody(script, "attachAvatarAnalyser"),
-    /if \(!isAgent\(participant\)\) return;/,
+    /!isAgent\(participant\)\) return;/,
   );
   // And the teardown is gated on the analyser's own track, or a second
   // participant leaving killed lip sync for the rest of the session.
@@ -836,23 +854,4 @@ test("avatar analyser reads Jim and never the candidate", () => {
   }
   // A context built outside a user gesture starts suspended and reads silence.
   assert.match(script, /jimAnalyserContext\.state === "suspended"/);
-});
-
-test("avatar teardown cancels a deferred width retry", () => {
-  const release = functionBody(script, "stopWatchingStageWidth");
-  assert.match(
-    release,
-    /window\.removeEventListener\("resize", stageWidthWatch\);/,
-  );
-  assert.match(release, /stageWidthWatch = null;/);
-  // Both ends: teardown drops it, and so does a start that succeeds. Waiting
-  // for the next resize to notice would hold the handler for a session that
-  // never resizes again.
-  for (const caller of ["stopAvatar", "startAvatar"]) {
-    assert.match(
-      functionBody(script, caller),
-      /stopWatchingStageWidth\(\)/,
-      `${caller} must release the width watch`,
-    );
-  }
 });

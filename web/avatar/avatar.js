@@ -136,9 +136,12 @@ function approach(current, target, dt, durationMs) {
   return current + (target - current) * (1 - Math.exp(-dt / durationMs));
 }
 
-/// `loadModel` resolves to `{ apply(pose), dispose() }` or rejects. Rejecting,
-/// timing out, and never being called all land on the same neutral panel, so a
-/// browser without WebGL and an unreachable model degrade identically.
+/// `loadModel(signal)` resolves to `{ apply(pose), dispose() }` or rejects.
+/// Rejecting, timing out, and never being called all land on the same neutral
+/// panel, so a browser without WebGL and an unreachable model degrade
+/// identically. The signal aborts once the load stops mattering, on `destroy()`
+/// or a lost timeout race, so a loader can stop before it builds a renderer
+/// nobody will draw.
 export function createAvatar({
   mount,
   loadModel,
@@ -185,16 +188,19 @@ export function createAvatar({
   }
 
   setPhase("loading");
+  const loadAbort = new AbortController();
+  // Both end the avatar for good; they differ only in what the panel says.
+  const ended = () => phase === "stopped" || phase === "degraded";
 
   // Called inside a promise, not directly. A loadModel that throws
   // synchronously would otherwise escape past withTimeout and out of
   // createAvatar, leaving the mount stuck on "loading" forever with no panel
   // text and no rejection anyone can catch.
-  const loading = Promise.resolve().then(() => loadModel());
+  const loading = Promise.resolve().then(() => loadModel(loadAbort.signal));
 
   const ready = withTimeout(loading, timeoutMs)
     .then((loaded) => {
-      if (phase === "stopped") return false;
+      if (ended()) return false;
       if (!loaded || typeof loaded.apply !== "function")
         throw new Error("avatar model has no apply()");
       model = loaded;
@@ -207,18 +213,23 @@ export function createAvatar({
       // here would surface as an unhandled rejection mid-interview. But every
       // failure mode collapses to the same panel by design, so without this
       // line a broken model and an absent one are indistinguishable from
-      // outside the page.
+      // outside the page. Not for a load that failed because the avatar was
+      // ended on purpose: Hide or leaving aborts it, and that AbortError is
+      // neither a broken model nor an absent one.
+      loadAbort.abort();
+      if (ended()) return false;
       console.warn("codetrial avatar_unavailable", error);
-      if (phase !== "stopped") setPhase("unavailable");
+      setPhase("unavailable");
       return false;
     });
 
-  // The timeout races the load, it cannot cancel it. A model that arrives after
-  // the race was lost has already built a WebGL context and appended a canvas,
-  // so without this it sits there for the rest of the interview burning one of
-  // the browser's ~16 contexts, with its canvas under a neutral panel whose
-  // whole claim is that no canvas exists. Chained after `ready` so it observes
-  // the adoption decision rather than racing it.
+  // The abort above asks the load to stop, and a loader is free to ignore it.
+  // A model that arrives after the race was lost anyway has already built a
+  // WebGL context and appended a canvas, so without this it sits there for the
+  // rest of the interview burning one of the browser's ~16 contexts, with its
+  // canvas under a neutral panel whose whole claim is that no canvas exists.
+  // Chained after `ready` so it observes the adoption decision rather than
+  // racing it.
   void ready
     .then(() => loading)
     .then((loaded) => {
@@ -318,9 +329,12 @@ export function createAvatar({
     return pose;
   }
 
-  function destroy() {
+  /// `final` is "degraded" when load retired the avatar rather than the page
+  /// ending, so the one owner of `data-avatar-state` writes that too.
+  function destroy(final = "stopped") {
     setSpeaking(false);
-    setPhase("stopped");
+    loadAbort.abort();
+    setPhase(final);
     model?.dispose?.();
     model = null;
   }
@@ -352,4 +366,167 @@ function withTimeout(promise, timeoutMs) {
   return Promise.race([Promise.resolve(promise), expiry]).finally(() =>
     clearTimeout(timer),
   );
+}
+
+// Audio has priority over decoration. A frame cap alone did not prevent audio
+// delays under CPU load, so sustained pressure retires the live avatar. These
+// are rendering heuristics, not measurements of WebRTC playout latency; the
+// playout monitor below is the measurement.
+//
+// Cadence is judged by time, cost by frames. A mean cost let one 2 s stall in
+// an otherwise short window outweigh every healthy frame beside it, so cost
+// counts frames. But counting slow frames missed a page frozen in bursts: three
+// quick frames and a 1.5 s stall, over and over, is 94% stalled and only a
+// quarter of its frames slow. So cadence adds up the time spent in gaps past
+// 45 ms, and more than half the window stalled is overloaded.
+//
+// And two windows in a row, as the playout monitor asks. The first window
+// after the preflight lands on the page joining the room and publishing its
+// tracks, which is start-up work rather than sustained load, and a single
+// window judged an avatar on it that would have drawn cheaply from then on.
+export const AVATAR_FRAME_MS = 1000 / 30;
+export function createRenderBudget() {
+  let start = null;
+  let previous = null;
+  let count = 0;
+  let stalledMs = 0;
+  let expensive = 0;
+  let streak = 0;
+  let last = null;
+  /// A window that closes at `at` hands that frame to the next one as its
+  /// start, so no interval is lost between windows. A pause breaks the run of
+  /// windows as well as the window itself.
+  function startWindow(at) {
+    start = previous = at;
+    count = stalledMs = expensive = 0;
+  }
+  function reset() {
+    startWindow(null);
+    streak = 0;
+  }
+  function sample(at, duration) {
+    if (previous === null) {
+      startWindow(at);
+      return false;
+    }
+    count += 1;
+    // Beyond one missed vsync at the 30 fps cap: 50 ms at 60 Hz counts, the
+    // 33 ms the cap asks for does not, and neither does the 40 ms the cap lands
+    // on at 50 and 75 Hz, which a line at 40 split in half on timer jitter.
+    if (at - previous > 45) stalledMs += at - previous;
+    if (duration > 8) expensive += 1;
+    previous = at;
+    const span = at - start;
+    if (span < 2000) return false;
+    // Ten frames make a cost fraction worth reading, but waiting for them let a
+    // worse freeze take longer to retire: two windows took 21 s at 1 fps. A
+    // window closes at 4 s whatever it has, and its stalled time decides.
+    if (count < 10 && span < 4000) return false;
+    last = {
+      stalledPct: Math.round((100 * stalledMs) / span),
+      expensivePct: Math.round((100 * expensive) / count),
+    };
+    const overloaded = stalledMs / span > 0.5 || expensive / count > 0.5;
+    startWindow(at);
+    streak = overloaded ? streak + 1 : 0;
+    return streak >= 2;
+  }
+  /// What the last closed window measured, for the warning a retirement logs.
+  return { sample, reset, last: () => last };
+}
+
+// How often Jim's inbound audio is read, and what counts as late. On a
+// CPU-bound laptop the jitter-buffer delay measured 75-104 ms with the avatar
+// hidden and 172-1187 ms with it drawn, and a 30 fps cap still left audio late
+// at 38-57 page fps: page fps does not see the contention, the buffer does. Two
+// consecutive windows over the line, so one network burst does not retire the
+// avatar on its own. Network jitter that persists will retire it too, which is
+// the right bias: when Jim is already late, decoration is the first thing to
+// give up.
+const PLAYOUT_POLL_MS = 2000;
+const PLAYOUT_LIMIT_MS = 200;
+
+/// `sample` takes the cumulative `jitterBufferDelay` (seconds) and
+/// `jitterBufferEmittedCount` of Jim's inbound-rtp audio and judges the delay
+/// accrued since the previous sample, not the session mean, so a late start
+/// neither hides nor inflates what is happening now.
+export function createPlayoutMonitor() {
+  let previous = null;
+  let streak = 0;
+  let lastMs = null;
+  function reset() {
+    previous = null;
+    streak = 0;
+  }
+  function sample(stats) {
+    const delay = stats?.jitterBufferDelay;
+    const emitted = stats?.jitterBufferEmittedCount;
+    if (!Number.isFinite(delay) || !Number.isFinite(emitted)) return false;
+    // Counters that went backwards belong to a new receiver.
+    if (previous === null || emitted < previous.emitted) {
+      previous = { delay, emitted };
+      streak = 0;
+      return false;
+    }
+    // Nothing played out, as in a silent stretch under DTX: no evidence either
+    // way, so the window stretches until audio arrives.
+    if (emitted === previous.emitted) return false;
+    const ms = (1000 * (delay - previous.delay)) / (emitted - previous.emitted);
+    lastMs = Math.round(ms);
+    previous = { delay, emitted };
+    streak = ms > PLAYOUT_LIMIT_MS ? streak + 1 : 0;
+    return streak >= 2;
+  }
+  return { sample, reset, lastMs: () => lastMs };
+}
+
+/// The poll around the monitor: Jim's inbound audio, read every
+/// PLAYOUT_POLL_MS while frames are being drawn, and never otherwise.
+/// `noteDraw` starts it and `pause` stops it, so every window the monitor
+/// judges was drawn through; delay accrued while nothing was drawn is not the
+/// avatar's doing.
+///
+/// A pause also drops any answer still in flight. Resetting the monitor alone
+/// was not enough: the late answer became the new baseline, and its counters
+/// from before the pause charged the whole pause to the first window after it.
+/// An answer for a track that has since been replaced is dropped the same way.
+export function createPlayoutWatch({ currentTrack, onLate }) {
+  const monitor = createPlayoutMonitor();
+  let timer = null;
+  let epoch = 0;
+  let polling = false;
+  let watched = null;
+  function noteDraw() {
+    if (timer === null) timer = setInterval(poll, PLAYOUT_POLL_MS);
+  }
+  function pause() {
+    if (timer !== null) clearInterval(timer);
+    timer = null;
+    monitor.reset();
+    epoch += 1;
+  }
+  async function poll() {
+    const track = currentTrack();
+    if (polling || !track) return;
+    if (track !== watched) {
+      monitor.reset();
+      watched = track;
+    }
+    const asked = epoch;
+    polling = true;
+    let stats = null;
+    try {
+      (await track.getRTCStatsReport?.())?.forEach((entry) => {
+        if (entry.type === "inbound-rtp" && entry.kind === "audio")
+          stats = entry;
+      });
+    } catch {
+      // No stats, no verdict. The render budget still stands behind this.
+    } finally {
+      polling = false;
+    }
+    if (asked !== epoch || track !== currentTrack()) return;
+    if (monitor.sample(stats)) onLate(monitor.lastMs());
+  }
+  return { noteDraw, pause };
 }

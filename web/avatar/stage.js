@@ -15,7 +15,10 @@ import { peakLevel } from "../audio-check.js";
 import {
   ANALYSER_FFT_SIZE,
   ANALYSER_WINDOW,
+  AVATAR_FRAME_MS,
   createAvatar,
+  createPlayoutWatch,
+  createRenderBudget,
   mouthFromAmplitude,
 } from "./avatar.js";
 
@@ -25,28 +28,95 @@ import {
 /// frame.
 let nodes = null;
 
+/// The model loader. `deps.loadModel` replaces it for the stage test only,
+/// which has no WebGL; the page passes nothing.
+let loadModel = async (mount, signal) => {
+  const { loadAvatarModel } = await import("./model.js");
+  return loadAvatarModel(mount, signal);
+};
+
+/// Once per page. A second call would add a second click listener and could
+/// swap the loader under a model already in flight.
 export function initAvatarStage(deps) {
+  if (nodes) throw new Error("the avatar stage is initialized once");
   ({ nodes } = deps);
+  if (deps.loadModel) loadModel = deps.loadModel;
+  nodes.hideAvatar.addEventListener("click", () => disableAvatar(null));
+  // Read once here and observed after, never per frame: reading clientWidth
+  // flushes pending layout, which vrm.js already had to take out of the typing
+  // path. The observer is also how a stage that was narrow comes back, so it
+  // replaces a window resize listener. One observer for the page; the fallback
+  // is the listener it replaces, for an engine without ResizeObserver.
+  stageWidth = nodes.jimAvatar.clientWidth;
+  if (window.ResizeObserver)
+    new window.ResizeObserver((entries) =>
+      onStageWidth(entries[entries.length - 1].contentRect.width),
+    ).observe(nodes.jimAvatar);
+  else
+    window.addEventListener("resize", () =>
+      onStageWidth(nodes.jimAvatar.clientWidth),
+    );
 }
 
+/// Whether a model is wanted: between the page's `startAvatar` and a stop. A
+/// stage that widens outside that window builds nothing.
+let avatarWanted = false;
+/// The mount's width as last observed. Zero below the CSS breakpoint.
+let stageWidth = 0;
+
+function onStageWidth(width) {
+  // The observer also reports height-only changes, every frame of a drag.
+  if (width === stageWidth) return;
+  stageWidth = width;
+  if (width === 0 || !avatarWanted) return;
+  // Before a model exists this builds one; after, it restarts a loop that
+  // paused because the stage went narrow.
+  if (avatar) resumeAvatar();
+  else startAvatar();
+}
+
+/// The page covers the stage with its preflight and uncovers it after. Told
+/// rather than read, so the stage does not depend on another component's DOM.
+/// Covered, the stage is inert, so nothing on it can be reached by keyboard
+/// unseen, and nothing is drawn behind the overlay: its level meter and face
+/// detector need the main thread more than a face nobody can see does.
+export function setStageCovered(covered) {
+  nodes.jimStage.inert = covered;
+  if (!covered) resumeAvatar();
+}
+
+/// Retired for the rest of the page, by the candidate or by load. Never turned
+/// back on: a stage that kept re-testing whether it could compete with audio
+/// would take the audio away again each time it tried.
+let avatarDisabled = false;
+const renderBudget = createRenderBudget();
+const playout = createPlayoutWatch({
+  currentTrack: () => jimTrack,
+  onLate: (ms) => disableAvatar("playout_delayed", `${ms}ms`),
+});
 let avatar = null;
 let avatarFrame = null;
+/// When the next frame is due, for the 30 fps cap. Null while paused, so the
+/// first frame after a pause draws at once.
+let nextDraw = null;
 let jimAnalyser = null;
 let jimAnalyserSource = null;
 let jimAnalyserSamples = null;
-let jimAnalyserTrack = null;
+/// Jim's current audio track, kept whether or not an analyser could be built
+/// on it. The playout watch follows this and not the analyser: a browser that
+/// throws on `AudioContext` loses lip sync, and must not also lose the one
+/// signal that sees his voice arriving late.
+let jimTrack = null;
 let jimAnalyserContext = null;
 const jimAnalyserPeaks = [];
 
 export function startAvatar() {
-  if (avatar) return;
+  if (avatar || avatarDisabled) return;
   // Below the breakpoint the stage is hidden and nothing is built, but the
   // candidate can cross it at any time by widening the window or undocking
-  // devtools. Without a retry, an interview that started narrow never gets an
-  // avatar however wide it gets. Registered once and only while there is
-  // nothing to render, so a session that starts wide adds no listener and a
-  // session that starts narrow drops it as soon as one is built.
-  watchForStageWidth();
+  // devtools. The width observer retries while this is wanted, so an interview
+  // that started narrow still gets an avatar once it is wide.
+  avatarWanted = true;
   // Below the stylesheet's breakpoint the avatar is `display: none`, and a
   // hidden element is not worth 11 MB of model, 730 KB of renderer, one of the
   // page's ~16 WebGL contexts and a 60 Hz loop drawing into a 1x1 canvas. The
@@ -59,21 +129,20 @@ export function startAvatar() {
     return;
   const reducedMotion =
     window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches === true;
-  stopWatchingStageWidth();
   avatar = createAvatar({
     mount: nodes.jimAvatar,
     reducedMotion,
-    // The panel says which of the two things happened, because "Jim is here by
-    // voice" under a blank box is indistinguishable from a broken page.
+    // Hide is offered only while there is something to hide, and every change
+    // of state passes through here, so this is its one writer. The panel says
+    // which of the two things happened, because "Jim is here by voice" under a
+    // blank box is indistinguishable from a broken page.
     onState: (next) => {
+      nodes.hideAvatar.hidden = !(next === "loading" || next === "ready");
       if (next !== "unavailable") return;
       nodes.jimAvatarNote.textContent =
         "Jim is here by voice; his avatar is unavailable in this browser.";
     },
-    loadModel: async () => {
-      const { loadAvatarModel } = await import("./model.js");
-      return loadAvatarModel(nodes.jimAvatar);
-    },
+    loadModel: (signal) => loadModel(nodes.jimAvatar, signal),
   });
   // Started only once something can actually render. Pumping regardless meant
   // every session without a model, which is all of them today, ran a 60 Hz
@@ -90,6 +159,12 @@ export function startAvatar() {
   });
 }
 
+/// Whether a drawn frame would be seen. Below the CSS breakpoint the mount has
+/// no width, and the preflight overlay is opaque over the stage while it is up.
+function stageVisible() {
+  return stageWidth > 0 && !nodes.jimStage.inert;
+}
+
 export function pumpAvatar(at) {
   if (!avatar) return;
   // A hidden document stops asking for frames rather than asking and returning
@@ -98,70 +173,110 @@ export function pumpAvatar(at) {
   // and the humanoid update stop too, and `resumeAvatar` below is what starts
   // them again. Written as "stop scheduling" rather than "skip a frame"
   // because a loop that keeps scheduling is a loop that is still running.
+  //
+  // The same holds for a stage nobody can see. Hidden by the CSS breakpoint,
+  // which the candidate can cross at any time by narrowing the window or
+  // docking devtools, or covered by the preflight overlay, whose level meter
+  // and face detector need the main thread more than a face behind it does.
+  // The width cannot see the overlay, because an element under it still has
+  // its width. Loading early is the point; drawing early is not. The width
+  // observer brings the loop back, and so does the end of the preflight.
   if (document.hidden) {
-    avatarFrame = null;
+    pauseAvatar();
     return;
   }
   avatarFrame = requestAnimationFrame(pumpAvatar);
-  // Hidden by the CSS breakpoint, which the candidate can cross at any time by
-  // narrowing the window or docking devtools. startAvatar only samples this
-  // once, so without the check the humanoid rig, expressions and constraints
-  // kept running 60 times a second to produce no pixels.
-  //
-  // The preflight overlay is the same argument by a different route: it is
-  // opaque and covers the stage, so a model that finishes loading while the
-  // candidate is still granting a camera would otherwise render behind it,
-  // taking main-thread frames away from the level meter and the face detector.
-  // The width check cannot see this, because an element under an overlay still
-  // has its width. Loading early is the point; drawing early is not.
-  if (!nodes.jimAvatar.clientWidth || !nodes.audioCheck.hidden) return;
-  avatar.setMouth(mouthFromAmplitude(jimAmplitude()));
   // The rAF timestamp is the frame's target time and is identical across every
   // callback in that frame; performance.now() drifts by however long the loop
   // took to reach us.
-  avatar.frame(at ?? performance.now());
+  const clock = at ?? performance.now();
+  // Thirty frames a second is enough for a face, and half the main-thread and
+  // GPU work of sixty. A deadline that advances by the frame time, rather than
+  // a gap since the last draw, holds the average to 30 on any refresh rate: a
+  // minimum gap drew every third vsync at 100 Hz, 33 fps. The 1 ms slack is for
+  // timestamps that land a hair early; a deadline missed by a whole frame
+  // starts over instead of bursting to catch up.
+  if (nextDraw !== null && clock < nextDraw - 1) return;
+  if (!stageVisible()) {
+    pauseAvatar();
+    return;
+  }
+  nextDraw =
+    nextDraw === null || clock - nextDraw >= AVATAR_FRAME_MS
+      ? clock + AVATAR_FRAME_MS
+      : nextDraw + AVATAR_FRAME_MS;
+  const started = performance.now();
+  avatar.setMouth(mouthFromAmplitude(jimAmplitude()));
+  avatar.frame(clock);
+  playout.noteDraw();
+  // Cadence on the frame clock, cost on the wall clock: the rAF timestamp is
+  // vsync-aligned, and performance.now() here adds callback jitter to the gap.
+  if (renderBudget.sample(clock, performance.now() - started)) {
+    const { stalledPct, expensivePct } = renderBudget.last();
+    disableAvatar(
+      "budget_exceeded",
+      `stalled=${stalledPct}% expensive=${expensivePct}%`,
+    );
+  }
+}
+
+/// Stops the loop without tearing anything down. The budget and the playout
+/// watch forget their windows, so the pause is never charged to the avatar:
+/// not as one long frame, and not as delay accrued while nothing was drawn.
+function pauseAvatar() {
+  if (avatarFrame !== null) cancelAnimationFrame(avatarFrame);
+  avatarFrame = null;
+  nextDraw = null;
+  renderBudget.reset();
+  playout.pause();
 }
 
 /// Starts the render loop again after the tab comes back.
 ///
 /// One listener for the life of the page, added beside the loop rather than
 /// inside it: a listener added per frame is sixty listeners a second.
-export function resumeAvatar() {
+function resumeAvatar() {
+  if (!nodes) return;
+  // Paused here and not left to the next frame: a browser may suspend the
+  // frame callback as the tab hides, and the stats poll keeps running, so
+  // without this a hidden tab kept its playout count and could be retired
+  // on delay accrued while nobody could see it.
+  if (document.hidden) {
+    pauseAvatar();
+    return;
+  }
+  // No budget reset here. This also runs while the loop is going, on every
+  // width change, and a reset then cleared an overloaded streak; a loop that
+  // is not going stopped through `pauseAvatar`, which already reset it.
+  //
   // `state()` and not just `avatar`: `createAvatar` returns before the model
   // has loaded, so a visibility change during the load would otherwise start a
   // loop that poses nothing sixty times a second.
-  if (
-    !avatar ||
-    avatar.state() !== "ready" ||
-    document.hidden ||
-    avatarFrame !== null
-  )
-    return;
+  if (!avatar || avatar.state() !== "ready" || avatarFrame !== null) return;
   pumpAvatar();
 }
 
 document.addEventListener("visibilitychange", resumeAvatar);
 
-/// Retries `startAvatar` when the stage becomes visible.
-///
-/// `resize` rather than a media query, because the stylesheet owns the
-/// breakpoint and `startAvatar` already asks the computed style rather than
-/// restating it. One listener at a time.
-let stageWidthWatch = null;
-
-function watchForStageWidth() {
-  if (avatar || stageWidthWatch) return;
-  stageWidthWatch = () => startAvatar();
-  window.addEventListener("resize", stageWidthWatch);
-}
-
-/// Dropped as soon as there is something to render, not on the next resize
-/// after that. A session that never resizes again would otherwise hold the
-/// handler, and the scope it closes over, for the length of the interview.
-function stopWatchingStageWidth() {
-  if (!stageWidthWatch) return;
-  window.removeEventListener("resize", stageWidthWatch);
-  stageWidthWatch = null;
+/// `reason` is null for the candidate's own Hide, or what retired it, and
+/// `measured` is the number that decided, logged so a real session can say
+/// how close to the line it was.
+function disableAvatar(reason, measured) {
+  if (avatarDisabled) return;
+  // Asked before the teardown hides the button, which would drop focus to the
+  // body for a keyboard user whose focus was on it.
+  const hadFocus = document.activeElement === nodes.hideAvatar;
+  avatarDisabled = true;
+  stopAvatar(reason ? "degraded" : "stopped");
+  const note = reason
+    ? "Jim is here by voice; his avatar was turned off to keep the interview responsive."
+    : "Jim is here by voice; his avatar is turned off.";
+  nodes.jimAvatarNote.textContent = note;
+  if (reason) console.warn(`codetrial avatar_${reason} ${measured}`);
+  // Focus says it once. The status region says it only when focus did not
+  // move, since a note both focused and announced is read twice.
+  if (!reason || hadFocus) nodes.jimAvatarNote.focus({ preventScroll: true });
+  else nodes.jimAvatarStatus.textContent = note;
 }
 
 /// Jim's own track, never the candidate's. `createMediaElementSource` would be
@@ -172,15 +287,16 @@ export function attachAvatarAnalyser(track, participant) {
   // to take whichever arrived first: a second participant, or a stray hosted
   // agent of the kind scripts/browser-check.cjs already has to isolate, would
   // have driven the mouth. Never the candidate, who is never subscribed here.
-  if (!isAgent(participant)) return;
-  if (!track?.mediaStreamTrack || track === jimAnalyserTrack) return;
+  if (avatarDisabled || !isAgent(participant)) return;
+  if (!track?.mediaStreamTrack || track === jimTrack) return;
   // A new publication replaces the old analyser rather than being ignored.
   // Bailing out on `jimAnalyser` alone left the analyser bound to the track
   // that had just been replaced, and LiveKit does not promise the unsubscribe
   // for the old publication arrives before the subscribe for the new one: when
   // it arrived after, `dropRemoteAudio` tore down the only analyser there was
   // and nothing rebuilt it, so lip sync died for the rest of the session.
-  if (jimAnalyser) releaseAvatarAnalyser();
+  releaseAnalyserNodes();
+  jimTrack = track;
   try {
     jimAnalyserContext ||= new (
       window.AudioContext || window.webkitAudioContext
@@ -198,15 +314,14 @@ export function attachAvatarAnalyser(track, participant) {
     // One buffer for the session. Allocating it per frame produced 512 bytes of
     // garbage 60 times a second for the whole interview.
     jimAnalyserSamples = new Uint8Array(jimAnalyser.fftSize);
-    jimAnalyserTrack = track;
     // Not connected to the destination: the audio element is already playing
     // this track, and a second path would play Jim twice.
     jimAnalyserSource.connect(jimAnalyser);
     resumeAnalyserOnGesture();
   } catch {
     // No analyser means no lip-sync. Everything else about the avatar, and all
-    // of the audio, still works.
-    releaseAvatarAnalyser();
+    // of the audio, still works, and Jim's track is still followed.
+    releaseAnalyserNodes();
   }
 }
 
@@ -214,11 +329,15 @@ export function attachAvatarAnalyser(track, participant) {
 /// per session. Without disconnecting the source node, each reconnect left a
 /// live MediaStreamAudioSourceNode attached to the same context.
 export function releaseAvatarAnalyser() {
+  releaseAnalyserNodes();
+  jimTrack = null;
+}
+
+function releaseAnalyserNodes() {
   jimAnalyserSource?.disconnect();
   jimAnalyserSource = null;
   jimAnalyser = null;
   jimAnalyserSamples = null;
-  jimAnalyserTrack = null;
   jimAnalyserPeaks.length = 0;
 }
 
@@ -271,11 +390,14 @@ export function jimAmplitude() {
   );
 }
 
-export function stopAvatar() {
-  stopWatchingStageWidth();
-  if (avatarFrame !== null) cancelAnimationFrame(avatarFrame);
-  avatarFrame = null;
-  avatar?.destroy();
+/// `final` is the state the mount is left in; `createAvatar` owns the write.
+/// A load still running is aborted there, before the renderer is imported or a
+/// context is built: hiding is how a candidate under load asks for their CPU
+/// back, and a load that ran to the end only to be disposed spent it anyway.
+export function stopAvatar(final) {
+  avatarWanted = false;
+  pauseAvatar();
+  avatar?.destroy(final);
   avatar = null;
   releaseAvatarAnalyser();
   void jimAnalyserContext?.close?.().catch(() => {});
@@ -287,7 +409,7 @@ export function stopAvatar() {
 /// is a second owner of the renderer's lifetime, and the teardown order here is
 /// the whole reason this file exists.
 export function isAvatarAnalyserTrack(track) {
-  return track === jimAnalyserTrack;
+  return track === jimTrack;
 }
 
 export function setAvatarSpeaking(speaking) {

@@ -58,6 +58,7 @@ import {
   releaseAvatarAnalyser,
   setAvatarExpression,
   setAvatarSpeaking,
+  setStageCovered,
   startAvatar,
   stopAvatar,
 } from "./avatar/stage.js";
@@ -378,6 +379,9 @@ const nodes = {
   meetOutputNote: document.querySelector("#meet-output-note"),
   jimAvatar: document.querySelector("#jim-avatar"),
   jimAvatarNote: document.querySelector("#jim-avatar-note"),
+  jimStage: document.querySelector("#jim-stage"),
+  hideAvatar: document.querySelector("#hide-avatar"),
+  jimAvatarStatus: document.querySelector("#jim-avatar-status"),
 };
 
 // Jim's audio element. Named because setSinkId needs a stable target and the
@@ -390,6 +394,9 @@ let jimAudio = null;
 initReplay({ state, nodes, recordingEnabled, consentVersion, replayVersion });
 initCaptions({ nodes });
 initAvatarStage({ nodes });
+// The preflight overlay is up from the first paint; the stage stays inert and
+// undrawn under it until the preflight closes, below.
+setStageCovered(true);
 initAudioOutput({ nodes, jimAudioElement: () => jimAudio });
 initRecording({ state, nodes, recordingEnabled, addTranscript, setBanner });
 initIntegrity({
@@ -429,6 +436,7 @@ async function init() {
   // indistinguishable from an avatar that is never coming.
   startAvatar();
   const preflight = await runAudioCheck();
+  setStageCovered(false);
   // Before the room, so nothing downstream ever sees the camera: the publisher,
   // the watchers and the heartbeat all read the stream, and handing them a
   // track that is about to vanish is what made this a special case everywhere.

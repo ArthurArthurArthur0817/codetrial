@@ -783,24 +783,28 @@ async function isolateRustAgent(
           throw new Error("the avatar never left its loading state");
         });
 
-      const avatarState = await page
-        .locator("#jim-avatar")
-        .getAttribute("data-avatar-state");
-      const canvases = await page.locator("#jim-avatar canvas").count();
-      const fallbackVisible = await page
-        .locator("#jim-avatar-fallback")
-        .isVisible();
-      const note = (await page.locator("#jim-avatar-note").innerText()).trim();
+      // One read of every fact the verdict depends on. Separate calls could
+      // straddle an automatic turn-off and see a "ready" state beside a
+      // released canvas, which is a race and not a broken avatar.
+      const snapshot = () =>
+        page.evaluate(() => {
+          const mount = document.querySelector("#jim-avatar");
+          const fallback = document.querySelector("#jim-avatar-fallback");
+          return {
+            state: mount?.dataset.avatarState ?? null,
+            canvases: mount?.querySelectorAll("canvas").length ?? 0,
+            fallbackVisible:
+              !!fallback &&
+              fallback.getClientRects().length > 0 &&
+              getComputedStyle(fallback).visibility !== "hidden",
+            note:
+              document.querySelector("#jim-avatar-note")?.innerText.trim() ??
+              "",
+          };
+        });
+      let view = await snapshot();
 
-      if (avatarState === "ready") {
-        if (canvases !== 1)
-          throw new Error(
-            `a rendered avatar needs exactly one canvas, found ${canvases}`,
-          );
-        if (fallbackVisible)
-          throw new Error(
-            "the neutral panel is still covering a rendered avatar",
-          );
+      if (view.state === "ready") {
         // Counts real render calls. The previous version sampled toDataURL
         // once, waited, and then compared that one sample against a length
         // threshold, so it had no "after" and passed on a cleared buffer.
@@ -812,11 +816,14 @@ async function isolateRustAgent(
         if (first === null)
           throw new Error("the page exposed no avatar frame counter");
         // Waits for the condition instead of sleeping past it: the next frame
-        // lands in about 16 ms, so a fixed 500 ms sleep spent most of itself
+        // lands in about 33 ms, so a fixed 500 ms sleep spent most of itself
         // waiting for something already true.
         await page
           .waitForFunction(
-            (from) => (window.__codetrialAvatarFrames?.() ?? 0) > from,
+            (from) =>
+              (window.__codetrialAvatarFrames?.() ?? 0) > from ||
+              document.querySelector("#jim-avatar")?.dataset.avatarState ===
+                "degraded",
             first,
             { timeout: 5000 },
           )
@@ -825,6 +832,30 @@ async function isolateRustAgent(
               `the avatar render loop is not running: stuck at ${first} frames`,
             );
           });
+        view = await snapshot();
+      }
+      const { state: avatarState, canvases, fallbackVisible, note } = view;
+      if (avatarState === "ready") {
+        if (canvases !== 1)
+          throw new Error(
+            `a rendered avatar needs exactly one canvas, found ${canvases}`,
+          );
+        if (fallbackVisible)
+          throw new Error(
+            "the neutral panel is still covering a rendered avatar",
+          );
+      } else if (avatarState === "degraded") {
+        console.log("avatar: degraded under load");
+        if (requireModel)
+          throw new Error("the required avatar was retired under load");
+        if (canvases !== 0)
+          throw new Error("a degraded avatar must release its canvas");
+        if (!fallbackVisible)
+          throw new Error("a degraded avatar must show the voice-only panel");
+        if (!note.includes("keep the interview responsive"))
+          throw new Error(
+            `a degraded avatar must explain the performance fallback, got: ${note}`,
+          );
       } else if (avatarState === "unavailable") {
         if (requireModel && !modelDelivered)
           throw new Error("the pinned avatar model was never delivered");
