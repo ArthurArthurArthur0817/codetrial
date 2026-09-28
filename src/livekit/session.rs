@@ -717,16 +717,24 @@ fn tool_response(state: &mut RuntimeState, call: &GeminiFunctionCall) -> serde_j
         // for every tool response, and the closing is about to be prompted for
         // properly. Without this it says goodbye twice.
         //
-        // Gated on the same trusted evidence the behavioral round opens on, and
-        // for the same reason: this is the model judging that its own interview
-        // is finished, and the cost of believing it wrongly is a candidate cut
-        // off partway. A two-round interview also has to reach the reserved
-        // round's explicit started-or-skipped disposition. Refusing costs
-        // nothing -- the timer still ends the session, which is what happened
-        // before this tool existed -- so the gate is on the claim, not on the
-        // clock.
+        // A coding-only session belongs to the candidate for its full duration.
+        // REACTO evidence records work attempted, including failed tests; it
+        // cannot authorize taking the remaining time away. Leave termination to
+        // the candidate or the existing browser/server timer paths, even when
+        // all tests pass. No second clock belongs in this tool.
+        //
+        // For a two-round session, gated on the evidence the behavioral round
+        // opens on, and for the same reason: this is the model judging that its
+        // own interview is finished, and the cost of believing it wrongly is a
+        // candidate cut off partway. A two-round interview also has to reach
+        // the reserved round's explicit started-or-skipped disposition.
+        // Refusing costs nothing -- the timer still ends the session, which is
+        // what happened before this tool existed -- so the gate is on the
+        // claim, not on the clock.
         TOOL_END_INTERVIEW => {
-            if !crate::agent::coding_round_complete(state) {
+            if state.interview_loop == crate::agent::InterviewLoop::CodingOnly
+                || !crate::agent::coding_round_complete(state)
+            {
                 return serde_json::json!({
                     "error": crate::agent::end_interview_refusal(state)
                 });

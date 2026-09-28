@@ -144,8 +144,8 @@ const ROUND_TRANSITION_SKEW: std::time::Duration = std::time::Duration::from_sec
 /// `the_time_warning_threshold_is_the_same_number_on_both_sides`.
 pub const TIME_WARNING_S: u64 = 300;
 
-pub const INTERVIEW_CONTRACT_BUNDLE_VERSION: u32 = 18;
-pub const LIVE_PROMPT_VERSION: u32 = 10;
+pub const INTERVIEW_CONTRACT_BUNDLE_VERSION: u32 = 19;
+pub const LIVE_PROMPT_VERSION: u32 = 11;
 pub const REPORT_PROMPT_VERSION: u32 = 13;
 pub const RUBRIC_VERSION: u32 = 1;
 pub const REPORT_SCHEMA_VERSION: u32 = 2;
@@ -759,6 +759,10 @@ pub struct RuntimeState {
     /// early stub, or of another language's buffer, does not vouch for code
     /// written after it.
     pub tested_code: Option<TestedCode>,
+    /// Whether every case passed in the run that owns `tested_code`. Later
+    /// outages, empty runs or uncredited submissions may replace the displayed
+    /// test report without changing this execution's outcome.
+    pub tested_passed: Option<bool>,
     /// What the complexity analysis last recorded describes, so a later run is
     /// judged against the solution that analysis described rather than against
     /// whatever ran before it.
@@ -900,6 +904,7 @@ impl Default for RuntimeState {
             last_test_run: None,
             test_runs: 0,
             tested_code: None,
+            tested_passed: None,
             analysis: None,
             runner_unavailable: None,
             hints_used: 0,
@@ -1263,6 +1268,17 @@ pub(crate) fn tested_code_is_current(state: &RuntimeState) -> bool {
         .tested_code
         .as_ref()
         .is_some_and(|tested| covers(tested, &state.language, &state.code))
+}
+
+/// Outcome claims require identical source and language. The Test gate keeps
+/// credit through small edits, but even whitespace or comments can affect
+/// literals, indentation, token boundaries or compiler directives. Comparing
+/// bytes avoids claiming semantic equivalence without a language parser.
+pub(crate) fn tested_code_is_exact(state: &RuntimeState) -> bool {
+    state
+        .tested_code
+        .as_ref()
+        .is_some_and(|tested| tested.language == state.language && tested.code == state.code)
 }
 
 /// Whether `code` in `language` is still the code `tested` holds, by the Test
@@ -1641,14 +1657,21 @@ pub(crate) fn skip_unassessed_star(state: &mut RuntimeState, summary: &str) {
 /// end of REACTO, and one who did not has not, whatever the timer says. Three
 /// callers ask this same question -- whether to open the behavioral round,
 /// whether a report may call the coding round complete, and whether the
-/// interviewer may close the session -- and they were three copies of the same
-/// closure, which is three chances for the gate to mean something slightly
-/// different in each.
+/// interviewer may close a two-round session -- and they were three copies of
+/// the same closure, which is three chances for the gate to mean something
+/// slightly different in each.
 pub(crate) fn coding_round_complete(state: &RuntimeState) -> bool {
     phases_evidenced(
         state,
         &[FrameworkPhase::Test, FrameworkPhase::Optimizations],
     )
+}
+
+/// Past the coding gate in a session that keeps going anyway: a coding-only
+/// session's time belongs to the candidate until the timer or their End, so
+/// every prompt that would wrap up a two-round coding round asks this instead.
+pub(crate) fn coding_continues_past_gate(state: &RuntimeState) -> bool {
+    state.interview_loop == InterviewLoop::CodingOnly && coding_round_complete(state)
 }
 
 /// Every one of these phases observed or inferred, none of them skipped.

@@ -53,8 +53,8 @@ fn prompt_golden_digest_matches_versions() {
     // its hash is a string nothing checks. The pair is still asserted, because
     // the failure worth catching is a version bumped with the golden left
     // alone, which a digest comparison on its own reads as fine.
-    let recorded_versions = (10, 13);
-    let recorded_digest = "da8686efeb80bdac9cf3b0851a4db51c455361a38dbba8731f83770467274878";
+    let recorded_versions = (11, 13);
+    let recorded_digest = "8168022e8d19cc13bc4ea6fa21ecea5b44d5125e904ba93a7ace35c7a556d591";
 
     assert_eq!(
         (LIVE_PROMPT_VERSION, REPORT_PROMPT_VERSION),
@@ -697,6 +697,22 @@ fn coding_only_prompt_removes_the_behavioral_round_contract() {
         InterviewLoop::CodingOnly,
     );
     assert!(prompt.contains("coding round owns all 45 minutes"));
+    assert!(
+        prompt.contains("Only the platform timer or the candidate's End action ends the session")
+    );
+    assert!(prompt.contains("prioritize unresolved failures and let the candidate finish editing"));
+    assert!(prompt.contains("No tool ends this session"));
+    assert!(!prompt.contains("end_interview"));
+    assert!(
+        build_instructions_for_plan(
+            get_problem(Some("two-sum")),
+            45,
+            &InterviewProfile::default(),
+            &InterviewGrounding::default(),
+            InterviewLoop::CodingBehavioral,
+        )
+        .contains("`end_interview`: call it once the session is genuinely finished")
+    );
     assert!(prompt.contains("STAR BEHAVIORAL ROUND — not configured"));
     assert!(!prompt.contains("STAR BEHAVIORAL CLOSE — use only after"));
 
@@ -965,16 +981,16 @@ fn interview_contract_versions_are_one_closed_bundle() {
         "the bundle table has no row for {INTERVIEW_CONTRACT_BUNDLE_VERSION}"
     );
 
-    assert_eq!(INTERVIEW_CONTRACT_BUNDLE_VERSION, 18);
-    assert_eq!(LIVE_PROMPT_VERSION, 10);
+    assert_eq!(INTERVIEW_CONTRACT_BUNDLE_VERSION, 19);
+    assert_eq!(LIVE_PROMPT_VERSION, 11);
     assert_eq!(REPORT_PROMPT_VERSION, 13);
     assert_eq!(RUBRIC_VERSION, 1);
     assert_eq!(REPORT_SCHEMA_VERSION, 2);
     assert_eq!(
         interview_contract_json(),
         json!({
-            "bundleVersion": 18,
-            "livePromptVersion": 10,
+            "bundleVersion": 19,
+            "livePromptVersion": 11,
             "reportPromptVersion": 13,
             "rubricVersion": 1,
             "reportSchemaVersion": 2,

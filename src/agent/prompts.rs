@@ -149,11 +149,35 @@ pub fn build_instructions_for_plan(
     let coding_minutes = duration_min.saturating_sub(behavioral_minutes);
     let round_policy = match interview_loop {
         InterviewLoop::CodingOnly => format!(
-            "ROUND PLAN — coding only. The REACTO coding round owns all {duration_min} minutes. Never ask a behavioral question; the platform marks STAR skipped."
+            "ROUND PLAN — coding only. The REACTO coding round owns all {duration_min} minutes. Only the platform timer or the candidate's End action ends the session. REACTO evidence does not mean the solution passes: prioritize unresolved failures and let the candidate finish editing; after a passing solution, offer the released follow-ups or discuss trade-offs they have not covered, without repeating completed questions or inventing a second task. Never say goodbye early or ask the candidate to end. Never ask a behavioral question; the platform marks STAR skipped."
         ),
         InterviewLoop::CodingBehavioral => format!(
             "ROUND PLAN — two rounds: the REACTO coding round has {coding_minutes} minutes and the STAR behavioral reserve has {behavioral_minutes} minutes. Do not transition from coding until a trusted [SYSTEM EVENT] confirms the Test and Optimizations evidence gate passed. Before that event, ask no behavioral, experience, or past-project question, even when the candidate mentions a weakness or past work in passing; acknowledge it and stay on the coding step. Once the behavioral round starts, ask exactly one question, use only prior candidate answers and trusted evidence for follow-ups, never repeat a question, and never return to coding."
         ),
+    };
+
+    // Coding-only sessions are not offered `end_interview` (see
+    // `live_tool_declarations`), so their instructions describe no such tool.
+    let end_tool = match interview_loop {
+        InterviewLoop::CodingOnly => {
+            "- No tool ends this session. It lasts until the platform timer expires or the
+  candidate chooses End, even if every REACTO step has evidence and all tests
+  pass. Continue supporting their work and discussion; do not say goodbye or
+  ask them to end the session early."
+        }
+        InterviewLoop::CodingBehavioral => {
+            "- `end_interview`: call it once the session is genuinely finished, meaning the
+  candidate has a solution they can defend with its complexity stated, the
+  reserved behavioral round has run or been refused, and there is nothing
+  further you would ask. Do not say goodbye first: the platform answers this
+  call with the closing it wants spoken. Never call it to escape a difficult
+  stretch and never because the candidate has gone quiet or is stuck; that time
+  is theirs to spend. The platform refuses the call until Test and Optimizations
+  both hold candidate evidence and the behavioral reserve has started or been
+  skipped, so record what they earn as they earn it. If you never call it the
+  timer ends the session anyway, and the candidate can end it themselves at any
+  point."
+        }
     };
     let star_round_policy = if interview_loop == InterviewLoop::CodingOnly {
         "STAR BEHAVIORAL ROUND — not configured. Never ask a behavioral or experience question in this session.".to_string()
@@ -338,17 +362,7 @@ TOOLS
   Never repeat identical evidence, and
   never read the evidence state back to them as a checklist; naming the phase
   you are steering toward is fine.
-- `end_interview`: call it once the session is genuinely finished, meaning the
-  candidate has a solution they can defend with its complexity stated, the
-  reserved behavioral round has run or been refused, and there is nothing
-  further you would ask. Do not say goodbye first: the platform answers this
-  call with the closing it wants spoken. Never call it to escape a difficult
-  stretch and never because the candidate has gone quiet or is stuck; that time
-  is theirs to spend. The platform refuses the call until Test and Optimizations
-  both hold candidate evidence and, for a two-round plan, the behavioral reserve
-  has started or been skipped, so record what they earn as they earn it. If you
-  never call it the timer ends the session anyway, and the candidate can end it
-  themselves at any point.
+{end_tool}
 
 Be warm but rigorous — a real interviewer who wants the candidate to succeed but
 never does the work for them."#,
@@ -462,9 +476,9 @@ pub fn language_choice(spoken: &str, context: LanguageChoiceContext) -> String {
 /// in the live prompt from the first turn: they are several hundred characters
 /// the model carries on every turn before it may use them, and a model holding
 /// them from the start is a model that can raise one early.
-fn follow_ups_text(follow_ups: &[&str]) -> String {
+fn follow_ups_text(lead: &str, limit: &str, follow_ups: &[&str]) -> String {
     format!(
-        "The coding round is complete. Follow-ups you may now raise, at most two of these, in order and one at a time, as a change to the scenario: discussion, not a second task, and never at the cost of the behavioral round or wrap-up:\n{}",
+        "{lead}, at most two of these, in order and one at a time, as a change to the scenario: discussion, not a second task{limit}:\n{}",
         numbered_list(follow_ups)
     )
 }
@@ -473,8 +487,21 @@ fn follow_ups_text(follow_ups: &[&str]) -> String {
 /// complete, or the problem has none to give. One rule for the evidence reply
 /// that releases them and the cold restart that hands them over again.
 pub fn released_follow_ups(state: &RuntimeState) -> Option<String> {
-    (crate::agent::coding_round_complete(state) && !state.follow_ups.is_empty())
-        .then(|| follow_ups_text(state.follow_ups))
+    (crate::agent::coding_round_complete(state) && !state.follow_ups.is_empty()).then(|| {
+        if state.interview_loop == InterviewLoop::CodingOnly {
+            follow_ups_text(
+                "Follow-ups you may raise only after unresolved failures are addressed",
+                "",
+                state.follow_ups,
+            )
+        } else {
+            follow_ups_text(
+                "The coding round is complete. Follow-ups you may now raise",
+                ", and never at the cost of the behavioral round or wrap-up",
+                state.follow_ups,
+            )
+        }
+    })
 }
 
 /// The earlier steps of the same framework that have no evidence yet, named
@@ -573,6 +600,54 @@ fn code_since_latest_run(state: &RuntimeState) -> Option<bool> {
         .map(|_| super::tested_code_is_current(state))
 }
 
+const CODING_ONLY_ENDING: &str = "A coding-only interview ends when the platform timer expires or the candidate chooses End, even when all REACTO steps have evidence and all tests pass. Do not say goodbye or ask them to end the session.";
+
+/// The outcome of the credited run when the editor still holds exactly the code
+/// it executed, and `None` when that run cannot speak for the code on screen.
+fn verified_outcome(state: &RuntimeState) -> Option<bool> {
+    state
+        .tested_passed
+        .filter(|_| super::tested_code_is_exact(state))
+}
+
+fn coding_only_continuation(state: &RuntimeState) -> String {
+    let current = code_since_latest_run(state);
+    let verified = verified_outcome(state);
+    let unavailable = super::runner_unavailable_on_screen(state);
+    let next = match (verified, current) {
+        (Some(passed), _) => {
+            if !passed {
+                "The credited run executed the code on screen and has failing cases. Let the candidate finish editing, then ask them to diagnose one unresolved failing case or verify their fix; do not supply the bug or solution.".to_string()
+            } else {
+                let offer = if state.follow_ups.is_empty() {
+                    "allow discussion of"
+                } else {
+                    "offer the released follow-ups or discuss"
+                };
+                format!("The credited run executed the code on screen and all cases passed. Do not ask for another run or repeat completed questions; {offer} trade-offs not yet covered, without starting a second task.")
+            }
+        }
+        _ if unavailable => {
+            "The runner cannot provide tests for this language. Let the candidate finish their work and discuss any unresolved concern using a hand trace; do not repeat a trace already covered.".to_string()
+        }
+        (None, Some(true)) => {
+            "The code has a small edit since the credited run, so that run's result may not describe the code on screen. If the edit could change the result, ask them to click Run on the code now on screen; do not assume the earlier failures or passes still hold.".to_string()
+        }
+        (None, Some(false)) => {
+            "The code has changed since the latest executed run. Let the candidate finish editing, then verify the changed code if the change could affect the result; do not assume earlier failures or passes describe it.".to_string()
+        }
+        _ => {
+            "No executed run can be matched to the code on screen. Let the candidate finish editing, then invite them to click Run before drawing conclusions from earlier test results.".to_string()
+        }
+    };
+    let outage = if unavailable && verified.is_some() {
+        " The runner is currently unavailable; use a hand trace for any further verification, without repeating a trace already covered."
+    } else {
+        ""
+    };
+    format!("{CODING_ONLY_ENDING} {next}{outage}")
+}
+
 /// Where the coding round stands on the steps #66 kept sending candidates back
 /// to, for every coding prompt that might otherwise ask for them again. `None`
 /// when nothing is known: no real test run and no Test or Optimizations
@@ -584,6 +659,12 @@ fn code_since_latest_run(state: &RuntimeState) -> Option<bool> {
 /// cannot see the code the run tested, and that covered work is recorded
 /// rather than asked for again.
 fn coding_progress(state: &RuntimeState) -> Option<String> {
+    if super::coding_continues_past_gate(state) {
+        return Some(format!(
+            "Test and Optimizations have evidence; that records work attempted, not a passing solution. {}",
+            coding_only_continuation(state)
+        ));
+    }
     let run = state
         .last_test_run
         .as_ref()
@@ -690,7 +771,7 @@ pub fn resumed_context(state: &RuntimeState, reply: bool, owed_prompt: Option<&s
         let complete = super::coding_round_complete(state);
         parts.push(format!(
             "{} REACTO steps already evidenced: {}.",
-            if complete {
+            if complete && state.interview_loop != InterviewLoop::CodingOnly {
                 "The coding problem is solved and tested; do not return to completed REACTO steps."
             } else {
                 "The coding round is active."
@@ -703,9 +784,11 @@ pub fn resumed_context(state: &RuntimeState, reply: bool, owed_prompt: Option<&s
             "Do not open STAR without the trusted round-start event.".to_string()
         });
         if complete {
-            parts.push(released_follow_ups(state).unwrap_or_else(|| {
-                "Wrap up the coding discussion under the round plan.".to_string()
-            }));
+            if let Some(follow_ups) = released_follow_ups(state) {
+                parts.push(follow_ups);
+            } else if state.interview_loop != InterviewLoop::CodingOnly {
+                parts.push("Wrap up the coding discussion under the round plan.".to_string());
+            }
         }
         parts.push(MISSING_EVIDENCE.to_string());
         parts.push(NO_REPEAT.to_string());
@@ -794,24 +877,44 @@ pub fn cold_restart(state: &RuntimeState) -> String {
             )
         }
     } else if crate::agent::coding_round_complete(state) {
-        (
-            format!(
-                "The coding problem is solved and tested: REACTO steps evidenced: {}. Do not ask another coding question or return to earlier steps.",
-                evidenced_among(state, &REACTO_PHASE_IDS)
-            ),
-            released_follow_ups(state).unwrap_or_else(|| {
-                "Wrap up the coding discussion under the round plan.".to_string()
-            }),
-            None,
-        )
+        let evidenced = evidenced_among(state, &REACTO_PHASE_IDS);
+        let follow_ups = released_follow_ups(state);
+        if crate::agent::coding_continues_past_gate(state) {
+            let mut next =
+                format!("Answer the latest unanswered candidate turn if there is one. {NO_REPEAT}");
+            if let Some(follow_ups) = follow_ups {
+                next.push(' ');
+                next.push_str(&follow_ups);
+            }
+            (
+                format!("The coding round is active: REACTO steps evidenced: {evidenced}."),
+                next,
+                None,
+            )
+        } else {
+            (
+                format!(
+                    "The coding problem is solved and tested: REACTO steps evidenced: {evidenced}. Do not ask another coding question or return to earlier steps."
+                ),
+                follow_ups.unwrap_or_else(|| {
+                    "Wrap up the coding discussion under the round plan.".to_string()
+                }),
+                None,
+            )
+        }
     } else {
+        let next = if state.interview_loop == InterviewLoop::CodingOnly {
+            CODING_ONLY_ENDING.to_string()
+        } else {
+            "If the coding discussion is complete, wrap it up under the round plan; do not open STAR without the trusted round-start event.".to_string()
+        };
         (
             format!(
                 "The coding round is active. REACTO steps already evidenced: {}. Do not re-run those. {MISSING_EVIDENCE}",
                 evidenced_among(state, &REACTO_PHASE_IDS)
             ),
             format!(
-                "Answer the latest unanswered candidate turn if there is one. Otherwise pick up at the first step that is neither evidenced nor plainly done in the recovered transcript, editor or test report. If that cannot be told and the editor has code, ask ONE short question about what is already there and continue from that step; if the editor is empty, ask what they have worked out so far and continue from their answer. {NO_REPEAT} If the coding discussion is complete, wrap it up under the round plan; do not open STAR without the trusted round-start event."
+                "Answer the latest unanswered candidate turn if there is one. Otherwise pick up at the first step that is neither evidenced nor plainly done in the recovered transcript, editor or test report. If that cannot be told and the editor has code, ask ONE short question about what is already there and continue from that step; if the editor is empty, ask what they have worked out so far and continue from their answer. {NO_REPEAT} {next}"
             ),
             None,
         )
@@ -933,6 +1036,9 @@ pub fn silence_nudge(state: &RuntimeState, evidence: &str, excerpt: Option<&str>
         .as_ref()
         .is_some_and(super::evidence::run_failed_to_start);
     let with_code = match coding_progress(state) {
+        Some(progress) if super::coding_continues_past_gate(state) => {
+            format!("if code is present: {progress}")
+        }
         Some(progress) if super::coding_round_complete(state) => format!(
             "if code is present: {progress} Ask whether they have anything to add, or wrap up the coding discussion under the round plan."
         ),
@@ -966,7 +1072,14 @@ pub fn proactive_review(state: &RuntimeState, evidence: &str, excerpt: Option<&s
 /// hand trace can complete it, asking for a Run would spend the candidate's
 /// last minutes on a runner that cannot answer.
 pub fn time_warning(state: &RuntimeState) -> String {
-    let order = if super::coding_round_complete(state) {
+    let order = if super::coding_continues_past_gate(state) {
+        match verified_outcome(state) {
+            Some(true) => "confirm any final change, then discuss only what they have not covered yet",
+            Some(false) => "prioritize the unresolved failures and verify the fix, then discuss only what remains uncovered",
+            None => "verify the code now on screen, then discuss only what remains uncovered",
+        }
+        .to_string()
+    } else if super::coding_round_complete(state) {
         "confirm any final change, then add anything about the solution they have not covered yet"
             .to_string()
     } else {
@@ -1071,15 +1184,35 @@ pub fn owed_reply(owed_prompt: Option<&str>) -> String {
     }
 }
 
-/// Why `end_interview` is refused while the coding round is unfinished, naming
-/// only the steps still missing. With Test recorded, inviting a Run sends a
+/// Why `end_interview` is refused: coding-only time belongs to the candidate,
+/// and an unfinished round needs only the steps still missing. With Test
+/// recorded, inviting a Run sends a
 /// finished candidate back to Test; without it, the way to Test is the one the
 /// gate is in, since a Run button is no help while the runner is missing.
 pub(crate) fn end_interview_refusal(state: &RuntimeState) -> String {
-    let unfinished = "so the interview is not finished";
+    if super::coding_continues_past_gate(state) {
+        return coding_only_continuation(state);
+    }
+    let refusal = unfinished_coding_refusal(state);
+    if state.interview_loop == InterviewLoop::CodingOnly {
+        format!("{CODING_ONLY_ENDING} {refusal}")
+    } else {
+        refusal
+    }
+}
+
+/// In a coding-only session missing evidence is not what stands between the
+/// interviewer and the end, so the refusal must not read as though recording
+/// it would make `end_interview` succeed.
+fn unfinished_coding_refusal(state: &RuntimeState) -> String {
+    let unfinished = if state.interview_loop == InterviewLoop::CodingOnly {
+        ""
+    } else {
+        ", so the interview is not finished"
+    };
     if super::phases_evidenced(state, &[super::FrameworkPhase::Test]) {
         return format!(
-            "The coding round has no Optimizations evidence yet, {unfinished}. {RECORD_UNRECORDED} Otherwise ask only for what they have not covered, and record evidence when the candidate earns it."
+            "The coding round has no Optimizations evidence yet{unfinished}. {RECORD_UNRECORDED} Otherwise ask only for what they have not covered, and record evidence when the candidate earns it."
         );
     }
     let missing = if super::phases_evidenced(state, &[super::FrameworkPhase::Optimizations]) {
@@ -1093,7 +1226,7 @@ pub(crate) fn end_interview_refusal(state: &RuntimeState) -> String {
         "If the candidate has not run the code now in the editor, invite them to click Run and wait for the results"
     };
     format!(
-        "The coding round has no {missing} evidence yet, {unfinished}. {way_to_test}; otherwise continue, and record evidence when the candidate earns it."
+        "The coding round has no {missing} evidence yet{unfinished}. {way_to_test}; otherwise continue, and record evidence when the candidate earns it."
     )
 }
 
@@ -1583,6 +1716,18 @@ pub enum TestRecord {
     Settled,
 }
 
+pub(super) fn uncredited_test_results_reaction(
+    summary_text: &str,
+    excerpt: Option<&str>,
+    state: &RuntimeState,
+) -> String {
+    let code = reaction_code(excerpt);
+    let next = coding_only_continuation(state);
+    format!(
+        "[SYSTEM EVENT] These test results provide no new execution evidence for the code on screen:\n{summary_text}\n{code}Do not treat these results as passing or failing, or narrate their counts. {next}"
+    )
+}
+
 /// The reaction asks for nothing the evidence gate would refuse: a run the
 /// candidate edited past is not called testing, and is not recorded.
 ///
@@ -1629,7 +1774,12 @@ pub fn test_results_reaction(
         // A result can land after the candidate has typed past the code it ran.
         // Then this run does not describe the editor, and another run of what
         // is there now may be exactly what the change needs.
-        let (rerun, not_again) = if !super::tested_code_is_current(state) {
+        let matches_editor = if state.interview_loop == InterviewLoop::CodingOnly {
+            super::tested_code_is_exact(state)
+        } else {
+            super::tested_code_is_current(state)
+        };
+        let (rerun, not_again) = if !matches_editor {
             (
                 " The editor has changed since this run, so it may not describe the code now on screen; ask for a run of that code only if the change could affect the result.",
                 "complexity or edge cases",
@@ -1642,8 +1792,13 @@ pub fn test_results_reaction(
         } else {
             ("", "complexity, edge cases or another run")
         };
+        let next = if state.interview_loop == InterviewLoop::CodingOnly {
+            coding_only_continuation(state)
+        } else {
+            "If the coding discussion is complete, wrap it up under the round plan; do not start a behavioral question in this same reply.".to_string()
+        };
         return format!(
-            "[SYSTEM EVENT] The candidate just ran the built-in test cases and every one passed:\n{summary_text}\n{code}Treat this only as the candidate's reported result, not proof.{record}{rerun} Complexity and edge cases are already covered: acknowledge the result in one short sentence and do not ask for {not_again}. If the coding discussion is complete, wrap it up under the round plan; do not start a behavioral question in this same reply."
+            "[SYSTEM EVENT] The candidate just ran the built-in test cases and every one passed:\n{summary_text}\n{code}Treat this only as the candidate's reported result, not proof.{record}{rerun} Complexity and edge cases are already covered: acknowledge the result in one short sentence and do not ask for {not_again}. {next}"
         );
     }
     if all_passed {

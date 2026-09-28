@@ -671,35 +671,169 @@ fn the_evidence_that_completes_coding_releases_the_follow_ups_once() {
     assert!(!crate::agent::cold_restart(&fresh).contains(first));
 }
 #[test]
-fn end_interview_allows_a_completed_coding_only_plan() {
+fn coding_only_completion_leaves_the_remaining_time_to_the_candidate() {
+    for passed in [2, 4] {
+        for elapsed in [803, 1740, 1860] {
+            for paused in [false, true] {
+                let mut state = RuntimeState {
+                    interview_loop: crate::agent::InterviewLoop::CodingOnly,
+                    coding_minutes: 30,
+                    behavioral_minutes: 0,
+                    started_at: Instant::now()
+                        .checked_sub(Duration::from_secs(elapsed))
+                        .unwrap(),
+                    code: "def solve(nums):\n    return sorted(nums)\n".to_string(),
+                    ..RuntimeState::default()
+                };
+                let run = serde_json::json!({
+                    "passed": passed, "total": 4,
+                    "code": state.code, "language": state.language
+                });
+                crate::agent::apply_data_event(
+                    &mut state,
+                    crate::runtime::TOPIC_TEST_RESULTS,
+                    &run,
+                    99.0,
+                );
+                for phase in ["test", "optimizations"] {
+                    record_framework_evidence(
+                        &mut state,
+                        &serde_json::json!({
+                            "phase": phase, "source": observed_source(phase), "kind": "observed",
+                            "confidence": 90, "summary": format!("Candidate finished {phase}.")
+                        }),
+                    )
+                    .unwrap();
+                }
+                assert!(crate::agent::coding_round_complete(&state));
+                state.paused = paused;
+                let ending = execute_tool_call(
+                    &mut state,
+                    &GeminiFunctionCall {
+                        id: "1".to_string(),
+                        name: TOOL_END_INTERVIEW.to_string(),
+                        args: serde_json::json!({}),
+                    },
+                );
+                assert!(
+                    !state.end_requested,
+                    "model must not end a coding-only session"
+                );
+                assert!(!state.ended);
+                assert!(
+                    ending["error"]
+                        .as_str()
+                        .unwrap()
+                        .contains("platform timer expires")
+                );
+                let refusal = ending["error"].as_str().unwrap();
+                assert!(refusal.contains("Do not say goodbye"));
+                if passed == 2 {
+                    assert!(refusal.contains("diagnose one unresolved failing case"));
+                }
+
+                // The five-minute warning names failures only when there are
+                // some.
+                let warning = crate::agent::time_warning(&state);
+                if passed == 4 {
+                    assert!(warning.contains("confirm any final change"), "{warning}");
+                    assert!(!warning.contains("unresolved failures"), "{warning}");
+                } else {
+                    assert!(
+                        warning.contains("prioritize the unresolved failures"),
+                        "{warning}"
+                    );
+                }
+                for prompt in [
+                    crate::agent::silence_nudge(&state, "", None),
+                    crate::agent::proactive_review(&state, "", None),
+                    crate::agent::cold_restart(&state),
+                    crate::agent::resumed_context(&state, false, None),
+                    crate::agent::time_warning(&state),
+                ] {
+                    assert!(prompt.contains("platform timer expires"), "{prompt}");
+                    assert!(
+                        !prompt.contains("wrap up the coding discussion"),
+                        "{prompt}"
+                    );
+                    assert!(!prompt.contains("coding problem is solved"), "{prompt}");
+                    if passed == 2 {
+                        assert!(
+                            prompt.contains("diagnose one unresolved failing case"),
+                            "{prompt}"
+                        );
+                    }
+                }
+                if passed == 4 {
+                    let prompt = crate::agent::test_results_reaction(
+                        "4/4 passed",
+                        true,
+                        crate::agent::TestRecord::Settled,
+                        None,
+                        &state,
+                        crate::agent::SincePrevious::Unchanged,
+                    );
+                    assert!(prompt.contains("platform timer expires"));
+                    assert!(!prompt.contains("wrap it up"));
+                }
+
+                // Neither a refusal nor incomplete code may block an explicit
+                // End or the timer, which both use the control path.
+                for reason in ["candidate_ended", "time_up"] {
+                    let mut ended = state.clone();
+                    let result = crate::agent::apply_data_event(
+                        &mut ended,
+                        crate::runtime::TOPIC_CONTROL,
+                        &serde_json::json!({
+                            "type": "end_interview", "reason": reason,
+                            "code": "def solve(nums):\n    return sor", "language": "python"
+                        }),
+                        99.0,
+                    );
+                    assert!(ended.ended);
+                    assert_eq!(result.finish_interview.as_deref(), Some(reason));
+                    assert_eq!(ended.code, "def solve(nums):\n    return sor");
+                }
+            }
+        }
+    }
+}
+
+/// An unfinished coding-only round is refused for the same reason as a
+/// finished one, so the refusal must not read as though recording the missing
+/// evidence would let `end_interview` through.
+#[test]
+fn unfinished_coding_only_refusal_does_not_promise_an_ending() {
     let mut state = RuntimeState {
         interview_loop: crate::agent::InterviewLoop::CodingOnly,
         code: "def solve(nums):\n    return sorted(nums)\n".to_string(),
         ..RuntimeState::default()
     };
-    receive_test_run(&mut state);
-    for phase in ["test", "optimizations"] {
-        record_framework_evidence(
-            &mut state,
-            &serde_json::json!({
-                "phase": phase, "source": observed_source(phase), "kind": "observed",
-                "confidence": 90, "summary": format!("Candidate finished {phase}.")
-            }),
-        )
-        .unwrap();
-    }
-
-    let ending = execute_tool_call(
-        &mut state,
-        &GeminiFunctionCall {
-            id: "1".to_string(),
-            name: TOOL_END_INTERVIEW.to_string(),
-            args: serde_json::json!({}),
-        },
+    let call = GeminiFunctionCall {
+        id: "1".to_string(),
+        name: TOOL_END_INTERVIEW.to_string(),
+        args: serde_json::json!({}),
+    };
+    let refusal = execute_tool_call(&mut state, &call)["error"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(refusal.contains("platform timer expires"), "{refusal}");
+    assert!(
+        refusal.contains("no Test and Optimizations evidence yet."),
+        "{refusal}"
     );
+    assert!(!refusal.contains("not finished"), "{refusal}");
 
-    assert!(ending["result"].is_string());
-    assert!(state.end_requested);
+    state.interview_loop = crate::agent::InterviewLoop::CodingBehavioral;
+    let refusal = execute_tool_call(&mut state, &call)["error"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        refusal.contains("so the interview is not finished"),
+        "{refusal}"
+    );
 }
 
 /// The reply that first ticks a later step names the earlier ones still open,
@@ -882,6 +1016,12 @@ fn oral_test_trace_cannot_end_the_interview_before_execution() {
         crate::agent::framework_progress(&state),
         ["optimizations", "test"]
     );
-    assert!(execute_tool_call(&mut state, &end).get("error").is_none());
-    assert!(state.end_requested);
+    let ending = execute_tool_call(&mut state, &end);
+    assert!(
+        ending["error"]
+            .as_str()
+            .unwrap()
+            .contains("platform timer expires")
+    );
+    assert!(!state.end_requested);
 }

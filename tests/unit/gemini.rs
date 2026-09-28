@@ -1308,6 +1308,21 @@ fn live_setup_uses_native_audio_voice_tools_and_transcription() {
     let ending_tool = &setup["tools"][0]["functionDeclarations"][3];
     assert_eq!(ending_tool["name"], TOOL_END_INTERVIEW);
     assert!(ending_tool.get("parameters").is_none());
+
+    // Only the timer or the candidate ends a coding-only session, so it is not
+    // offered a tool the platform would always refuse.
+    let coding_only = RuntimeBootstrap {
+        interview_loop: crate::agent::InterviewLoop::CodingOnly,
+        ..bootstrap(&config, "interview-fixed", Some("two-sum"), 45)
+    };
+    let names = live_setup_message(&coding_only, None)["setup"]["tools"][0]["functionDeclarations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["name"].clone())
+        .collect::<Vec<_>>();
+    assert_eq!(names.len(), 3);
+    assert!(!names.contains(&json!(TOOL_END_INTERVIEW)));
     assert_eq!(setup["inputAudioTranscription"], json!({}));
     assert_eq!(setup["outputAudioTranscription"], json!({}));
     assert_eq!(

@@ -402,7 +402,7 @@ impl Conversation {
                 .json(&json!({
                     "systemInstruction": { "parts": [{ "text": self.instructions }] },
                     "contents": self.contents,
-                    "tools": [{ "functionDeclarations": live_tool_declarations() }],
+                    "tools": [{ "functionDeclarations": live_tool_declarations(self.state.interview_loop) }],
                     "generationConfig": { "temperature": 0.7 },
                 }))
                 .send()
@@ -420,7 +420,7 @@ impl Conversation {
     }
 
     async fn generate_local(&self, base: &str) -> Value {
-        let tools = live_tool_declarations()
+        let tools = live_tool_declarations(self.state.interview_loop)
             .as_array()
             .into_iter()
             .flatten()

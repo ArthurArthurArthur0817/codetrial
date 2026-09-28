@@ -3050,3 +3050,268 @@ fn an_analysis_of_the_rewrite_is_not_asked_for_again() {
     let rerun = run_tests(&mut state, 3, 3).generate_reply.unwrap();
     assert!(!rerun.contains("may no longer describe"), "{rerun}");
 }
+
+#[test]
+fn coding_only_continuation_tracks_edits_language_and_follow_ups() {
+    let mut state = with_written_code(RuntimeState {
+        interview_loop: InterviewLoop::CodingOnly,
+        follow_ups: &["Discuss streaming input."],
+        ..RuntimeState::default()
+    });
+    let unfinished = cold_restart(&state);
+    assert!(unfinished.contains("platform timer expires"));
+    assert!(!unfinished.contains("offer the released follow-ups"));
+    assert!(released_follow_ups(&state).is_none());
+    record_coding_gate_evidence(&mut state);
+    for passed in [2, 4] {
+        run_tests(&mut state, passed, 4);
+        for prompt in [cold_restart(&state), resumed_context(&state, false, None)] {
+            assert_eq!(prompt.matches("A coding-only interview ends").count(), 1);
+            assert!(prompt.contains("Discuss streaming input."));
+            assert!(prompt.contains("only after unresolved failures are addressed"));
+            assert!(prompt.contains("executed the code on screen"));
+        }
+        for uncredited in [
+            json!({"total": 0, "setupError": "HTTP 503", "runnerUnavailable": true,
+                "code": state.code, "language": state.language}),
+            json!({"passed": 0, "total": 0, "code": state.code, "language": state.language}),
+            json!({"passed": if passed == 2 { 4 } else { 0 }, "total": 4, "language": state.language}),
+        ] {
+            let mut retained = state.clone();
+            let reaction = apply_data_event(&mut retained, TOPIC_TEST_RESULTS, &uncredited, 100.0);
+            {
+                let prompt = reaction
+                    .generate_reply
+                    .expect("uncredited run receives a reaction");
+                // An outage is the platform's, not a setup error to diagnose.
+                assert!(!prompt.contains("Return from Test to Coding"), "{prompt}");
+                assert!(
+                    prompt.contains("provide no new execution evidence for the code on screen")
+                );
+                assert!(!prompt.contains("cannot be matched"));
+                assert!(prompt.contains("Do not treat these results as passing or failing"));
+                assert!(!prompt.contains("every one passed"));
+                assert!(!prompt.contains("some failed"));
+                assert!(prompt.contains(if passed == 2 {
+                    "has failing cases"
+                } else {
+                    "all cases passed"
+                }));
+            }
+            let prompt = cold_restart(&retained);
+            assert!(prompt.contains(if passed == 2 {
+                "has failing cases"
+            } else {
+                "all cases passed"
+            }));
+            assert!(!prompt.contains("click Run"));
+            if uncredited["runnerUnavailable"] == true {
+                assert!(prompt.contains("use a hand trace for any further verification"));
+                retained.code = "def solve(nums):\n    return list(reversed(nums))\n".to_string();
+                let prompt = cold_restart(&retained);
+                assert!(prompt.contains("using a hand trace"));
+                assert!(!prompt.contains("click Run"));
+            }
+        }
+        let mut invalidated = state.clone();
+        let compile_error = json!({"total": 0, "setupError": "SyntaxError",
+            "code": state.code, "language": state.language});
+        let reaction =
+            apply_data_event(&mut invalidated, TOPIC_TEST_RESULTS, &compile_error, 100.0)
+                .generate_reply
+                .expect("a compile error receives a reaction");
+        assert!(
+            reaction.contains("Return from Test to Coding"),
+            "{reaction}"
+        );
+        assert!(invalidated.tested_code.is_none());
+        assert_eq!(invalidated.tested_passed, None);
+        assert!(cold_restart(&invalidated).contains("No executed run can be matched"));
+        let mut edited = state.clone();
+        edited.code = "def solve(nums):\n    return list(reversed(nums))\n".to_string();
+        for prompt in [silence_nudge(&edited, "", None), cold_restart(&edited)] {
+            assert!(prompt.contains("code has changed since the latest executed run"));
+            assert!(!prompt.contains("executed the code on screen and has failing cases"));
+        }
+        edited.language = "cpp".to_string();
+        let prompt = cold_restart(&edited);
+        assert!(prompt.contains("No executed run can be matched to the code on screen"));
+        assert!(!prompt.contains("diagnose one unresolved failing case"));
+    }
+    state.follow_ups = &[];
+    let prompt = cold_restart(&state);
+    assert!(!prompt.contains("offer the released follow-ups"));
+    assert!(prompt.contains("trade-offs not yet covered"));
+
+    state.interview_loop = InterviewLoop::CodingBehavioral;
+    assert!(silence_nudge(&state, "", None).contains("wrap up the coding discussion"));
+    assert!(
+        test_results_reaction(
+            "4/4",
+            true,
+            TestRecord::Settled,
+            None,
+            &state,
+            SincePrevious::Unchanged
+        )
+        .contains("wrap it up under the round plan")
+    );
+}
+
+/// The Test gate keeps a run's credit through a small edit, but `<` to `<=` is
+/// small and can change every result, so a coding-only prompt states a run's
+/// outcome only while the editor holds exactly the code it ran.
+#[test]
+fn coding_only_prompts_state_a_result_only_for_the_code_that_ran() {
+    let mut state = with_written_code(RuntimeState {
+        interview_loop: InterviewLoop::CodingOnly,
+        ..RuntimeState::default()
+    });
+    record_coding_gate_evidence(&mut state);
+    run_tests(&mut state, 4, 4);
+    let prompt = cold_restart(&state);
+    assert!(prompt.contains("all cases passed"), "{prompt}");
+
+    // The outage note belongs only to a verified run the runner can no longer
+    // repeat, not to every verified run.
+    assert!(
+        !prompt.contains("runner is currently unavailable"),
+        "{prompt}"
+    );
+    assert!(
+        prompt.contains("Answer the latest unanswered candidate turn"),
+        "{prompt}"
+    );
+
+    // A comment edit keeps Test credit but no longer warrants an exact claim.
+    state.code = "def solve(nums):\n    return sorted(nums)  # O(n log n)\n".to_string();
+    assert!(!cold_restart(&state).contains("all cases passed"));
+
+    // Indentation is Python's control flow, so moving a line is an edit even
+    // though no character was added or removed.
+    let mut dedented = with_written_code(RuntimeState {
+        interview_loop: InterviewLoop::CodingOnly,
+        ..RuntimeState::default()
+    });
+    dedented.code = "def solve(nums):\n    for n in nums:\n        return n\n".to_string();
+    record_coding_gate_evidence(&mut dedented);
+    run_tests(&mut dedented, 4, 4);
+    assert!(cold_restart(&dedented).contains("all cases passed"));
+    dedented.code = "def solve(nums):\n    for n in nums:\n    return n\n".to_string();
+    assert!(!cold_restart(&dedented).contains("all cases passed"));
+
+    // Four characters: still credited as Test, no longer vouched for.
+    state.code = "def solve(nums):\n    return sorted(nums)[1:]\n".to_string();
+    assert!(state.tested_code.is_some());
+    for prompt in [cold_restart(&state), time_warning(&state)] {
+        assert!(!prompt.contains("all cases passed"), "{prompt}");
+        assert!(!prompt.contains("unresolved failures"), "{prompt}");
+    }
+    assert!(cold_restart(&state).contains("small edit since the credited run"));
+    assert!(time_warning(&state).contains("verify the code now on screen"));
+
+    // An empty run after a larger edit ran nothing, so it is not a failure to
+    // diagnose.
+    state.code = "def solve(nums):\n    return list(reversed(nums))\n".to_string();
+    let reply = run_tests(&mut state, 0, 0)
+        .generate_reply
+        .expect("an empty run is answered");
+    assert!(
+        reply.contains("provide no new execution evidence"),
+        "{reply}"
+    );
+    assert!(!reply.contains("some failed"), "{reply}");
+    assert!(
+        reply.contains("code has changed since the latest executed run"),
+        "{reply}"
+    );
+}
+
+#[test]
+fn coding_only_outcomes_preserve_literal_whitespace_and_token_boundaries() {
+    for (language, before, after) in [
+        (
+            "python",
+            "def solve(s):\n    return s.replace(\" \", \"\")\n",
+            "def solve(s):\n    return s.replace(\"\", \"\")\n",
+        ),
+        (
+            "python",
+            "def solve(s):\n    return \"\"\"a \nb\"\"\"\n",
+            "def solve(s):\n    return \"\"\"a\nb\"\"\"\n",
+        ),
+        (
+            "python",
+            "def solve(s):\n    return \"\"\"a\n\nb\"\"\"\n",
+            "def solve(s):\n    return \"\"\"a\nb\"\"\"\n",
+        ),
+        (
+            "javascript",
+            "function solve(a,b) { return a+/**/++b; }",
+            "function solve(a,b) { return a++/**/+b; }",
+        ),
+        (
+            "javascript",
+            "function solve() { return `a\n\nb`; }",
+            "function solve() { return `a\nb`; }",
+        ),
+    ] {
+        for passed in [2, 4] {
+            let mut state = RuntimeState {
+                interview_loop: InterviewLoop::CodingOnly,
+                language: language.to_string(),
+                code: before.to_string(),
+                ..RuntimeState::default()
+            };
+            record_coding_gate_evidence(&mut state);
+            run_tests(&mut state, passed, 4);
+            let outcome = if passed == 4 {
+                "all cases passed"
+            } else {
+                "has failing cases"
+            };
+            assert!(
+                cold_restart(&state).contains(outcome),
+                "{language}: {before:?}"
+            );
+            state.code = after.to_string();
+            for prompt in [
+                cold_restart(&state),
+                time_warning(&state),
+                resumed_context(&state, false, None),
+            ] {
+                assert!(
+                    !prompt.contains(outcome),
+                    "{language}: {before:?} -> {after:?}: {prompt}"
+                );
+                assert!(!prompt.contains("Do not ask for another run"), "{prompt}");
+            }
+            run_tests(&mut state, passed, 4);
+            assert!(cold_restart(&state).contains(outcome));
+        }
+    }
+}
+
+#[test]
+fn coding_only_delayed_passing_results_allow_verifying_small_edits() {
+    let mut state = with_written_code(RuntimeState {
+        interview_loop: InterviewLoop::CodingOnly,
+        ..RuntimeState::default()
+    });
+    record_coding_gate_evidence(&mut state);
+    let submitted = state.code.clone();
+    state.code = "def solve(nums):\n    return sorted(nums)[1:]\n".to_string();
+    let packet = json!({"language": state.language, "code": submitted, "passed": 4, "total": 4});
+    let reply = apply_data_event(&mut state, TOPIC_TEST_RESULTS, &packet, 100.0)
+        .generate_reply
+        .unwrap();
+    assert!(
+        reply.contains("ask for a run of that code only if the change could affect the result"),
+        "{reply}"
+    );
+    assert!(
+        !reply.contains("do not ask for complexity, edge cases or another run"),
+        "{reply}"
+    );
+    assert!(!reply.contains("all cases passed"), "{reply}");
+}

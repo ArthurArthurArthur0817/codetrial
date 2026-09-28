@@ -412,6 +412,9 @@ fn apply_test_results(
         .zip(raw.get("language").and_then(serde_json::Value::as_str))
         .filter(|(_, language)| offered_language(language).is_some());
 
+    let all_passed =
+        total > 0 && payload.get("passed").and_then(serde_json::Value::as_i64) == Some(total);
+
     // How a credited run's code compares, read before it replaces the last
     // credited run: a rerun of the same code is a repeat of the result already
     // reacted to, and a rewrite since the complexity was recorded makes that
@@ -437,6 +440,7 @@ fn apply_test_results(
             }
             _ => SincePrevious::Other,
         });
+        state.tested_passed = Some(all_passed);
         state.tested_code = Some(super::TestedCode {
             language: language.to_string(),
             code: code.to_string(),
@@ -471,6 +475,7 @@ fn apply_test_results(
             .is_some_and(|tested| tested.language == language)
     {
         state.tested_code = None;
+        state.tested_passed = None;
     }
     state.last_test_run = Some(payload.clone());
     state.test_runs += 1;
@@ -505,8 +510,6 @@ fn apply_test_results(
         };
     }
 
-    let all_passed =
-        total > 0 && payload.get("passed").and_then(serde_json::Value::as_i64) == Some(total);
     let summary = format_test_run_for_reaction(payload, state.test_runs);
     let excerpt = changed_excerpt(&state.language, &state.code_shown, &state.code);
     if excerpt.is_some() {
@@ -516,10 +519,17 @@ fn apply_test_results(
     // Held to the gate's own reading: an outage from a run in the language the
     // candidate has since left is an ordinary setup error for the code on
     // screen, and inviting a trace there invites a record the gate refuses.
+    // Past the gate of a coding-only session an outage is still not the
+    // candidate's to diagnose, so it continues from the credited run instead; a
+    // compile error keeps the setup-error reaction.
     let reply = if trace_open {
         test_runner_unavailable_reaction(&summary, excerpt.as_deref())
+    } else if outage && super::coding_continues_past_gate(state) {
+        super::prompts::uncredited_test_results_reaction(&summary, excerpt.as_deref(), state)
     } else if setup_error {
         test_setup_error_reaction(&summary, excerpt.as_deref())
+    } else if !credited && super::coding_continues_past_gate(state) {
+        super::prompts::uncredited_test_results_reaction(&summary, excerpt.as_deref(), state)
     } else {
         test_results_reaction(
             &summary,
