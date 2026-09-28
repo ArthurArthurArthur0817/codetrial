@@ -350,12 +350,31 @@ test("typing an opening bracket around a selection wraps it and leaves the wrapp
   }
 });
 
+test("typing an opening bracket right before other text leaves the closer to the candidate", () => {
+  // The reproduction from issue 150: an opener typed in front of `a+b)` must
+  // not strand the `)` the candidate already typed behind a second one.
+  for (const open of ["(", "{", "["]) {
+    assert.equal(insertBracketPair("a+b)", 0, 0, open), null);
+    assert.equal(insertBracketPair("foobar", 3, 3, open), null);
+  }
+  // Whitespace, a closer, or punctuation that ends an expression still gets
+  // the pair, at the end of a line as well as the end of the buffer.
+  for (const [value, at] of [
+    ["x = ;", 4],
+    ["f(a, b)", 6],
+    ["call\nnext", 4],
+    ["call next", 4],
+    ["if (x) ", 7],
+  ]) {
+    assert.deepEqual(insertBracketPair(value, at, at, "("), {
+      value: `${value.slice(0, at)}()${value.slice(at)}`,
+      start: at + 1,
+      end: at + 1,
+    });
+  }
+});
+
 test("typing an opening bracket in the middle of existing text only touches the selection", () => {
-  assert.deepEqual(insertBracketPair("foobar", 3, 3, "("), {
-    value: "foo()bar",
-    start: 4,
-    end: 4,
-  });
   assert.deepEqual(insertBracketPair("one, two", 5, 8, "["), {
     value: "one, [two]",
     start: 6,

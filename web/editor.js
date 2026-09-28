@@ -73,11 +73,25 @@ export function isBracketOpenerKeystroke(event) {
   );
 }
 
+// What may follow a bare caret for an opener to get its closer: the end of
+// the line, whitespace, a closer, or punctuation that ends an expression. The
+// set is VS Code's default autoCloseBefore. Before anything else the candidate
+// is opening a group around text that is already there, and a closer typed
+// here would sit in front of that text rather than after it (issue 150).
+const AUTO_CLOSE_BEFORE = new Set([..." \t\n;:.,=>", ...BRACKET_CLOSERS]);
+
 // Typing an opener around a selection wraps it, the way most editors do;
 // typing it at a bare caret inserts an empty pair and steps inside so the
-// candidate doesn't have to type the closer themselves.
+// candidate doesn't have to type the closer themselves. Null, so the caller
+// falls through to native insertion, when the caret sits before other text.
 export function insertBracketPair(value, start, end, opener) {
   const closer = BRACKET_PAIRS[opener];
+  if (
+    start === end &&
+    start < value.length &&
+    !AUTO_CLOSE_BEFORE.has(value[start])
+  )
+    return null;
   const inner = value.slice(start, end);
   const insertion = `${opener}${inner}${closer}`;
   const caret = start + opener.length + inner.length;

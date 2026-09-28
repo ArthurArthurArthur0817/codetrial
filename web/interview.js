@@ -616,15 +616,15 @@ function bindEvents() {
       return;
     }
     if (isBracketOpenerKeystroke(event)) {
-      event.preventDefault();
-      applyEditorEdit(
-        insertBracketPair(
-          nodes.editor.value,
-          nodes.editor.selectionStart,
-          nodes.editor.selectionEnd,
-          event.data,
-        ),
+      const pair = insertBracketPair(
+        nodes.editor.value,
+        nodes.editor.selectionStart,
+        nodes.editor.selectionEnd,
+        event.data,
       );
+      if (!pair) return;
+      event.preventDefault();
+      applyEditorEdit(pair);
       return;
     }
     if (isBracketCloserKeystroke(event)) {
