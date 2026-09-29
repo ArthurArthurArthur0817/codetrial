@@ -70,6 +70,10 @@ pub fn sanitize_test_run(payload: &serde_json::Value) -> serde_json::Value {
     // well break a line on them: the thing being defended is what the model
     // sees, not what `str::lines` splits on.
     //
+    // Each one becomes a space rather than nothing. Dropped outright, a
+    // compiler's lines ran together in the prompt and the report, so the caret
+    // and the "1 error" under it read as "^1 error".
+    //
     // Brackets stay: "expected [1, 2, 3], got [3, 2, 1]" is the string this
     // bound is generous enough to fit, and mangling it to protect against a
     // delimiter the model reads as prose costs more than it buys.
@@ -77,7 +81,13 @@ pub fn sanitize_test_run(payload: &serde_json::Value) -> serde_json::Value {
         value.and_then(serde_json::Value::as_str).map(|value| {
             value
                 .chars()
-                .filter(|c| !c.is_control() && !matches!(c, '\u{2028}' | '\u{2029}'))
+                .map(|c| {
+                    if c.is_control() || matches!(c, '\u{2028}' | '\u{2029}') {
+                        ' '
+                    } else {
+                        c
+                    }
+                })
                 .take(MAX_TEST_TEXT)
                 .collect::<String>()
         })
@@ -158,7 +168,7 @@ pub fn sanitize_test_run(payload: &serde_json::Value) -> serde_json::Value {
     let setup_error = match payload.get("setupError") {
         Some(error) if python_truthy(error) => Some(
             text(Some(error))
-                .filter(|text| !text.is_empty())
+                .filter(|text| !text.trim().is_empty())
                 .unwrap_or_else(|| "The runner reported a setup error.".to_string()),
         ),
         other => text(other),
