@@ -88,7 +88,8 @@ Platform notes:
   a folder of its own before double-clicking it: with no config file nearby it
   opens the Setup page above, and everything it writes lands in that folder, the
   `config/` that page fills in, and, if the start fails, a
-  `codetrial-error.log` beside the executable that is the only place the reason
-  appears when there is no terminal to read one from.
+  `codetrial-error.log` beside the executable. That log names the build it
+  came from before the reason, and is the only place the reason appears when
+  there is no terminal to read one from.
 - Only `x86_64` Linux, `arm64` macOS, and `x86_64` Windows are published. Build
   from source for anything else.

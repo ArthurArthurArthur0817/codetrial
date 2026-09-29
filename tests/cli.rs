@@ -16,6 +16,14 @@ fn run_cli_args(args: &[&str]) -> (i32, String, String) {
     run_cli_args_with_env(args, &[])
 }
 
+fn build_version_line() -> String {
+    format!(
+        "codetrial {} ({})\n",
+        env!("CARGO_PKG_VERSION"),
+        env!("CODETRIAL_BUILD_COMMIT")
+    )
+}
+
 /// Written by `wait_for_http` and read by `spawn_server`; the pair is pinned
 /// in `only_sigkill_is_retryable`.
 const SIGKILL_PREFIX: &str = "SIGKILL: ";
@@ -812,6 +820,10 @@ fn binary_help_exits_without_loading_config() {
     for (args, usage) in [
         (&["--help"][..], "usage: codetrial MODE [OPTIONS]"),
         (&["web", "-h"][..], "usage: codetrial web [OPTIONS]"),
+        (
+            &["--version", "--help"][..],
+            "usage: codetrial MODE [OPTIONS]",
+        ),
         // Help beats parsing. Both of these are a flag missing its value, and
         // answering a request for help with a parse error is the wrong answer
         // to the question that was asked.
@@ -832,7 +844,12 @@ fn binary_help_exits_without_loading_config() {
 
         // The options, not just the usage line. Help that names the modes and
         // stops is help that does not answer "how do I point it at my config".
-        for flag in ["--config PATH", "--web-addr ADDR", "-h, --help"] {
+        for flag in [
+            "--config PATH",
+            "--web-addr ADDR",
+            "-h, --help",
+            "-V, --version",
+        ] {
             assert!(
                 stdout.contains(flag),
                 "{args:?} must document {flag}: {stdout}"
@@ -842,6 +859,22 @@ fn binary_help_exits_without_loading_config() {
             stdout.contains("--flag=value"),
             "{args:?} must say how to pass a dash-prefixed value: {stdout}"
         );
+    }
+}
+
+#[test]
+fn binary_version_exits_without_loading_config() {
+    let expected = build_version_line();
+    for args in [
+        &["--version"][..],
+        &["-V"][..],
+        &["web", "--config", "--version"][..],
+        &["--config", "-V"][..],
+    ] {
+        let (code, stdout, stderr) = run_cli_args(args);
+        assert_eq!(code, 0, "{args:?}");
+        assert_eq!(stdout, expected, "{args:?}");
+        assert!(stderr.is_empty(), "{args:?}: {stderr}");
     }
 }
 
@@ -928,7 +961,7 @@ fn binary_web_names_the_config_it_read_when_credentials_are_missing() {
     let _ = std::fs::remove_dir_all(dir);
 
     assert_eq!(code, 1);
-    assert!(stdout.is_empty());
+    assert_eq!(stdout, build_version_line());
     assert!(
         stderr.contains("missing required LiveKit credentials"),
         "{stderr}"
@@ -1015,7 +1048,7 @@ fn binary_with_no_arguments_defaults_to_web_mode() {
     let _ = std::fs::remove_dir_all(dir);
 
     assert_eq!(code, 1, "{stderr}");
-    assert!(stdout.is_empty());
+    assert_eq!(stdout, build_version_line());
     assert!(
         stderr.contains("missing required LiveKit credentials"),
         "{stderr}"
@@ -2060,7 +2093,7 @@ fn binary_web_refuses_a_public_listener_without_a_session_secret() {
     let _ = std::fs::remove_dir_all(&config_dir);
 
     assert_eq!(code, 1);
-    assert!(stdout.is_empty());
+    assert_eq!(stdout, build_version_line());
     assert!(
         stderr.contains("SESSION_SECRET must be set to bind 0.0.0.0"),
         "{stderr}"
@@ -2100,7 +2133,7 @@ fn binary_web_refuses_production_without_a_session_secret() {
     let _ = std::fs::remove_dir_all(&dir);
 
     assert_eq!(code, 1);
-    assert!(stdout.is_empty());
+    assert_eq!(stdout, build_version_line());
     assert!(
         stderr.contains("SESSION_SECRET must be set when NODE_ENV=production"),
         "{stderr}"
@@ -2299,7 +2332,7 @@ fn binary_web_reports_bind_failure_after_config_validation() {
     let _ = std::fs::remove_dir_all(dir);
 
     assert_eq!(code, 1);
-    assert!(stdout.is_empty());
+    assert_eq!(stdout, build_version_line());
     assert!(stderr.contains("failed to bind"), "{stderr}");
 }
 
@@ -2338,18 +2371,21 @@ fn binary_web_logs_any_startup_failure_not_just_a_cold_start_one() {
     let output = cli_command(&["web", "--config", config.to_str().unwrap()], &[], &dir)
         .output()
         .expect("codetrial should exit");
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
     let stderr = String::from_utf8(output.stderr).expect("stderr should be UTF-8");
     let log = std::fs::read_to_string(dir.join("codetrial-error.log"));
     let _ = std::fs::remove_dir_all(&dir);
 
     assert_eq!(output.status.code(), Some(1));
+    assert_eq!(stdout, build_version_line());
     assert!(
         stderr.contains("missing required LiveKit credentials"),
         "{stderr}"
     );
     let log = log.expect("codetrial-error.log should have been written");
+    let reason = log.strip_prefix(&build_version_line());
     assert!(
-        log.contains("missing required LiveKit credentials"),
+        reason.is_some_and(|reason| reason.contains("missing required LiveKit credentials")),
         "{log}"
     );
 }

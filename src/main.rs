@@ -73,6 +73,14 @@ fn main() {
     std::process::exit(run_agent_command(&args));
 }
 
+fn build_version() -> String {
+    format!(
+        "codetrial {} ({})",
+        env!("CARGO_PKG_VERSION"),
+        env!("CODETRIAL_BUILD_COMMIT")
+    )
+}
+
 fn run_agent_command(args: &[String]) -> i32 {
     // Answered before parsing, and from the raw arguments. `--help` beside a
     // flag that is missing its value is still a request for help, and a parse
@@ -89,6 +97,14 @@ fn run_agent_command(args: &[String]) -> i32 {
                 .find(|(name, ..)| name == arg)
                 .map(|(_, _, usage, _)| *usage)
         }));
+        return 0;
+    }
+    if args
+        .iter()
+        .take_while(|arg| *arg != "--")
+        .any(|arg| arg == "--version" || arg == "-V")
+    {
+        println!("{}", build_version());
         return 0;
     }
     let (mut positionals, options) = match parse_agent_args(args) {
@@ -123,6 +139,10 @@ fn run_agent_command(args: &[String]) -> i32 {
     if positionals.len() != arity {
         eprintln!("usage: {usage}");
         return 2;
+    }
+
+    if mode == "web" {
+        println!("{}", build_version());
     }
 
     // Every mode reports failure the same way, so it is reported in one place
@@ -215,7 +235,7 @@ fn print_help(usage: Option<&str>) {
         }
     }
     println!(
-        "\nOptions:\n  --config PATH        Use PATH instead of config/codetrial.env.local\n  --web-addr ADDR      Listen on ADDR\n  --web-dir PATH       Serve files from PATH\n  --room-prefix PREFIX Prefix generated room names\n  --duration-min MIN   Set the interview duration\n  -h, --help           Show this help\n\nEvery option also takes `--flag=value`, which is the only way to pass a value\nthat starts with a dash. `--` ends the options."
+        "\nOptions:\n  --config PATH        Use PATH instead of config/codetrial.env.local\n  --web-addr ADDR      Listen on ADDR\n  --web-dir PATH       Serve files from PATH\n  --room-prefix PREFIX Prefix generated room names\n  --duration-min MIN   Set the interview duration\n  -h, --help           Show this help\n  -V, --version        Show the package version and build commit\n\nEvery option also takes `--flag=value`, which is the only way to pass a value\nthat starts with a dash. `--` ends the options."
     );
 }
 
@@ -605,8 +625,15 @@ fn public_setup_refusal(
 /// lives. A double-clicked binary has no console to leave the reason in and
 /// no working directory anyone chose, so the folder it was unpacked into is
 /// the one place its owner knows to look.
+///
+/// Headed by the same build line the console shows first. This file is what
+/// arrives when that owner reports the failure, and a report that cannot name
+/// its build cannot say whether a fix is already in it.
 fn log_web_error(error: &str) {
-    let _ = std::fs::write(web_error_log_path(), format!("{error}\n"));
+    let _ = std::fs::write(
+        web_error_log_path(),
+        format!("{}\n{error}\n", build_version()),
+    );
 }
 
 /// Dropped once a launch is past everything that could have written one, so

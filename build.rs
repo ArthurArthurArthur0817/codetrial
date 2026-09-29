@@ -1,4 +1,5 @@
-//! Makes `rust-embed` see a changed asset tree, and installs the git hooks.
+//! Makes `rust-embed` see a changed asset tree, records the commit being
+//! built, and installs the git hooks.
 //!
 //! The derive expands to one `include_bytes!` per file, and rustc records
 //! those in dep-info, so *editing* an embedded asset already rebuilds. Files
@@ -17,7 +18,89 @@ use std::process::Command;
 
 fn main() {
     println!("cargo:rerun-if-changed=web");
+    set_build_commit();
     install_git_hooks();
+}
+
+/// The released binary must identify the source it was built from even when
+/// the rolling `latest` tag has since moved. CI supplies its checkout SHA;
+/// local builds use HEAD, and source archives without either say `unknown`.
+/// Both are seven characters wide, because `--short` alone follows
+/// `core.abbrev`, and a setting below seven would fail `hex_sha`.
+fn set_build_commit() {
+    println!("cargo:rerun-if-env-changed=GITHUB_SHA");
+    let root = std::env::var_os("CARGO_MANIFEST_DIR")
+        .map(std::path::PathBuf::from)
+        .filter(|root| root.join(".git").exists());
+    if let Some(root) = root.as_deref() {
+        watch_git_head(root);
+    }
+
+    let commit = std::env::var("GITHUB_SHA")
+        .ok()
+        .and_then(|sha| hex_sha(&sha).map(|sha| sha[..7].to_ascii_lowercase()))
+        .or_else(|| {
+            root.as_deref()
+                .and_then(|root| git_output(root, &["rev-parse", "--short=7", "HEAD"]))
+                .and_then(|sha| hex_sha(&sha).map(str::to_ascii_lowercase))
+        })
+        .unwrap_or_else(|| "unknown".to_string());
+    println!("cargo:rustc-env=CODETRIAL_BUILD_COMMIT={commit}");
+}
+
+fn hex_sha(sha: &str) -> Option<&str> {
+    let sha = sha.trim();
+    (sha.len() >= 7 && sha.bytes().all(|byte| byte.is_ascii_hexdigit())).then_some(sha)
+}
+
+fn git_output(root: &std::path::Path, args: &[&str]) -> Option<String> {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(root)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8(output.stdout).ok()
+}
+
+/// HEAD holds the commit in a detached checkout and names a ref on a branch.
+/// Watch that ref too, so the next local commit rebuilds the identifier even
+/// when none of the source files changed.
+fn watch_git_head(root: &std::path::Path) {
+    let Some(head) = git_path(root, "HEAD") else {
+        return;
+    };
+    println!("cargo:rerun-if-changed={}", head.display());
+    if let Some(reference) = git_output(root, &["symbolic-ref", "-q", "HEAD"])
+        && let Some(path) = git_path(root, reference.trim())
+    {
+        if path.is_file() {
+            println!("cargo:rerun-if-changed={}", path.display());
+        } else {
+            // A packed or unborn branch has no loose ref yet. A commit creates
+            // one without changing packed-refs, so watch the nearest existing
+            // parent as well as packed-refs.
+            if let Some(parent) = path.ancestors().skip(1).find(|parent| parent.is_dir()) {
+                println!("cargo:rerun-if-changed={}", parent.display());
+            }
+            if let Some(packed) = git_path(root, "packed-refs")
+                && packed.is_file()
+            {
+                println!("cargo:rerun-if-changed={}", packed.display());
+            }
+        }
+    }
+}
+
+/// Joined onto `root` rather than asked for as absolute. `--path-format` needs
+/// git 2.31, and an older one, such as the git in the Bullseye image the Linux
+/// release builds in, echoes the unknown flag back as output and still exits 0.
+/// The answer is relative to the working directory, which is `root`, or
+/// already absolute, which `join` keeps as it is.
+fn git_path(root: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
+    git_output(root, &["rev-parse", "--git-path", name]).map(|path| root.join(path.trim()))
 }
 
 /// Links `scripts/git-*.sh` into the hooks directory of a checkout.
@@ -64,7 +147,7 @@ fn install_git_hooks() {
     // this does not notice. That directory holds every gate script in the
     // repository and each edit to one would rebuild the binary; `make hooks`
     // covers the rare case at no standing cost.
-    if let Some(hooks) = hooks_dir(&root)
+    if let Some(hooks) = git_path(&root, "hooks")
         && hooks.is_dir()
     {
         println!("cargo:rerun-if-changed={}", hooks.display());
@@ -104,21 +187,6 @@ fn install_git_hooks() {
         Ok(output) => warn_hooks(&String::from_utf8_lossy(&output.stderr)),
         Err(error) => warn_hooks(&error.to_string()),
     }
-}
-
-/// Where git keeps this checkout's hooks, which is `.git/hooks` only in the
-/// simple case.
-fn hooks_dir(root: &std::path::Path) -> Option<std::path::PathBuf> {
-    let output = Command::new("git")
-        .args(["rev-parse", "--path-format=absolute", "--git-path", "hooks"])
-        .current_dir(root)
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let path = String::from_utf8(output.stdout).ok()?;
-    Some(std::path::PathBuf::from(path.trim()))
 }
 
 fn warn_hooks(reason: &str) {
