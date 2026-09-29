@@ -322,6 +322,17 @@ jobs:
       - name: Run gates
         run: ./scripts/test.sh
 
+      # The release job makes the same comparison, but only after a merge: a
+      # `build.rs` that stops recording the commit would pass every pull
+      # request and turn the publishing leg red instead. `cargo test` above
+      # has already built this binary from the same checkout.
+      - name: Prove the build names its commit
+        run: |
+          version=$(target/debug/codetrial --version)
+          head=$(git rev-parse HEAD)
+          [[ $version == *"(${head::7})" ]] \
+            || { echo "build reports \"$version\", not ${head::7}" >&2; exit 1; }
+
       # Its own step, not part of `cargo test`. It drives a real browser through
       # the offline interview and is hermetic now, with the Compiler Explorer
       # calls intercepted, but it still fails on a two minute navigation timeout
