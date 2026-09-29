@@ -722,6 +722,7 @@ jobs:
             --workdir /workspace \
             --env CARGO_HOME=/cargo \
             --env CXX=/clang/bin/clang++ \
+            --env GITHUB_SHA \
             ${{ matrix.image }} \
             cargo build --release --locked --target ${{ matrix.target }}
       # A successful link does not prove the Objective-C categories survived.
