@@ -15,7 +15,8 @@ LiveKit tokens, and runs the interviewer agent.
 │  · editor + syntax colors  ├─────────────────────▶│ (SFU)               │
 │  · problem panel, timer    │  data channel        └─────┬───────────────┘
 │  · test runners            │  code_update, control,     │
-│  · report + history        │  test_results, report      │
+│  · whiteboard              │  test_results, report,     │
+│  · report + history        │  board_image               │
 └────────────┬───────────────┘                            ▼
              │                            ┌──────────────────────────────────┐
              │ /api/*                     │ Rust agent (LiveKit runner)      │
@@ -33,10 +34,19 @@ the agent receives structured code rather than editor screenshots. Python and
 JavaScript run locally; C, C++, and Java run through Compiler Explorer, so
 source code leaves the browser for those three.
 
+The lobby also offers a whiteboard interview, which takes the same problem bank
+and the same six steps and swaps the editor and the test runner for a board.
+Nothing runs: the candidate draws their examples and traces one by hand. The
+board is exported as an image a moment after each stroke settles and reaches
+the interviewer over its own byte stream on the same data channel, and
+`read_board` puts the latest one back in front of it on request.
+
 Audio and code snapshots stay in memory unless [recording](#recording) is
 enabled, which is off by default. Candidate video reaches Gemini only with
-`CODETRIAL_GEMINI_CANDIDATE_VIDEO_ENABLED=true`. Face-presence analysis runs in
-the browser and reports itself unavailable rather than guessing.
+`CODETRIAL_GEMINI_CANDIDATE_VIDEO_ENABLED=true`, and never in a whiteboard
+interview, where the board travels the stream a camera frame would.
+Face-presence analysis runs in the browser and reports itself unavailable
+rather than guessing.
 
 ## Dependencies by lifecycle
 
@@ -212,7 +222,7 @@ The common ones:
 | `GEMINI_REPORT_MODEL` | `gemini-3.1-flash-lite` | Report model |
 | `CODETRIAL_MAX_INTERIM_REVIEWS` | `6` | Quiet-pause report-model reviews per interview; `0` disables them and `72` is the maximum |
 | `CODETRIAL_GEMINI_REPLY_TIMEOUT_S` | `45` | Seconds an owed interviewer reply may go without output before the Live socket is replaced (20–120); see [degradation controls](docs/provider-cost-and-degradation.md) |
-| `CODETRIAL_GEMINI_CANDIDATE_VIDEO_ENABLED` | `false` | Forward candidate video to Gemini, one low-resolution frame in five seconds |
+| `CODETRIAL_GEMINI_CANDIDATE_VIDEO_ENABLED` | `false` | Forward candidate video to Gemini, one low-resolution frame in five seconds; ignored in a whiteboard interview |
 | `CODETRIAL_COMPILER_EXPLORER_ENABLED` | `true` | Enable remote C, C++, and Java runs |
 | `CODETRIAL_MAX_CONCURRENT_INTERVIEWS` | `16` | Interviews one `web` process hosts agents for |
 
