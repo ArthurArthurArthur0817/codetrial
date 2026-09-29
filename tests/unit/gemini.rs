@@ -306,11 +306,10 @@ async fn report_transport_fixture_with_body(
     let result = generate_report_transport(
         &keys,
         &url,
-        "prompt",
+        &generate_report_request("prompt", None, GENERATION_SEED),
         &mut budget,
         backoff,
         "test-room",
-        GENERATION_SEED,
     )
     .await;
     server.abort();
@@ -418,11 +417,10 @@ async fn a_key_ruled_out_during_the_backoff_is_not_retried() {
     let result = generate_report_transport(
         &keys,
         &url,
-        "prompt",
+        &generate_report_request("prompt", None, GENERATION_SEED),
         &mut budget,
         REPORT_RETRY_BACKOFF,
         "test-room",
-        GENERATION_SEED,
     )
     .await;
     server.abort();
@@ -947,8 +945,8 @@ fn report_retry_backoff_doubles_from_the_first_wait() {
 
 #[test]
 fn report_requests_are_session_local_and_never_reuse_personalized_output() {
-    let first = generate_report_request("session-a private evidence", GENERATION_SEED);
-    let second = generate_report_request("session-b private evidence", GENERATION_SEED);
+    let first = generate_report_request("session-a private evidence", None, GENERATION_SEED);
+    let second = generate_report_request("session-b private evidence", None, GENERATION_SEED);
     assert_ne!(first, second);
     assert!(first.to_string().contains("session-a private evidence"));
     assert!(!first.to_string().contains("session-b private evidence"));
@@ -972,6 +970,7 @@ pub(crate) async fn generate_report_at(
     let calls = ReportCalls {
         keys,
         url: url.to_string(),
+        board: None,
         budget: ReportCallBudget::new(),
         backoff,
         run,
@@ -1551,6 +1550,8 @@ async fn a_misrecognized_turn_neither_appears_in_nor_decides_the_report() {
     let final_code = "class Solution:\n    def matchDisputedCharge(self, nums: list[int], target: int) -> list[int]:\n        seen = {}\n        for i, amount in enumerate(nums):\n            if target - amount in seen:\n                return [seen[target - amount], i]\n            seen[amount] = i\n        return []\n";
     let prompt = crate::agent::report_prompt(crate::agent::ReportPromptInput {
         problem,
+        interview_mode: InterviewMode::Coding,
+        board_attached: false,
         transcript: &transcript,
         rolling_assessment: "",
         final_code,
@@ -1583,6 +1584,7 @@ async fn a_misrecognized_turn_neither_appears_in_nor_decides_the_report() {
         &GeminiKeys::single(&key),
         &model,
         &prompt,
+        None,
         problem,
         false,
         ReportRun {
@@ -2156,7 +2158,7 @@ fn report_generation_request_matches_python_report_model_config() {
         "https://generativelanguage.googleapis.com/v1beta/models/gemini-report:generateContent"
     );
 
-    let request = generate_report_request("score this", GENERATION_SEED);
+    let request = generate_report_request("score this", None, GENERATION_SEED);
     assert_eq!(request["contents"][0]["parts"][0]["text"], "score this");
 
     // The constant half goes first, as the system instruction, so every report
@@ -2166,8 +2168,29 @@ fn report_generation_request_matches_python_report_model_config() {
         crate::agent::report_system_instruction()
     );
     assert_eq!(
-        generate_report_request("another session", GENERATION_SEED)["systemInstruction"],
+        generate_report_request("another session", None, GENERATION_SEED)["systemInstruction"],
         request["systemInstruction"]
+    );
+    assert_eq!(
+        request["contents"][0]["parts"].as_array().map(Vec::len),
+        Some(1),
+        "an editor interview attaches nothing"
+    );
+
+    // The board rides the same request as an inline image, because a report is
+    // one `generateContent` call and there is nowhere else for a picture to go.
+    // Before the prompt, which is the order the prompt is written in: it tells
+    // the reviewer to read the board before scoring.
+    let with_board =
+        generate_report_request("score this", Some(&[0xff, 0xd8, 0xff]), GENERATION_SEED);
+    assert_eq!(
+        with_board["contents"][0]["parts"][0]["inlineData"],
+        json!({ "mimeType": "image/jpeg", "data": "/9j/" })
+    );
+    assert_eq!(with_board["contents"][0]["parts"][1]["text"], "score this");
+    assert_eq!(
+        with_board["generationConfig"], request["generationConfig"],
+        "the attachment changes nothing about how the report is generated"
     );
     assert_eq!(
         request["generationConfig"]["responseMimeType"],
@@ -2801,6 +2824,7 @@ fn the_interim_review_asks_for_bounded_prose_and_no_thinking() {
     let request = content_request(
         &crate::agent::interim_system_instruction(),
         "read this stretch",
+        None,
         interim_generation_config(),
     );
     let config = &request["generationConfig"];
@@ -2819,7 +2843,7 @@ fn the_interim_review_asks_for_bounded_prose_and_no_thinking() {
     );
 
     // The report's own config still goes through the shared envelope unchanged.
-    let report = generate_report_request("write the debrief", GENERATION_SEED);
+    let report = generate_report_request("write the debrief", None, GENERATION_SEED);
     assert_eq!(
         report["generationConfig"]["responseMimeType"],
         "application/json"
@@ -3429,9 +3453,8 @@ async fn quota_regeneration_waits_until_the_whole_key_rotation_can_make_a_call()
         generate_report_once(
             &selected,
             &url,
-            "same frozen prompt",
+            &generate_report_request("same frozen prompt", None, GENERATION_SEED),
             "quota-regeneration",
-            GENERATION_SEED,
         )
         .await
         .unwrap(),
@@ -3523,11 +3546,10 @@ async fn concurrent_quota_exhaustion_keeps_its_delay_after_a_report_503() {
     let error = generate_report_transport(
         &keys,
         &url,
-        "frozen prompt",
+        &generate_report_request("frozen prompt", None, GENERATION_SEED),
         &mut budget,
         Duration::ZERO,
         "concurrent-quota",
-        GENERATION_SEED,
     )
     .await
     .unwrap_err();

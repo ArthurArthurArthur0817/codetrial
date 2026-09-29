@@ -378,6 +378,8 @@ fn prompt_samples() -> Value {
         "hintRungWithheld": hint_rung_withheld_text(2),
         "report": report_prompt(ReportPromptInput {
             problem,
+            interview_mode: InterviewMode::Coding,
+            board_attached: false,
             transcript: "Candidate: I will use a hash map.",
             rolling_assessment: "",
             final_code: "def two_sum(nums, target): return []",
@@ -392,8 +394,46 @@ fn prompt_samples() -> Value {
             evidence: &working_report,
             behavioral_round: BehavioralRound::Opened,
         }),
+        "boardReport": report_prompt(ReportPromptInput {
+            problem,
+            interview_mode: InterviewMode::Whiteboard,
+            board_attached: true,
+            transcript: "Candidate: I will keep a map of what I have seen.",
+            rolling_assessment: "",
+            final_code: "",
+            language: "python",
+            hints_used: 1,
+            hint_rung: 1,
+            volunteered_hints: 0,
+            duration_min: 45,
+            elapsed_min: 31.0,
+            test_summary: "",
+            practice_level: None,
+            evidence: "",
+            behavioral_round: BehavioralRound::NotConfigured,
+        }),
+        "boardReportNoBoard": report_prompt(ReportPromptInput {
+            problem,
+            interview_mode: InterviewMode::Whiteboard,
+            board_attached: false,
+            transcript: "Candidate: I would rather talk it through.",
+            rolling_assessment: "",
+            final_code: "",
+            language: "python",
+            hints_used: 0,
+            hint_rung: 0,
+            volunteered_hints: 0,
+            duration_min: 45,
+            elapsed_min: 8.0,
+            test_summary: "",
+            practice_level: None,
+            evidence: "",
+            behavioral_round: BehavioralRound::NotConfigured,
+        }),
         "reportEmpty": report_prompt(ReportPromptInput {
             problem,
+            interview_mode: InterviewMode::Coding,
+            board_attached: false,
             transcript: "",
             rolling_assessment: "",
             final_code: "",
@@ -410,6 +450,8 @@ fn prompt_samples() -> Value {
         }),
         "reportHalfElapsed": report_prompt(ReportPromptInput {
             problem,
+            interview_mode: InterviewMode::Coding,
+            board_attached: false,
             transcript: "",
             rolling_assessment: "",
             final_code: "",
@@ -431,6 +473,8 @@ fn prompt_samples() -> Value {
         // could then drift and nothing would notice.
         "reportProgressive": report_prompt(ReportPromptInput {
             problem,
+            interview_mode: InterviewMode::Coding,
+            board_attached: false,
             transcript: "Candidate: I will use a hash map.",
             rolling_assessment: &rolling_assessment(
 
@@ -462,6 +506,8 @@ fn prompt_samples() -> Value {
         }),
         "reportMultiline": report_prompt(ReportPromptInput {
             problem,
+            interview_mode: InterviewMode::Coding,
+            board_attached: false,
             transcript: "Candidate: I will use a hash map.",
             rolling_assessment: "",
             final_code: "def two_sum(nums, target):\n    return [0, 1]",
@@ -796,6 +842,8 @@ fn evaluation_reaction(case: &Value, state: &mut RuntimeState) -> String {
         }
         "report" => model_report_input(report_prompt(ReportPromptInput {
             problem: get_problem(Some("two-sum")),
+            interview_mode: InterviewMode::Coding,
+            board_attached: false,
             transcript: case["transcript"].as_str().expect("transcript is text"),
             rolling_assessment: "",
             final_code: code,

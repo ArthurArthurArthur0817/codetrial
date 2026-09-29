@@ -3108,10 +3108,15 @@ async fn handle_data_packet(
     if let Err(error) = close_turns(room, context).await {
         eprintln!("closing the last turns failed ({error}); writing the report anyway");
     }
+
+    // Copied out rather than borrowed: the farewell below holds the context,
+    // board and all, for as long as the report call runs beside it.
+    let board = context.board.latest().map(<[u8]>::to_vec);
     let assessment = freeze_assessment(
         interview.boot,
         context.state,
         interview.started_at.elapsed().as_secs_f64() / 60.0,
+        board,
     );
     let mut recovery_events = interview.events.lock().await;
     let api_key = &**interview.keys;
@@ -3138,6 +3143,7 @@ async fn handle_data_packet(
         generate_report_bounded(
             interview.boot,
             &assessment.prompt,
+            assessment.board.as_deref(),
             assessment.behavioral_round_opened(),
             api_key,
             crate::gemini::GENERATION_SEED,

@@ -170,7 +170,7 @@ pub(crate) const THINKING_RELEASE_COOLDOWN: std::time::Duration =
 
 pub const INTERVIEW_CONTRACT_BUNDLE_VERSION: u32 = 29;
 pub const LIVE_PROMPT_VERSION: u32 = 21;
-pub const REPORT_PROMPT_VERSION: u32 = 16;
+pub const REPORT_PROMPT_VERSION: u32 = 17;
 pub const RUBRIC_VERSION: u32 = 1;
 pub const REPORT_SCHEMA_VERSION: u32 = 2;
 

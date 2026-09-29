@@ -234,7 +234,7 @@ fn report_helpers_use_report_topic_prompt_state_and_error_note() {
         },
         "time_up",
     );
-    let prompt = report_prompt_text(&boot, &state, 12.4);
+    let prompt = report_prompt_text(&boot, &state, 12.4, false);
 
     assert!(prompt.contains("Candidate: I will use a hash map."));
     assert!(prompt.contains("Latest test run (run #1, python): 1/2 cases passed."));
@@ -286,7 +286,7 @@ fn the_report_prompt_carries_both_the_rolling_assessment_and_the_whole_transcrip
         "- Candidate enumerated the empty-input case before writing any code.",
     );
 
-    let prompt = report_prompt_text(&boot, &state, 45.0);
+    let prompt = report_prompt_text(&boot, &state, 45.0, false);
 
     // Delimited, like the transcript and the editor are wherever candidate
     // material reaches a model: the notes are a reading of that material, so an
@@ -319,6 +319,7 @@ fn a_session_with_no_recorded_assessment_keeps_the_plain_report_prompt() {
             ..RuntimeState::default()
         },
         1.0,
+        false,
     );
     assert!(prompt.contains("BEGIN UNTRUSTED TRANSCRIPT"));
     assert!(prompt.contains("Candidate: only evidence"));
@@ -346,6 +347,7 @@ fn the_report_prompt_delimits_everything_the_candidate_wrote() {
             ..RuntimeState::default()
         },
         1.0,
+        false,
     );
 
     for marker in [
@@ -421,7 +423,7 @@ fn an_interview_past_the_evidence_cap_still_reports_every_phase_it_reached() {
         .unwrap();
     }
 
-    let prompt = report_prompt_text(&boot, &state, 45.0);
+    let prompt = report_prompt_text(&boot, &state, 45.0, false);
     for phase in ["repeat", "example", "algorithm", "test", "optimizations"] {
         assert!(
             prompt.contains(&format!("Candidate completed {phase}.")),
@@ -679,7 +681,7 @@ fn a_report_carries_the_evidence_block_and_counts_what_it_cost() {
     // ledger stays out of it has a block to stay out of.
     crate::agent::record_interim_notes(&mut state, "- Candidate named the duplicates case.");
 
-    let prompt = report_prompt_text(&boot, &state, 45.0);
+    let prompt = report_prompt_text(&boot, &state, 45.0, false);
     assert!(prompt.contains("DETERMINISTIC SESSION EVIDENCE"));
 
     // The code line of the view, which only a code entry in the ledger writes.
@@ -723,7 +725,7 @@ fn a_frozen_report_prompt_is_counted_and_a_missed_deadline_still_reports() {
     let config = report_test_config();
     let boot = bootstrap(&config, "interview-fixed", Some("two-sum"), 45);
     let mut state = RuntimeState::default();
-    let prompt = freeze_report_prompt(&boot, &mut state, 12.0);
+    let prompt = freeze_report_prompt(&boot, &mut state, 12.0, false);
     assert_eq!(state.evidence_ledger.metrics.final_report_prompt_count, 1);
 
     // Counted with the system instruction the brief goes out behind.
@@ -826,7 +828,7 @@ async fn a_deadline_after_a_refused_answer_is_offered_as_a_refusal() {
         let config = report_test_config();
         let boot = bootstrap(&config, "interview-fixed", Some("two-sum"), 45);
         let mut live = RuntimeState::default();
-        let mut frozen = freeze_assessment(&boot, &mut live, 12.0);
+        let mut frozen = freeze_assessment(&boot, &mut live, 12.0, None);
         let keys = GeminiKeys::single("deadline-refused");
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         tx.send(RecoveryEvent::Left).unwrap();
@@ -923,7 +925,7 @@ fn the_report_is_told_where_the_behavioral_round_stood() {
         ),
     ] {
         let mut live = state;
-        let frozen = freeze_assessment(&boot, &mut live, 12.0);
+        let frozen = freeze_assessment(&boot, &mut live, 12.0, None);
         assert_eq!(frozen.behavioral_round_opened(), opened, "{line}");
         assert!(frozen.prompt.contains(line), "{line}");
         assert_eq!(
@@ -973,11 +975,11 @@ fn the_report_transcript_marks_where_the_round_opened() {
 
     let config = report_test_config();
     let boot = bootstrap(&config, "interview-mark", Some("two-sum"), 45);
-    let prompt = report_prompt_text(&boot, &in_flight, 30.0);
+    let prompt = report_prompt_text(&boot, &in_flight, 30.0, false);
     assert!(prompt.contains(&format!(
         "Candidate: We fixed it.\n{mark}\nJim: Now tell me"
     )));
-    assert!(!report_prompt_text(&boot, &unopened, 30.0).contains(&format!("\n{mark}\n")));
+    assert!(!report_prompt_text(&boot, &unopened, 30.0, false).contains(&format!("\n{mark}\n")));
 }
 
 #[test]
@@ -985,7 +987,7 @@ fn report_metadata_uses_the_frozen_assessment() {
     let config = report_test_config();
     let boot = bootstrap(&config, "interview-fixed", Some("two-sum"), 45);
     let mut live = RuntimeState::default();
-    let mut frozen = freeze_assessment(&boot, &mut live, 12.0);
+    let mut frozen = freeze_assessment(&boot, &mut live, 12.0, None);
     live.code = "post-interview edits".into();
     live.hints_used = 5;
     assert!(!frozen.prompt.contains("post-interview edits"));
@@ -1361,7 +1363,7 @@ async fn a_report_lost_to_503s_is_regenerated_from_the_frozen_interview() {
     let config = report_test_config();
     let boot = bootstrap(&config, "interview-fixed", Some("two-sum"), 45);
     let mut live = RuntimeState::default();
-    let mut frozen = freeze_assessment(&boot, &mut live, 12.0);
+    let mut frozen = freeze_assessment(&boot, &mut live, 12.0, None);
     let keys = GeminiKeys::single("recovery-e2e");
     let (flag, again) = (AtomicBool::default(), AtomicBool::default());
     let first = generate_at(
@@ -1465,7 +1467,7 @@ async fn a_report_refused_after_both_repairs_is_regenerated_on_another_seed() {
     let config = report_test_config();
     let boot = bootstrap(&config, "interview-fixed", Some("two-sum"), 45);
     let mut live = RuntimeState::default();
-    let mut frozen = freeze_assessment(&boot, &mut live, 12.0);
+    let mut frozen = freeze_assessment(&boot, &mut live, 12.0, None);
     let keys = GeminiKeys::single("schema-recovery");
     let (flag, again) = (AtomicBool::default(), AtomicBool::default());
     let first = generate_at(
@@ -1544,7 +1546,7 @@ async fn an_absent_candidate_gets_the_failure_without_a_recovery_window() {
     let config = report_test_config();
     let boot = bootstrap(&config, "interview-fixed", Some("two-sum"), 45);
     let mut live = RuntimeState::default();
-    let mut frozen = freeze_assessment(&boot, &mut live, 12.0);
+    let mut frozen = freeze_assessment(&boot, &mut live, 12.0, None);
     let keys = GeminiKeys::single("absent");
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     let mut room = RecoveryFixture::new(rx);
@@ -2248,7 +2250,7 @@ async fn only_an_unacknowledged_provisional_report_is_republished() {
         let config = report_test_config();
         let boot = bootstrap(&config, "interview-fixed", Some("two-sum"), 45);
         let mut live = RuntimeState::default();
-        let mut frozen = freeze_assessment(&boot, &mut live, 12.0);
+        let mut frozen = freeze_assessment(&boot, &mut live, 12.0, None);
         let keys = GeminiKeys::single("republish");
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         tx.send(RecoveryEvent::Back).unwrap();
@@ -2309,4 +2311,38 @@ async fn presence_is_read_again_after_a_republish() {
         }
         drop(tx);
     }
+}
+
+/// A whiteboard interview is reported from the board, and the prompt follows
+/// the attachment rather than the mode.
+#[test]
+fn a_whiteboard_report_is_built_from_the_board_and_not_the_editor() {
+    let config = report_test_config();
+    let boot = crate::runtime::bootstrap_with_rounds(
+        &config,
+        "interview-board",
+        Some("two-sum"),
+        45,
+        crate::runtime::RuntimeOptions {
+            interview_mode: crate::agent::InterviewMode::Whiteboard,
+            ..Default::default()
+        },
+    );
+    let state = RuntimeState {
+        interview_mode: crate::agent::InterviewMode::Whiteboard,
+        board_snapshots: 9,
+        board_strokes: 64,
+        transcript: vec!["Candidate: here is the trace.".to_string()],
+        ..RuntimeState::default()
+    };
+
+    // `board.latest()` decides this: a whiteboard interview whose board never
+    // arrived is reported without one.
+    assert!(
+        report_prompt_text(&boot, &state, 20.0, true)
+            .contains("The image attached to this message")
+    );
+    let unattached = report_prompt_text(&boot, &state, 20.0, false);
+    assert!(unattached.contains("no board reached this review"));
+    assert!(!unattached.contains("UNTRUSTED EDITOR"));
 }

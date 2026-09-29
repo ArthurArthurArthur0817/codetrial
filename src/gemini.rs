@@ -21,6 +21,13 @@ use crate::runtime::{
 
 mod credentials;
 pub use credentials::GeminiKeys;
+
+/// What every image this process sends Gemini is encoded as: a camera frame, a
+/// whiteboard on the live socket, and the board attached to a report request.
+/// One spelling, because the three are read by one API and a fourth caller
+/// that guessed a different one would be refused at the wire rather than here.
+pub const GEMINI_IMAGE_MIME_TYPE: &str = "image/jpeg";
+
 use credentials::{
     ApiFailure, ApiSurface, CredentialFailure, credential_failure, failure_from_reason,
 };
@@ -699,10 +706,16 @@ pub(crate) async fn check_live_session_at(
 /// this one hands the model back its own invalid output, and the transport
 /// inside it retries a call that never produced any. The candidate is waiting,
 /// so both stay small and `REPORT_TIMEOUT` bounds them together.
+///
+/// `board` is the whiteboard image the report is graded from, and it rides
+/// every call this makes: the repairs resend the prompt, and a repair that
+/// dropped the picture would ask the reviewer to fix a report it can no longer
+/// see the evidence for.
 pub(crate) async fn generate_report_with_keys(
     keys: &GeminiKeys,
     model: &str,
     prompt: &str,
+    board: Option<&[u8]>,
     problem: &crate::agent::Problem,
     behavioral_round_opened: bool,
     run: ReportRun<'_>,
@@ -711,6 +724,7 @@ pub(crate) async fn generate_report_with_keys(
         ReportCalls {
             keys,
             url: gemini_generate_content_url(model),
+            board,
             budget: ReportCallBudget::new(),
             backoff: REPORT_RETRY_BACKOFF,
             run,
@@ -767,6 +781,7 @@ trait ReportTransport {
 struct ReportCalls<'a> {
     keys: &'a GeminiKeys,
     url: String,
+    board: Option<&'a [u8]>,
     budget: ReportCallBudget,
     backoff: Duration,
     run: ReportRun<'a>,
@@ -777,15 +792,20 @@ impl ReportTransport for ReportCalls<'_> {
         &mut self,
         prompt: &str,
     ) -> impl Future<Output = Result<String, Box<dyn std::error::Error + Send + Sync>>> + Send {
-        generate_report_transport(
-            self.keys,
-            &self.url,
-            prompt,
-            &mut self.budget,
-            self.backoff,
-            self.run.scope,
-            self.run.seed,
-        )
+        // Built once per call rather than once per attempt: every retry sends
+        // the same request, the encoded board included.
+        let request = generate_report_request(prompt, self.board, self.run.seed);
+        async move {
+            generate_report_transport(
+                self.keys,
+                &self.url,
+                &request,
+                &mut self.budget,
+                self.backoff,
+                self.run.scope,
+            )
+            .await
+        }
     }
 
     fn answer_refused(&mut self) {
@@ -982,11 +1002,10 @@ fn salvage_report(
 async fn generate_report_transport(
     keys: &GeminiKeys,
     url: &str,
-    prompt: &str,
+    request: &Value,
     budget: &mut ReportCallBudget,
     first_backoff: Duration,
     scope: &str,
-    seed: i64,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let mut api_key = keys.select_report()?;
 
@@ -996,7 +1015,7 @@ async fn generate_report_transport(
     loop {
         let call = budget.spend()?;
         let what = http_usage_label("report", scope, call, failures);
-        let error = match generate_report_once(&api_key, url, prompt, &what, seed).await {
+        let error = match generate_report_once(&api_key, url, request, &what).await {
             Ok(report) => return Ok(report),
             Err(error) => error,
         };
@@ -1236,6 +1255,7 @@ async fn generate_interim_review_at(
         &content_request(
             &crate::agent::interim_system_instruction(),
             prompt,
+            None,
             interim_generation_config(),
         ),
         INTERIM_ATTEMPT_TIMEOUT,
@@ -1290,10 +1310,27 @@ fn interim_generation_config() -> Value {
 /// one prompt part, and whatever the caller wants generated from it. The two
 /// callers differ only in the instruction and the config, and the envelope is
 /// the wire contract, which is not a thing to assert in two places.
-fn content_request(system: &str, prompt: &str, generation_config: Value) -> Value {
+///
+/// The image goes before the words when there is one. That is the documented
+/// order for a single image and a prompt about it, and it is also the order
+/// the prompt is written in: the board is what the reviewer is told to read
+/// before scoring, so it is what the model meets first.
+fn content_request(
+    system: &str,
+    prompt: &str,
+    image: Option<&[u8]>,
+    generation_config: Value,
+) -> Value {
+    let mut parts = Vec::new();
+    if let Some(image) = image {
+        parts.push(json!({
+            "inlineData": { "mimeType": GEMINI_IMAGE_MIME_TYPE, "data": STANDARD.encode(image) }
+        }));
+    }
+    parts.push(json!({ "text": prompt }));
     json!({
         "systemInstruction": { "parts": [ { "text": system } ] },
-        "contents": [ { "parts": [ { "text": prompt } ] } ],
+        "contents": [ { "parts": parts } ],
         "generationConfig": generation_config
     })
 }
@@ -1345,18 +1382,10 @@ async fn generate_content_once(
 async fn generate_report_once(
     api_key: &str,
     url: &str,
-    prompt: &str,
+    request: &Value,
     what: &str,
-    seed: i64,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    generate_content_once(
-        api_key,
-        url,
-        &generate_report_request(prompt, seed),
-        REPORT_ATTEMPT_TIMEOUT,
-        what,
-    )
-    .await
+    generate_content_once(api_key, url, request, REPORT_ATTEMPT_TIMEOUT, what).await
 }
 
 pub(crate) async fn open_live_session_at(
@@ -1890,10 +1919,11 @@ fn tool_response_message(answers: &[(GeminiFunctionCall, Value)]) -> Value {
     })
 }
 
-fn generate_report_request(prompt: &str, seed: i64) -> Value {
+fn generate_report_request(prompt: &str, board: Option<&[u8]>, seed: i64) -> Value {
     content_request(
         &crate::agent::report_system_instruction(),
         prompt,
+        board,
         json!({
             "responseMimeType": "application/json",
             "responseSchema": crate::agent::report_response_schema(),
