@@ -1,11 +1,11 @@
 ---
 name: codetrial-verify
-description: How a CodeTrial change is validated - scripts/test.sh as the offline gate, which generated artifacts have to be regenerated before it passes, the checks that need credentials or a running service and therefore sit outside it, the browser and mutation lanes, and how to bring the server up for a live look without taking the maintainer's port. Use before calling work done, when a gate fails on drift rather than on a bug, when adding a test, or when a fix needs to be seen working in the app.
+description: How a CodeTrial change is validated - scripts/test.sh as the credential-free gate, which generated artifacts have to be regenerated before it passes, the checks that need credentials or a browser and therefore sit outside it, the browser and mutation lanes, and how to bring the server up for a live look without taking the maintainer's port. Use before calling work done, when a gate fails on drift rather than on a bug, when adding a test, or when a fix needs to be seen working in the app.
 ---
 
 # Validating a CodeTrial change
 
-One gate runs offline and is the thing to run:
+One gate needs no credentials and is the thing to run:
 
 ```sh
 ./scripts/test.sh     # the gate CI's `check` job runs
@@ -19,13 +19,20 @@ Python unittest suites, the Node browser tests, ESLint, `ruff check`,
 `shellcheck`, the generated-artifact drift checks, the hook suite, `cargo-audit`
 and `actionlint`.
 
-Five of those lanes are optional, and only those five: ESLint, `ruff`,
-`shellcheck`, `cargo-audit` and `actionlint` say they skipped when the tool is
-absent rather than failing. The drift checks sitting between them in the output
-always run. That skipping is why a green local run is weaker evidence than a
-green CI run, and so is what this script leaves out: CI also holds a pull
-request's own commit messages to the rules, mutation-tests the diff in its own
-job, and builds release binaries for three targets.
+It is not offline. The `fetch-vendor` gate downloads missing assets named by a
+`web/vendor/**/FETCH` manifest; it cannot restore committed vendor files.
+`actionlint` publishes itself as a container, so that lane may reach for docker.
+Both are checksum-pinned or version-pinned; neither needs a credential.
+
+A lane whose tool is absent skips instead of failing. Skips made directly by
+`scripts/test.sh` appear under its final `not checked by this run:` summary.
+Formatter skips do not: `scripts/indent.sh` prints them inline while the
+`indent` gate keeps running. Read both the final summary and the formatter
+output before claiming coverage; never treat the skip set or its size as fixed.
+The drift checks always run. That skipping is why a green local run is weaker
+evidence than a green CI run, and so is what this script leaves out: CI also
+holds a pull request's own commit messages to the rules, mutation-tests the diff
+in its own job, and builds release binaries for three targets.
 
 The `indent` gate is the one that surprises people. `scripts/indent.sh --check`
 copies the tree, runs the whole formatter chain over the copy, and diffs:
@@ -46,8 +53,7 @@ what the generator would write now. A failure here is not a bug in your change;
 it means the source moved and the output did not:
 
 ```sh
-python3 scripts/gen-problems.py        # web/problems, web/judges, web/problem-pages.json,
-                                       # src/agent/problem_{topics,variants,guides}.rs
+python3 scripts/gen-problems.py
 python3 scripts/gen-problem-cards.py   # the problem cards in web/index.html
 node scripts/gen-wire-fixtures.mjs     # browser/agent wire fixtures
 node scripts/gen-recording-fixtures.mjs
@@ -61,17 +67,26 @@ and names what each side is missing, so port those first.
 
 ## What is deliberately outside the gate
 
-These need credentials, a network service, or a browser, and are run on their
-own when the area they cover is touched:
+These exercise live server, external-service, or browser flows and are run on
+their own when the area they cover is touched:
+
+One command per line: two names on one line runs the first and passes the
+second as an argument it ignores. The entry requirements are:
 
 ```sh
-scripts/browser-check.sh            # needs npm ci and playwright chromium
-scripts/server-check.sh             # needs a running server
-scripts/gemini-check.sh             # needs GOOGLE_API_KEY
-scripts/parity-check.sh scripts/report-parity-check.sh
-scripts/visual-parity-check.sh
-scripts/recording-integration.sh scripts/recording-provision-check.sh
+scripts/browser-check.sh              # Playwright + Chromium; rust/dispatch also need LiveKit and Gemini credentials
+scripts/server-check.sh               # cargo, node, curl; starts a server unless CODETRIAL_WEB_URL is set
+scripts/gemini-check.sh               # GOOGLE_API_KEY(S) in the selected CodeTrial config
+scripts/parity-check.sh                # the credentialed rust browser-check prerequisites
+scripts/report-parity-check.sh         # the credentialed rust browser-check prerequisites
+scripts/visual-parity-check.sh         # Playwright + Chromium; no service credentials
+scripts/recording-provision-check.sh   # gcloud credentials and the CODETRIAL_RECORDING_* values checked at its start
+scripts/recording-integration.sh       # --help lists per-phase credentials, tools and required --phase
 ```
+
+Read the script's validation or usage block before a credentialed run; it is
+the source of truth for optional modes and the complete environment-variable
+list.
 
 CI additionally mutation-tests the diff: `plan-mutants` counts what the change
 is worth and `mutants` runs `cargo-mutants` over it. A surviving mutant means a
@@ -86,8 +101,11 @@ retry.
 commit nor sneaks through one, plus `commentflow --check` and `shfmt -d` on
 staged shell. It does not build, test or check generated-artifact drift; that
 is what the gate is for. `scripts/git-commit-msg.sh` holds the message to the
-rules in codetrial-conventions, and `scripts/git-pre-push.sh` replays them over
-commits a rebase or an amend rewrote after the fact. CI runs the same list over
+rules in codetrial-conventions, `scripts/git-prepare-commit-msg.sh` splices the
+template above a `commit -v` scissors line, and `scripts/git-pre-push.sh`
+replays the rules over commits a rebase or an amend rewrote after the fact.
+`make hooks` installs every `scripts/git-*.sh`, so adding one there installs
+itself. CI runs the same list over
 a pull request's own commits, so the rules bind someone who never installed the
 hooks as well.
 
@@ -126,15 +144,11 @@ already been bitten by, hence commits like "Prove an empty test run is not a
 pass". Assert on the count as well as the content when a suite discovers its
 own cases.
 
-The quieter version of that is a test that runs and cannot fail, and a sweep of
-this suite found every shape of it worth knowing: a refusal asserted against a
-double that was *scripted* to refuse, so the script answered and not the code; a
-hash compared against one the test computed with the function under test; a
-traversal guard asked for files that did not exist, so "not found" read as
-"refused"; a `/enforce/` regex over a seventy-line document; and a module's whole
-wiring pinned by source-text matches that a rename walked straight past. The
-check that separates them is cheap and is the one to run before believing a new
-test: break the thing it names, watch it fail, put it back.
+The quieter version is a test that runs and cannot fail: a refusal asserted
+against a double that was scripted to refuse, or a hash compared against one the
+test computed with the function under test. The check that separates them is
+cheap and is the one to run before believing a new test: break the thing it
+names, watch it fail, put it back.
 
 ## Seeing it work in the app
 

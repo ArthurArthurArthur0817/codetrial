@@ -1,6 +1,6 @@
 ---
 name: codetrial-conventions
-description: The CodeTrial conventions no gate enforces - the register a comment, a commit message and a PR reply are written in, the untracked working docs at the repo root, where multi-byte characters are allowed and where they are not, deleting a redundant surface instead of deprecating it, and the repository layout. Use when drafting a commit message or a PR description, pushing a branch to open a pull request from, adding a file or a public surface, removing a flag or a subcommand, or writing a comment longer than a line.
+description: The CodeTrial conventions the gate does not settle on its own, several of them enforced by the git hooks instead - the register a comment, a commit message, an issue or PR title and a PR reply are written in, what stays out of a public issue or PR, the untracked working docs at the repo root, where multi-byte characters are allowed and where they are not, deleting a redundant surface instead of deprecating it, the contracts in docs/ that refuse a change, and the repository layout. Use when drafting a commit message, choosing an issue or PR title, pushing a branch to open a pull request from, adding a file or a public surface, removing a flag or a subcommand, proposing a change to how an interview spends, caches, records or reports, drafting or editing any public issue, PR or comment, or writing a comment longer than a line.
 ---
 
 # CodeTrial conventions
@@ -21,8 +21,8 @@ The house style is Chris Beams' seven rules, and `scripts/git-commit-msg.sh`
 enforces the mechanical ones: subject within 50 characters, capitalized,
 imperative, no trailing period, no backticks, no conventional-commit prefix,
 body wrapped at 72, printable ASCII throughout. Run
-`git log --no-merges --format=%s` if you want the calibration set rather than
-the claim; the recent log sits at 46 characters in the median.
+`git log --no-merges --format=%s | awk '{print length}' | sort -n` if you want
+the calibration set rather than a number here that drifts with every commit.
 
 The rule the hook cannot check is what the body says. This tree keeps its
 detailed reasoning in the comment next to the code, often several paragraphs
@@ -73,6 +73,26 @@ not through `.gitignore`, because the exclusion is one person's habit and
 delete them, and never assume a clone has them. Reports and analyses stay out
 of the tree the same way: a scratch directory, not a new tracked file.
 
+## Contracts that refuse a change
+
+`docs/` holds decisions already made, and some of them refuse a change that
+looks obviously right. Find the owning document and read the rule there before
+proposing work in its area. Never restate one of these rules from memory or
+from this file: a paraphrase drifts, and the document is what binds.
+
+`docs/provider-cost-and-degradation.md` owns what an interview may spend, what
+bounds a misbehaving provider, what may be cached, and what the candidate sees
+when a provider fails. `docs/observable-delivery-policy.md` owns what a report
+may say about a person, `docs/recording-contract.md` owns what happens to
+candidate media, and the rest of `docs/` owns its area the same way. The
+compatibility promise is below, under deleting a surface.
+
+A document that refuses your change is the answer, not an oversight waiting to
+be fixed. "Persist the finished session and regenerate the report later" reads
+as an obvious improvement, and the caching rule refuses it. The move is to
+propose changing that document on purpose, with the reason, or to leave it
+alone.
+
 ## Deleting a surface
 
 A subcommand, flag or helper that turns out to be redundant gets deleted,
@@ -83,7 +103,52 @@ fixtures in `tests/golden/` and the versions recorded in
 `docs/interview-contract-versions.md` describe, not the convenience surface of
 the CLI.
 
-## Pull requests and review replies
+## GitHub issues and pull requests
+
+Conversation may use the contributor's language; everything posted to GitHub is
+clear English, with identifiers and error messages kept verbatim. The target is
+`sysprog21/codetrial`; pass `--repo sysprog21/codetrial` to `gh`, because on a
+fork or a copy the checkout's default resolves elsewhere.
+
+A title carries no category, type or area prefix: no `[Bug]`, `[Feature]`,
+`Bug:`, `feat:`, `fix(web):` or `web:`. Labels do the classifying. Brackets that
+are part of the text, such as `argv[0]`, stay. An issue title names the symptom
+or the desired outcome:
+
+- `[Bug] Interview broken` becomes `Interview does not resume after reconnecting`.
+- `[Feature] Add export` becomes `Allow candidates to download interview feedback`.
+
+A PR title follows the commit subject rules above; a single-commit PR reuses
+its subject.
+
+Issue and PR bodies are read in a browser, so write each paragraph as one line;
+the 72-column wrap is for commit messages only. A PR that finishes an issue ends
+with `Closes #N` alone on the last line; one that only touches it ends with
+`Refs #N` there instead.
+
+Nothing public carries credentials, session tokens, candidate recordings or
+personal interview content; redact logs before pasting them. The repository has
+no private security channel, so a vulnerability report goes to the user to hand
+to a maintainer, never into a public issue.
+
+Nothing is written to GitHub until the user has approved the exact text, by
+saying yes to it or by dictating it and asking for it to be posted. The approval
+covers the writes shown. Approving a PR submission also covers later fix pushes
+to that branch and the review replies gh-submit makes while getting its checks
+green; any other comment, edit, close or merge needs its own.
+
+Never paste drafted text into shell source, where backticks and `$()` in a
+quoted error would run. Write the body to a UTF-8 file in a scratch directory
+with a file tool and pass `--body-file`; put the title in a file too and pass
+`--title "$(cat "$SCRATCH/title.txt")"`. Read the result back, and after a
+timeout check whether the write landed before retrying.
+
+Drafting an issue or PR body, or planning a first contribution, is
+[codetrial-contribute](../codetrial-contribute/SKILL.md). Reviewing the backlog
+for duplicates and incomplete reports is
+[codetrial-issue-triage](../codetrial-issue-triage/SKILL.md).
+
+## Pull request branches and review replies
 
 Open a pull request from a topic branch, never from `main`, and that includes
 the `main` of a fork. A pull request follows its head branch rather than a set
@@ -101,22 +166,20 @@ re-summarizing a diff git already shows. Close an addressed thread with
 
 ## Layout
 
+`README.md` has the tree under "Repository layout" and wins on it. Two
+directories it does not name matter as soon as you add a test:
+
 ```text
-src/            Rust server, interviewer agent, recording, token minting
-web/            Static browser application, served embedded or from disk
-problem-bank/   Source of truth for web/problems and web/judges
-config/         Env file templates and per-provider credentials
-docs/           Contracts and operational notes
-scripts/        Build, gate, hook and integration scripts
-tests/          Rust, Python and browser tests, plus golden fixtures
 tests/unit/     Unit test bodies, compiled into src/ by `#[path]`
 tests/common/   What the integration tests share
 ```
 
-## No test code under src/
+## No test bodies under src/
 
-`src/` holds implementation. A file there may declare a test module but must not
-contain one:
+`src/` holds implementation. A file there may declare a test module, and may
+carry a `#[cfg(test)]` item that a test needs to reach, but must not contain a
+test body. `grep -rn '#\[test\]' src/` returns nothing, and that is the check
+that keeps being true.
 
 ```rust
 #[cfg(test)]
