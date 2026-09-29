@@ -731,7 +731,9 @@ fn a_frozen_report_prompt_is_counted_and_a_missed_deadline_still_reports() {
     // Counted with the system instruction the brief goes out behind.
     assert_eq!(
         state.evidence_ledger.metrics.final_report_prompt_bytes,
-        (crate::agent::report_system_instruction().len() + 2 + prompt.len()) as u64
+        (crate::agent::report_system_instruction(crate::agent::InterviewMode::Coding).len()
+            + 2
+            + prompt.len()) as u64
     );
 
     let missed = tokio::runtime::Builder::new_current_thread()
@@ -828,7 +830,7 @@ async fn a_deadline_after_a_refused_answer_is_offered_as_a_refusal() {
         let config = report_test_config();
         let boot = bootstrap(&config, "interview-fixed", Some("two-sum"), 45);
         let mut live = RuntimeState::default();
-        let mut frozen = freeze_assessment(&boot, &mut live, 12.0, None);
+        let mut frozen = freeze_assessment(&boot, &mut live, 12.0, Vec::new());
         let keys = GeminiKeys::single("deadline-refused");
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         tx.send(RecoveryEvent::Left).unwrap();
@@ -925,7 +927,7 @@ fn the_report_is_told_where_the_behavioral_round_stood() {
         ),
     ] {
         let mut live = state;
-        let frozen = freeze_assessment(&boot, &mut live, 12.0, None);
+        let frozen = freeze_assessment(&boot, &mut live, 12.0, Vec::new());
         assert_eq!(frozen.behavioral_round_opened(), opened, "{line}");
         assert!(frozen.prompt.contains(line), "{line}");
         assert_eq!(
@@ -987,7 +989,7 @@ fn report_metadata_uses_the_frozen_assessment() {
     let config = report_test_config();
     let boot = bootstrap(&config, "interview-fixed", Some("two-sum"), 45);
     let mut live = RuntimeState::default();
-    let mut frozen = freeze_assessment(&boot, &mut live, 12.0, None);
+    let mut frozen = freeze_assessment(&boot, &mut live, 12.0, Vec::new());
     live.code = "post-interview edits".into();
     live.hints_used = 5;
     assert!(!frozen.prompt.contains("post-interview edits"));
@@ -1363,7 +1365,7 @@ async fn a_report_lost_to_503s_is_regenerated_from_the_frozen_interview() {
     let config = report_test_config();
     let boot = bootstrap(&config, "interview-fixed", Some("two-sum"), 45);
     let mut live = RuntimeState::default();
-    let mut frozen = freeze_assessment(&boot, &mut live, 12.0, None);
+    let mut frozen = freeze_assessment(&boot, &mut live, 12.0, Vec::new());
     let keys = GeminiKeys::single("recovery-e2e");
     let (flag, again) = (AtomicBool::default(), AtomicBool::default());
     let first = generate_at(
@@ -1467,7 +1469,7 @@ async fn a_report_refused_after_both_repairs_is_regenerated_on_another_seed() {
     let config = report_test_config();
     let boot = bootstrap(&config, "interview-fixed", Some("two-sum"), 45);
     let mut live = RuntimeState::default();
-    let mut frozen = freeze_assessment(&boot, &mut live, 12.0, None);
+    let mut frozen = freeze_assessment(&boot, &mut live, 12.0, Vec::new());
     let keys = GeminiKeys::single("schema-recovery");
     let (flag, again) = (AtomicBool::default(), AtomicBool::default());
     let first = generate_at(
@@ -1546,7 +1548,7 @@ async fn an_absent_candidate_gets_the_failure_without_a_recovery_window() {
     let config = report_test_config();
     let boot = bootstrap(&config, "interview-fixed", Some("two-sum"), 45);
     let mut live = RuntimeState::default();
-    let mut frozen = freeze_assessment(&boot, &mut live, 12.0, None);
+    let mut frozen = freeze_assessment(&boot, &mut live, 12.0, Vec::new());
     let keys = GeminiKeys::single("absent");
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     let mut room = RecoveryFixture::new(rx);
@@ -2250,7 +2252,7 @@ async fn only_an_unacknowledged_provisional_report_is_republished() {
         let config = report_test_config();
         let boot = bootstrap(&config, "interview-fixed", Some("two-sum"), 45);
         let mut live = RuntimeState::default();
-        let mut frozen = freeze_assessment(&boot, &mut live, 12.0, None);
+        let mut frozen = freeze_assessment(&boot, &mut live, 12.0, Vec::new());
         let keys = GeminiKeys::single("republish");
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         tx.send(RecoveryEvent::Back).unwrap();
@@ -2340,9 +2342,67 @@ fn a_whiteboard_report_is_built_from_the_board_and_not_the_editor() {
     // arrived is reported without one.
     assert!(
         report_prompt_text(&boot, &state, 20.0, true)
-            .contains("The image attached to this message")
+            .contains("The labeled images attached to this message")
     );
     let unattached = report_prompt_text(&boot, &state, 20.0, false);
     assert!(unattached.contains("no board reached this review"));
     assert!(!unattached.contains("UNTRUSTED EDITOR"));
+}
+
+/// The boards are frozen with the prompt, so a regeneration sends the reviewer
+/// the same pictures, labels and order as the first call, and the prompt says
+/// whether any went with it.
+#[test]
+fn a_frozen_assessment_keeps_its_boards_for_every_generation() {
+    let config = report_test_config();
+    let boot = crate::runtime::bootstrap_with_rounds(
+        &config,
+        "interview-board",
+        Some("two-sum"),
+        45,
+        crate::runtime::RuntimeOptions {
+            interview_mode: crate::agent::InterviewMode::Whiteboard,
+            ..Default::default()
+        },
+    );
+    let state = RuntimeState {
+        interview_mode: crate::agent::InterviewMode::Whiteboard,
+        board_strokes: 12,
+        transcript: vec!["Candidate: here is the trace.".to_string()],
+        ..RuntimeState::default()
+    };
+
+    let mut live = state.clone();
+    let frozen = freeze_assessment(
+        &boot,
+        &mut live,
+        20.0,
+        vec![
+            ReportBoard {
+                label: "Example checkpoint",
+                bytes: vec![0xff, 0xd8, 0xff],
+            },
+            ReportBoard {
+                label: "Final board",
+                bytes: vec![0xff, 0xd8, 0x00],
+            },
+        ],
+    );
+    assert_eq!(
+        frozen.report_boards(),
+        vec![
+            ("Example checkpoint", &[0xff, 0xd8, 0xff][..]),
+            ("Final board", &[0xff, 0xd8, 0x00][..]),
+        ]
+    );
+    assert!(
+        frozen
+            .prompt
+            .contains("The labeled images attached to this message")
+    );
+
+    let mut live = state;
+    let bare = freeze_assessment(&boot, &mut live, 20.0, Vec::new());
+    assert!(bare.report_boards().is_empty());
+    assert!(bare.prompt.contains("no board reached this review"));
 }

@@ -836,10 +836,17 @@ pub struct RuntimeState {
     /// send one, and a copy here would be a megabyte of JPEG on a struct the
     /// report path clones.
     pub board_snapshots: u32,
-    /// Strokes on the board the interviewer last saw, as the browser counted
-    /// them. The candidate's own claim about their own work, exactly like the
-    /// editor contents: it gates nothing that a lie about it would win.
+    /// Ink strokes on the board the interviewer last saw, as the browser
+    /// counted them. The candidate's own claim about their own work, exactly
+    /// like the editor contents: it gates nothing that a lie about it would
+    /// win. What the interviewer is told about the board now, and so it falls
+    /// to zero when the candidate clears it.
     pub board_strokes: u32,
+    /// Whether any board so far carried `MIN_BOARD_STROKES`. Sticky, unlike
+    /// `board_strokes`, because it is what `written_work` asks: clearing the
+    /// board between steps is how a whiteboard is used, and work the
+    /// candidate drew and then wiped is still work they did.
+    pub board_drawn: bool,
     pub last_board_at_ms: Option<u64>,
     /// `read_board` asking the room loop to put the latest board in front of
     /// the model again. A tool response carries JSON and cannot carry an
@@ -1011,6 +1018,7 @@ impl Default for RuntimeState {
             language_chosen: false,
             board_snapshots: 0,
             board_strokes: 0,
+            board_drawn: false,
             last_board_at_ms: None,
             board_resend_requested: false,
             transcript: Vec::new(),
@@ -1550,8 +1558,12 @@ pub fn elapsed_ms(state: &RuntimeState) -> u64 {
         .min(u128::from(u64::MAX)) as u64
 }
 
-/// How long ago the interviewer was last shown a board, in whole seconds, or
+/// How long ago the candidate's newest board arrived, in whole seconds, or
 /// `None` before the first one.
+///
+/// Arrival rather than the last send, because what `read_board` reports with
+/// it is how long ago the candidate left the board that way, and the same call
+/// puts that board in front of the interviewer again.
 pub fn board_age_seconds(state: &RuntimeState) -> Option<u64> {
     Some(elapsed_ms(state).saturating_sub(state.last_board_at_ms?) / 1000)
 }
@@ -1565,7 +1577,7 @@ pub fn board_age_seconds(state: &RuntimeState) -> Option<u64> {
 pub fn written_work(state: &RuntimeState) -> bool {
     match state.interview_mode {
         InterviewMode::Coding => code_written(state),
-        InterviewMode::Whiteboard => state.board_strokes >= MIN_BOARD_STROKES,
+        InterviewMode::Whiteboard => state.board_drawn,
     }
 }
 

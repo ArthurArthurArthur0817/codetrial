@@ -521,6 +521,21 @@ async fn on_tool_calls(
         })
         .collect::<Vec<_>>();
 
+    // What `read_board` could not put in its own response. Once per batch, so a
+    // batch that asked twice puts the board up once, and before the responses
+    // rather than after: Gemini starts its reply as soon as it has them, so a
+    // board sent after would arrive under an answer already being spoken about
+    // the board before it, while the tool has said this one is in front of it.
+    //
+    // Not `?`: an image the socket would not take is worth a line and a turn
+    // that answers from the board it already had, not an interview ended on the
+    // write.
+    if std::mem::take(&mut context.state.board_resend_requested)
+        && let Err(error) = board::resend(context.board, context.gemini).await
+    {
+        eprintln!("board resend failed ({error}); waiting for the close to be reported");
+    }
+
     // Not `?`. A response that did not go out is owed nothing back, so the flag
     // stays down, and the socket it failed on is replaced when its close is
     // reported; the checklist below still reflects the calls.
@@ -539,20 +554,6 @@ async fn on_tool_calls(
     }
     if checklist_changed(&shown_before, context.state) {
         publish_framework_progress(room, context.state).await?;
-    }
-
-    // What `read_board` could not put in its own response. After the responses
-    // rather than between them, so a batch that asked twice puts the board up
-    // once, and after the text so the model reads what it is looking at before
-    // it looks.
-    //
-    // Not `?`: an image the socket would not take is worth a line and a turn
-    // that answers from the board it already had, not an interview ended on the
-    // write.
-    if std::mem::take(&mut context.state.board_resend_requested)
-        && let Err(error) = board::resend(context.board, context.gemini).await
-    {
-        eprintln!("board resend failed ({error}); waiting for the close to be reported");
     }
     Ok(())
 }
@@ -936,6 +937,7 @@ pub fn execute_tool_call(state: &mut RuntimeState, call: &GeminiFunctionCall) ->
         && !state.end_requested
         && [
             TOOL_READ_EDITOR,
+            TOOL_READ_BOARD,
             TOOL_LOG_HINT,
             TOOL_RECORD_FRAMEWORK_EVIDENCE,
         ]
@@ -1029,9 +1031,13 @@ fn tool_response(state: &mut RuntimeState, call: &GeminiFunctionCall) -> serde_j
             // to fit the clue to their code, and asking for the code first was
             // a whole round trip before it could say anything. The fences are
             // the ones `read_editor` answers with. A whiteboard has no editor
-            // to fence, and the board it would fit the clue to is already the
-            // latest image the model was sent.
-            if requested && !state.interview_mode.is_whiteboard() {
+            // to fence, so the board comes instead, the way `read_board` sends
+            // it: the newest board can still be inside the send interval, and a
+            // clue fitted to the one before it is fitted to work the candidate
+            // has already moved past.
+            if requested && state.interview_mode.is_whiteboard() {
+                state.board_resend_requested = true;
+            } else if requested {
                 state.code_shown = state.code.clone();
                 result.push_str("\n\n");
                 result.push_str(&read_editor_text(

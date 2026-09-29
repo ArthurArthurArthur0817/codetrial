@@ -118,6 +118,16 @@ test("the eraser paints the background so an erasure is a stroke like any other"
   );
 });
 
+test("an erasure is a stroke but leaves no ink to count", () => {
+  const board = createBoard();
+  for (let swipe = 0; swipe < 3; swipe += 1)
+    stroke(board, 0, 0, 10, 10, "eraser");
+  assert.equal(board.strokeCount(), 3);
+  assert.equal(board.inkCount(), 0, "three swipes on an empty board");
+  stroke(board, 0, 0, 10, 10);
+  assert.equal(board.inkCount(), 1);
+});
+
 test("undo and redo walk the same strokes back and forward", () => {
   const board = createBoard();
   stroke(board, 0, 0, 1, 1);
@@ -154,18 +164,20 @@ test("a clear is undone in one piece", () => {
   stroke(board, 4, 4, 5, 5);
   assert.equal(board.clear(), true);
   assert.equal(board.strokeCount(), 0);
-
-  // Three redos rather than one: the board comes back in the order it was
-  // drawn, which is what the renderer needs to paint the later strokes over
-  // the earlier ones.
-  for (const expected of [
-    [0, 0, 1, 1],
-    [2, 2, 3, 3],
-    [4, 4, 5, 5],
-  ]) {
-    assert.equal(board.redo(), true);
-    assert.deepEqual(board.strokes().at(-1).points, expected);
-  }
+  assert.equal(board.canUndo(), true);
+  assert.equal(board.canRedo(), false);
+  assert.equal(board.clear(), false, "a cleared board has nothing to clear");
+  assert.equal(board.undo(), true);
+  assert.deepEqual(
+    board.strokes().map((item) => item.points),
+    [
+      [0, 0, 1, 1],
+      [2, 2, 3, 3],
+      [4, 4, 5, 5],
+    ],
+  );
+  assert.equal(board.redo(), true);
+  assert.equal(board.strokeCount(), 0);
   assert.equal(
     createBoard().clear(),
     false,
@@ -286,15 +298,14 @@ test("the journal is the drawing, and rebuilding from it gives the same board", 
   drawn.undo();
   stroke(drawn, 40, 40, 50, 50);
   drawn.clear();
-  // Before the next stroke, not after: drawing discards the redo stack, so a
-  // redo there is a no-op and journals nothing.
+  drawn.undo();
   drawn.redo();
   stroke(drawn, 60, 60, 70, 70);
 
   const ops = drawn.takeOps();
   assert.deepEqual(
     ops.map((op) => op.op),
-    ["stroke", "stroke", "undo", "stroke", "clear", "redo", "stroke"],
+    ["stroke", "stroke", "undo", "stroke", "clear", "undo", "redo", "stroke"],
   );
   assert.deepEqual(drawn.takeOps(), [], "taken once, not once per reader");
 

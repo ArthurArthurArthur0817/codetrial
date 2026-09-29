@@ -80,12 +80,7 @@ fn evidence_about_written_work_needs_a_drawing_at_a_whiteboard() {
         )
     );
 
-    // One stroke short, because a floor that is only tested from zero is a
-    // floor any number above zero would pass.
-    state.board_strokes = MIN_BOARD_STROKES - 1;
-    assert!(record_framework_evidence(&mut state, &evidence).is_err());
-
-    state.board_strokes = MIN_BOARD_STROKES;
+    state.board_drawn = true;
     let recorded = record_framework_evidence(&mut state, &evidence).expect("a drawn board counts");
     assert_eq!(
         framework_evidence_json(&recorded)["source"],
@@ -108,7 +103,7 @@ fn test_at_a_whiteboard_needs_no_run() {
     for source in ["board_snapshot", "candidate_speech"] {
         let mut state = RuntimeState {
             interview_mode: InterviewMode::Whiteboard,
-            board_strokes: MIN_BOARD_STROKES,
+            board_drawn: true,
             ..RuntimeState::default()
         };
         let recorded = record_framework_evidence(
@@ -132,7 +127,7 @@ fn test_at_a_whiteboard_needs_no_run() {
 fn evidence_from_the_other_surface_is_refused() {
     let mut board = RuntimeState {
         interview_mode: InterviewMode::Whiteboard,
-        board_strokes: MIN_BOARD_STROKES,
+        board_drawn: true,
         ..RuntimeState::default()
     };
     for source in ["editor_snapshot", "test_event"] {
@@ -227,7 +222,7 @@ fn the_report_cites_the_surface_the_interview_was_held_on() {
             "the whiteboard report still says {absent:?}"
         );
     }
-    assert!(attached.contains("The image attached to this message"));
+    assert!(attached.contains("The labeled images attached to this message"));
     assert!(attached.contains("NOTHING RAN"));
 
     // The phases keep their names in the schema, so the reviewer is told what
@@ -237,7 +232,7 @@ fn the_report_cites_the_surface_the_interview_was_held_on() {
     // A whiteboard interview with no board must not send the reviewer looking
     // for an attachment that is not there.
     let missing = brief(InterviewMode::Whiteboard, false, "");
-    assert!(!missing.contains("The image attached to this message"));
+    assert!(!missing.contains("The labeled images attached to this message"));
     assert!(missing.contains("no board reached this review"));
 
     // And the editor's report is unchanged by any of it.

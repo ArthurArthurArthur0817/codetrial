@@ -18,9 +18,10 @@ use crate::agent::{
     framework_evidence_json, interview_contract_json, report_prompt, report_system_instruction,
     rolling_assessment, transcript_for_report,
 };
-use crate::gemini::{GeminiKeys, generate_report_with_keys};
+use crate::gemini::{GeminiKeys, ReportMaterial, generate_report_with_keys};
 use crate::runtime::{RuntimeBootstrap, TOPIC_REPORT};
 
+use super::board::ReportBoard;
 use super::{REPORT_TIMEOUT, browser_packet};
 
 /// What the report call returned, or the deadline it missed.
@@ -47,16 +48,19 @@ fn freeze_report_prompt(
     // reads both.
     state.evidence_ledger.record_model_input(
         ModelInputKind::FinalReport,
-        &format!("{}\n\n{prompt}", report_system_instruction()),
+        &format!(
+            "{}\n\n{prompt}",
+            report_system_instruction(boot.interview_mode)
+        ),
     );
     prompt
 }
 
 pub(super) struct FrozenAssessment {
     pub prompt: String,
-    /// The whiteboard the prompt was frozen against, copied out so a
-    /// regeneration sends the reviewer the same picture as the first call.
-    pub board: Option<Vec<u8>>,
+    /// The whiteboard images the prompt was frozen against, copied out so a
+    /// regeneration sends the reviewer the same pictures as the first call.
+    boards: Vec<ReportBoard>,
     state: RuntimeState,
     /// Whether the first generation had an answer refused, for recovery.
     pub refused: std::sync::atomic::AtomicBool,
@@ -66,18 +70,29 @@ impl FrozenAssessment {
     pub(super) fn behavioral_round_opened(&self) -> bool {
         crate::agent::BehavioralRound::of(&self.state).opened()
     }
+
+    pub(super) fn report_boards(&self) -> Vec<(&str, &[u8])> {
+        labeled_boards(&self.boards)
+    }
+}
+
+fn labeled_boards(boards: &[ReportBoard]) -> Vec<(&str, &[u8])> {
+    boards
+        .iter()
+        .map(|board| (board.label, board.bytes.as_slice()))
+        .collect()
 }
 
 pub(super) fn freeze_assessment(
     boot: &RuntimeBootstrap<'_>,
     state: &mut RuntimeState,
     elapsed_min: f64,
-    board: Option<Vec<u8>>,
+    boards: Vec<ReportBoard>,
 ) -> FrozenAssessment {
-    let prompt = freeze_report_prompt(boot, state, elapsed_min, board.is_some());
+    let prompt = freeze_report_prompt(boot, state, elapsed_min, !boards.is_empty());
     FrozenAssessment {
         prompt,
-        board,
+        boards,
         state: state.clone(),
         refused: std::sync::atomic::AtomicBool::new(false),
     }
@@ -86,13 +101,13 @@ pub(super) fn freeze_assessment(
 /// The report call under `REPORT_TIMEOUT`. Borrows nothing of the interview
 /// state, which is what lets it run beside the farewell that still needs it.
 ///
-/// `board` is the whiteboard as the candidate left it, and it is the
-/// reviewer's only record of their written work: an editor interview passes
-/// `None` and a whiteboard interview passes it whenever one arrived at all.
+/// `boards` are the whiteboard phase checkpoints and final state. An editor
+/// interview passes an empty slice; a whiteboard interview passes every image
+/// that reached the agent, so clearing between phases does not erase evidence.
 pub(super) async fn generate_report_bounded(
     boot: &RuntimeBootstrap<'_>,
     prompt: &str,
-    board: Option<&[u8]>,
+    boards: &[(&str, &[u8])],
     behavioral_round_opened: bool,
     api_key: &GeminiKeys,
     seed: i64,
@@ -104,7 +119,10 @@ pub(super) async fn generate_report_bounded(
             api_key,
             boot.report_model,
             prompt,
-            board,
+            ReportMaterial {
+                mode: boot.interview_mode,
+                boards,
+            },
             boot.problem,
             behavioral_round_opened,
             crate::gemini::ReportRun {
@@ -684,13 +702,14 @@ pub(super) async fn publish_with_recovery(
     } = recovery;
     let FrozenAssessment {
         prompt,
-        board,
+        boards,
         mut state,
         refused,
     } = assessment;
     let refused = refused.into_inner() || refused_report(&generated);
     let again = std::sync::atomic::AtomicBool::new(false);
     let behavioral_round_opened = crate::agent::BehavioralRound::of(&state).opened();
+    let boards = labeled_boards(&boards);
     let mut room = LiveRecoveryRoom {
         room,
         room_name: boot.room_name,
@@ -710,7 +729,7 @@ pub(super) async fn publish_with_recovery(
         generate_report_bounded(
             boot,
             &prompt,
-            board.as_deref(),
+            &boards,
             behavioral_round_opened,
             keys,
             regeneration_seed(refused),
