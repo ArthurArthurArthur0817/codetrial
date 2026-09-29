@@ -368,6 +368,7 @@ const nodes = {
   cameraSkip: document.querySelector("#camera-skip"),
   cameraIntegrityVideo: document.querySelector("#camera-integrity-video"),
   audioJoin: document.querySelector("#audio-check-join"),
+  audioLeave: document.querySelector("#audio-check-leave"),
   meetPresentation: document.querySelector("#meet-presentation"),
   recordingConsentStep: document.querySelector("#recording-consent-step"),
   recordingConsent: document.querySelector("#recording-consent"),
@@ -835,15 +836,32 @@ function runAudioCheck() {
       }
     };
 
-    const finish = () => {
-      if (!sampleReadiness().ready) return;
+    // `finished` is also what makes the pool stop a grant that lands later,
+    // so a request still pending when this runs never lights the camera.
+    const stopChecks = () => {
       finished = true;
-      nodes.audioCheck.hidden = true;
       meter.stop();
       pool.cancelRetry();
       faceCheck.close();
       void context?.close().catch(() => {});
+    };
+
+    const finish = () => {
+      if (!sampleReadiness().ready) return;
+      stopChecks();
+      nodes.audioCheck.hidden = true;
       resolve({ userStream: pool.stream, cameraSkipped, cameraSkipReason });
+    };
+
+    // The checks gate the room, not the page. A candidate who denied a device
+    // or changed their mind had only the browser's own navigation, which
+    // leaves releasing the devices to the unload. Never resolves: nothing
+    // after the preflight should run on the way out.
+    const leave = () => {
+      stopChecks();
+      stopPreflight({ userStream: pool.stream });
+      stopAvatar();
+      window.location.assign("/");
     };
 
     // Browsers keep audio blocked until a user gesture, and the tone is the
@@ -894,6 +912,7 @@ function runAudioCheck() {
     nodes.audioHeard.addEventListener("click", confirmOutput);
 
     nodes.audioJoin.addEventListener("click", finish);
+    nodes.audioLeave.addEventListener("click", leave);
 
     nodes.cameraSkip.addEventListener("click", () => {
       if (recordingEnabled || cameraSkipped) return;
@@ -905,7 +924,6 @@ function runAudioCheck() {
       // next one came back with presentation on.
       nodes.meetPresentation.checked = false;
       writeStored(MEET_PRESENTATION_KEY, "0");
-      faceCheck.close();
       refresh();
     });
 

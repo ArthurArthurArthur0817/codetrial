@@ -32,6 +32,11 @@ export function createFaceCheck({
 
   // Replaces the record rather than clearing five fields, so a field added
   // later cannot be left behind by a reset that predates it.
+  //
+  // Also the only teardown. A close that disposed just the installed detector
+  // missed one a pending `start` was still building, and that run then
+  // installed it with nothing left to stop it; the generation bump here is
+  // what makes such a run close its own.
   const reset = () => {
     void state.detector?.close?.();
     video.srcObject = null;
@@ -79,7 +84,10 @@ export function createFaceCheck({
   return {
     start,
     reset,
-    close: () => void state.detector?.close?.(),
+    // The same teardown under the name a caller leaving the preflight uses.
+    // `reset` stays the lost camera's, reached only through the pool's
+    // `onLost`, so a call site written with it is a pairing done by hand.
+    close: reset,
     get ready() {
       return state.ready;
     },
