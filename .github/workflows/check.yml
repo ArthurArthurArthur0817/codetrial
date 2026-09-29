@@ -860,6 +860,20 @@ jobs:
           # read as coverage. `normalization_cannot_launder_a_refused_path`
           # owns that case, asserting the refusal itself rather than an outcome
           # the platform supplies for free.
+      # The checkout is the source this binary was compiled from, so its HEAD
+      # is the commit the binary must name. In CI the build takes that commit
+      # from `GITHUB_SHA` rather than from git, and every test reads back
+      # whatever the build recorded, so asking git is what notices a build
+      # that recorded `unknown`, a bad truncation, or another commit. Seven
+      # characters is the width `build.rs` prints.
+      - name: Prove the release names its commit
+        shell: bash
+        run: |
+          binary=target/${{ matrix.target }}/release/codetrial${{ matrix.extension }}
+          version=$("$binary" --version)
+          head=$(git rev-parse HEAD)
+          [[ $version == *"(${head::7})" ]] \
+            || { echo "release reports \"$version\", not ${head::7}" >&2; exit 1; }
 
       - name: Name release asset
         run: >-
