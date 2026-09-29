@@ -20,6 +20,27 @@ fn main() {
     install_git_hooks();
 }
 
+fn git_output(root: &std::path::Path, args: &[&str]) -> Option<String> {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(root)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8(output.stdout).ok()
+}
+
+/// Joined onto `root` rather than asked for as absolute. `--path-format` needs
+/// git 2.31, and an older one, such as the git in the Bullseye image the Linux
+/// release builds in, echoes the unknown flag back as output and still exits 0.
+/// The answer is relative to the working directory, which is `root`, or
+/// already absolute, which `join` keeps as it is.
+fn git_path(root: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
+    git_output(root, &["rev-parse", "--git-path", name]).map(|path| root.join(path.trim()))
+}
+
 /// Links `scripts/git-*.sh` into the hooks directory of a checkout.
 ///
 /// A hook nobody installed is a hook nobody runs, and the first person to find
@@ -64,7 +85,7 @@ fn install_git_hooks() {
     // this does not notice. That directory holds every gate script in the
     // repository and each edit to one would rebuild the binary; `make hooks`
     // covers the rare case at no standing cost.
-    if let Some(hooks) = hooks_dir(&root)
+    if let Some(hooks) = git_path(&root, "hooks")
         && hooks.is_dir()
     {
         println!("cargo:rerun-if-changed={}", hooks.display());
@@ -104,21 +125,6 @@ fn install_git_hooks() {
         Ok(output) => warn_hooks(&String::from_utf8_lossy(&output.stderr)),
         Err(error) => warn_hooks(&error.to_string()),
     }
-}
-
-/// Where git keeps this checkout's hooks, which is `.git/hooks` only in the
-/// simple case.
-fn hooks_dir(root: &std::path::Path) -> Option<std::path::PathBuf> {
-    let output = Command::new("git")
-        .args(["rev-parse", "--path-format=absolute", "--git-path", "hooks"])
-        .current_dir(root)
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let path = String::from_utf8(output.stdout).ok()?;
-    Some(std::path::PathBuf::from(path.trim()))
 }
 
 fn warn_hooks(reason: &str) {
