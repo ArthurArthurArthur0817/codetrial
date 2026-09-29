@@ -322,6 +322,17 @@ jobs:
       - name: Run gates
         run: ./scripts/test.sh
 
+      # The release job makes the same comparison, but only after a merge: a
+      # `build.rs` that stops recording the commit would pass every pull
+      # request and turn the publishing leg red instead. `cargo test` above
+      # has already built this binary from the same checkout.
+      - name: Prove the build names its commit
+        run: |
+          version=$(target/debug/codetrial --version)
+          head=$(git rev-parse HEAD)
+          [[ $version == *"(${head::7})" ]] \
+            || { echo "build reports \"$version\", not ${head::7}" >&2; exit 1; }
+
       # Its own step, not part of `cargo test`. It drives a real browser through
       # the offline interview and is hermetic now, with the Compiler Explorer
       # calls intercepted, but it still fails on a two minute navigation timeout
@@ -860,6 +871,20 @@ jobs:
           # read as coverage. `normalization_cannot_launder_a_refused_path`
           # owns that case, asserting the refusal itself rather than an outcome
           # the platform supplies for free.
+      # The checkout is the source this binary was compiled from, so its HEAD
+      # is the commit the binary must name. In CI the build takes that commit
+      # from `GITHUB_SHA` rather than from git, and every test reads back
+      # whatever the build recorded, so asking git is what notices a build
+      # that recorded `unknown`, a bad truncation, or another commit. Seven
+      # characters is the width `build.rs` prints.
+      - name: Prove the release names its commit
+        shell: bash
+        run: |
+          binary=target/${{ matrix.target }}/release/codetrial${{ matrix.extension }}
+          version=$("$binary" --version)
+          head=$(git rev-parse HEAD)
+          [[ $version == *"(${head::7})" ]] \
+            || { echo "release reports \"$version\", not ${head::7}" >&2; exit 1; }
 
       - name: Name release asset
         run: >-
