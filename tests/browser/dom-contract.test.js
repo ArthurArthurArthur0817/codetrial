@@ -659,8 +659,28 @@ test("an unrecorded preflight can continue without a camera", () => {
   );
   assert.match(
     script,
+    /CAMERA_SKIP_REASONS\[cameraErrorKind\(error\)\]/,
+    "the skip reason must come from the classifier that chose the advice",
+  );
+  assert.match(
+    script,
     /else if \(!preflight\.cameraSkipped\)/,
     "a skipped camera must not start the face-presence worker",
+  );
+});
+
+// The busy-camera advice tells the candidate to tick a control by its label.
+// A renamed label would leave the advice pointing at nothing while every other
+// test still passed, so the quoted text is read out of the advice and looked
+// up in the page.
+test("the busy-camera advice quotes a label the page still has", () => {
+  const advice = read("audio-check.js");
+  const quoted = advice.match(/then tick "([^"]+)"/);
+  assert.ok(quoted, "the busy-camera advice must quote the control it names");
+  assertIncludesCompact(
+    read("interview.html"),
+    `${quoted[1]}</label>`,
+    "the advice quotes a label interview.html does not have",
   );
 });
 

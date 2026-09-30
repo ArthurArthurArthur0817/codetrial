@@ -2,6 +2,7 @@ import { loadJudge, loadProblem } from "./problem-data.js";
 import { downloadMarkdown, reportFilename } from "./download.js";
 import { consumeSharedFocus } from "./problem-picker.js";
 import {
+  cameraErrorKind,
   outputUsable,
   preflightReadiness,
   videoTrackReady,
@@ -1216,22 +1217,19 @@ async function connectLiveKit(connection, preflight, presenting = false) {
   }
 }
 
+/// The reason a skipped camera goes into the signed trail, from the same
+/// classifier that chose the preflight's advice. `in_use` is a camera that was
+/// granted but would not start or stopped giving a picture; it does not claim
+/// which program held it. `declined` covers a camera with no error at all and
+/// any error none of the others name, so it never asserts more than a skip.
+const CAMERA_SKIP_REASONS = {
+  busy: "in_use",
+  denied: "denied",
+  no_device: "no_device",
+};
+
 function cameraSkipReasonFor(error) {
-  const words = String(error || "").toLowerCase();
-  if (
-    words.includes("not found") ||
-    words.includes("notfound") ||
-    words.includes("no camera")
-  )
-    return "no_device";
-  if (
-    words.includes("permission") ||
-    words.includes("denied") ||
-    words.includes("not allowed") ||
-    words.includes("notallowed")
-  )
-    return "denied";
-  return "declined";
+  return CAMERA_SKIP_REASONS[cameraErrorKind(error)] ?? "declined";
 }
 
 /// Meet cannot open a camera CodeTrial is holding, and the preflight has
