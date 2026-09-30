@@ -1365,6 +1365,109 @@ lobbyTest(
   },
 );
 
+for (const storage of ["account", "device"]) {
+  lobbyTest(
+    `saved ${storage} reports download their own markdown with local dates`,
+    async (page) => {
+      const cases = [
+        {
+          report: { decision: "HIRE", codingScore: 81 },
+          language: "python",
+          verdict: "HIRE",
+          heading: "python",
+        },
+        {
+          report: { decision: "NO_HIRE", codingScore: 42 },
+          language: "javascript",
+          verdict: "NO HIRE",
+          heading: "javascript",
+        },
+        {
+          report: {},
+          language: "unknown-language",
+          verdict: null,
+          heading: "not recorded",
+        },
+        {
+          report: { incomplete: true, decision: "HIRE" },
+          verdict: null,
+          heading: "not recorded",
+        },
+      ];
+      const entries = cases.map((item, index) => ({
+        problemId: EASY[0],
+        problemTitle: "Saved report",
+        date: `2026-01-01T${17 + index}:30:00Z`,
+        language: item.language,
+        report: { ...item.report, summary: `Stored summary ${index}` },
+      }));
+      if (storage === "account") {
+        reports = entries.map((payload) => ({ payload }));
+      } else {
+        session = { signedIn: false };
+        await page.addInitScript((entries) => {
+          localStorage.setItem("codetrial_history", JSON.stringify(entries));
+        }, entries);
+      }
+      await lobby(page);
+      const history = page.locator("#attempt-history");
+      assert.equal(
+        await history.getByRole("button", { name: /^Download report/ }).count(),
+        cases.length,
+      );
+      for (const [index, item] of cases.entries()) {
+        const when = `1/2/2026, ${index + 1}:30:00 AM`;
+        const button = history.getByRole("button", {
+          name: `Download report (.md) for Saved report, ${when}`,
+          exact: true,
+        });
+        const downloading = page.waitForEvent("download");
+        await button.click();
+        const download = await downloading;
+        assert.equal(await download.failure(), null);
+        assert.equal(
+          download.suggestedFilename(),
+          `interview-report-${EASY[0]}-2026-01-02.md`,
+        );
+        const chunks = [];
+        for await (const chunk of await download.createReadStream())
+          chunks.push(chunk);
+        const markdown = Buffer.concat(chunks).toString("utf8");
+        assert.ok(
+          markdown.startsWith(`# Interview Report - Saved report\n_${when}_`),
+        );
+        assert.ok(markdown.includes(`Stored summary ${index}`));
+        assert.ok(
+          markdown.includes(
+            `## Final code (${item.heading})\n(final code was not saved)`,
+          ),
+        );
+        assert.match(
+          markdown,
+          /## Conversation transcript\n\(transcript was not saved\)/,
+        );
+        assert.doesNotMatch(
+          markdown,
+          /```|no speech captured|editor was empty/,
+        );
+        if (item.verdict) {
+          assert.ok(markdown.includes(`## Verdict: ${item.verdict}\n`));
+          assert.ok(
+            markdown.includes(`| Coding | ${item.report.codingScore} / 100 |`),
+          );
+        } else {
+          assert.match(markdown, /## No evaluation/);
+          assert.doesNotMatch(
+            markdown,
+            /## Verdict:|Judged against|\/ 100|Hints used/,
+          );
+        }
+      }
+    },
+    { timezoneId: "Asia/Taipei", locale: "en-US", acceptDownloads: true },
+  );
+}
+
 lobbyTest("try again selects the problem", async (page) => {
   reports = [savedAttempt(EASY[0])];
   await lobby(page);

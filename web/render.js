@@ -423,13 +423,18 @@ export function reportMarkdown({
       ]
     : [];
   const chainNote = mdText(chainSentence(report));
-  const conversation = transcript
-    .filter((segment) => segment.final || segment.text.trim())
-    .map(
-      (segment) =>
-        `**${segment.speaker === "interviewer" ? "Jim" : "You"}:** ${mdText(segment.text.trim())}`,
-    )
-    .join("\n\n");
+  // Missing storage is not evidence of silence: only a saved, empty transcript
+  // can say that no speech was captured. Omitted fields have the same meaning.
+  const conversation =
+    transcript == null
+      ? "(transcript was not saved)"
+      : transcript
+          .filter((segment) => segment.final || segment.text.trim())
+          .map(
+            (segment) =>
+              `**${segment.speaker === "interviewer" ? "Jim" : "You"}:** ${mdText(segment.text.trim())}`,
+          )
+          .join("\n\n");
   // Candidate code is the one field here that must not be escaped, so when it
   // contains a run of backticks the fence is what has to give. Without this, a
   // ``` in a comment closes the block early and the rest of the report is read
@@ -439,7 +444,10 @@ export function reportMarkdown({
   // one argument per two characters of pasted code, and past roughly a hundred
   // thousand runs the call blows the argument limit and throws a RangeError, so
   // the candidate's own download button would do nothing.
-  const body = code.trimEnd() || "(editor was empty)";
+  const body =
+    code == null
+      ? "(final code was not saved)"
+      : code.trimEnd() || "(editor was empty)";
   const longestRun = (body.match(/`+/g) || []).reduce(
     (longest, run) => Math.max(longest, run.length),
     0,
@@ -449,7 +457,7 @@ export function reportMarkdown({
   // it takes the only characters a language tag can be. Today `language` comes
   // from the tabs and is allowlisted on both sides, but a newline here would
   // end the fence line and start emitting the candidate's code as prose.
-  const info = String(language).replace(/[^a-zA-Z0-9_+-]/g, "");
+  const info = String(language ?? "").replace(/[^a-zA-Z0-9_+-]/g, "");
   // The exported copy is the one that outlives the tab and can be forwarded, so
   // it must not carry a verdict the session never earned either. Only the head
   // differs: the tail used to be duplicated per branch and had already drifted
@@ -520,10 +528,8 @@ export function reportMarkdown({
     "",
     chainNote,
     "",
-    `## Final code (${mdText(language)})`,
-    fence + info,
-    body,
-    fence,
+    `## Final code (${mdText(language ?? "not recorded")})`,
+    ...(code == null ? [body] : [fence + info, body, fence]),
     "",
     "## Conversation transcript",
     conversation || "(no speech captured)",
