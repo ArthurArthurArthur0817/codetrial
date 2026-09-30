@@ -1,9 +1,21 @@
 ---
-name: codetrial-issue-triage
-description: Review CodeTrial GitHub issues, find duplicates or incomplete reports, and recommend evidence-backed next actions. Use for backlog triage, checking new issues, deciding whether a symptom already has an issue, or notifying contributors that a thread already exists and closing the duplicates. The assessment comes first and reviewing alone authorizes no GitHub edit. A comment that delivers a triage verdict on someone else's thread belongs here, including the evidence it carries across; text written on the contributor's own behalf, a new issue or PR body or a maintainer question, is codetrial-contribute.
+name: codetrial-triage
+description: >
+  Triage CodeTrial GitHub issues and open pull requests. Find duplicate or
+  incomplete issues and recommend evidence-backed actions, including notifying
+  contributors that a thread already exists and closing the duplicates; sweep
+  pull requests for held workflow runs, outdated review threads, functional
+  overlap, unanswered reviews and merge conflicts. Use for backlog triage,
+  checking new issues or pull requests, deciding whether a symptom already has
+  an issue, or asking what needs attention. Reviewing authorizes no GitHub edit
+  except run approvals, thread resolutions, rebase requests and hiding
+  superseded rebase reviews covered by an explicit pull-request sweep. A comment
+  that delivers a triage verdict on someone else's thread belongs here; use
+  codetrial-contribute for text written on a contributor's behalf, a new issue
+  or pull request, or a maintainer question.
 ---
 
-# Triage CodeTrial issues
+# Triage CodeTrial issues and pull requests
 
 Make the backlog easier to act on without discouraging people learning through
 AI-assisted contributions. Title and redaction rules are in
@@ -17,6 +29,11 @@ Example requests: "Review open issues for duplicates and missing details" or
 "Check whether this reconnect failure already has an issue". Default to a
 read-only report; an inspection request does not authorize comments, labels,
 renames or closure.
+
+A request about open pull requests ("sweep the PRs", "which PRs are stuck")
+follows [pulls.md](pulls.md) after the scope below. The duplicate reasoning
+here applies to PRs too, and the confirmed-list rule governs every comment it
+drafts.
 
 ## Establish the scope
 
