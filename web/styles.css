@@ -1021,7 +1021,13 @@ p {
   display: flex;
   flex-direction: column;
   align-items: center;
+  /* Safe, and scrollable: a card taller than the window, such as the preflight
+     on a laptop screen, otherwise overflows both edges and cannot be reached.
+     Plain center comes first because a browser that does not parse safe drops
+     that whole declaration and keeps this one. */
   justify-content: center;
+  justify-content: safe center;
+  overflow-y: auto;
   gap: 1rem;
   background: rgba(17, 17, 15, 0.95);
   padding: 1rem;

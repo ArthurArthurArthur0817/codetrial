@@ -732,6 +732,13 @@ fn participant_metadata_parsing_handles_frontend_metadata() {
         r#"{"interviewGrounding":{"requirements":["Must know Rust"],"skills":["Rust"],"anchors":["Built a parser"]}}"#,
     ));
 
+    assert!(
+        parse_participant_metadata(Some(r#"{"hideExamples":true}"#)).examples_hidden,
+        "a candidate who hid the examples must reach the interviewer as hidden"
+    );
+    assert!(!invalid_json.examples_hidden);
+    assert!(!parse_participant_metadata(Some(r#"{"hideExamples":"true"}"#)).examples_hidden);
+
     assert_eq!(grounding.grounding.requirements, ["Must know Rust"]);
     assert_eq!(grounding.grounding.anchors, ["Built a parser"]);
     assert!(

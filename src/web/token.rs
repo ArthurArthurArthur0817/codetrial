@@ -248,6 +248,15 @@ pub fn token_response(
                 crate::agent::interview_grounding_json(&grounding),
             );
     }
+
+    // Only a literal true hides them, and an absent key means shown, so a
+    // session that never ticked the box mints the same metadata as before.
+    if request.get("hideExamples") == Some(&Value::Bool(true)) {
+        metadata
+            .as_object_mut()
+            .expect("metadata is an object")
+            .insert("hideExamples".to_string(), Value::Bool(true));
+    }
     let metadata = metadata.to_string();
 
     Ok(TokenResponse {

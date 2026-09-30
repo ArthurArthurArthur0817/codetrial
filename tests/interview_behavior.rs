@@ -609,6 +609,7 @@ fn a_played_candidate_is_read_by_what_it_asks() {
         &InterviewProfile::default(),
         &InterviewGrounding::default(),
         InterviewLoop::CodingBehavioral,
+        false,
     );
     let answered = "Each distinct set of three values is reported once. If the same values occur at different positions, they do \
                     not count as separate groups. The list can contain between 3 and 3000 adjustments, each between -10^5 and 10^5.";
@@ -885,6 +886,7 @@ async fn uncertain_speech_is_clarified_without_crediting_or_correcting_it() {
                     &InterviewProfile::default(),
                     &InterviewGrounding::default(),
                     interview_loop,
+                    false,
                 ),
                 contents: vec![
                     json!({ "role": "user", "parts": [{ "text": "I am ready to work an example." }] }),
@@ -977,6 +979,7 @@ async fn live_interviewer_poses_the_variant_and_serves_hints_in_order() {
                 &InterviewProfile::default(),
                 &InterviewGrounding::default(),
                 InterviewLoop::CodingBehavioral,
+                false,
             ),
             contents: Vec::new(),
             state: RuntimeState::for_problem(problem),
@@ -1435,6 +1438,7 @@ async fn played_candidates_are_held_to_the_same_rules() {
                 &InterviewProfile::default(),
                 &InterviewGrounding::default(),
                 InterviewLoop::CodingBehavioral,
+                false,
             );
             let mut conversation = Conversation {
                 client: reqwest::Client::new(),
