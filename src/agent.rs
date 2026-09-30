@@ -1523,6 +1523,24 @@ pub fn record_framework_evidence(
         .ok_or("invalid summary")
         .map(|summary| bounded_model_text(summary, MAX_FRAMEWORK_SUMMARY_CHARS))?;
 
+    // The interviewer heard the audio the recognizer garbled, so a summary it
+    // writes from that turn ("did not give the indices") would reach the report
+    // as the candidate's speech even though the report never reads the turn
+    // itself. Speech evidence waits for a turn the report can read.
+    if source == EvidenceSource::CandidateSpeech
+        && kind != EvidenceKind::Skipped
+        && state
+            .transcript
+            .iter()
+            .rev()
+            .find(|line| line.starts_with(&format!("{CANDIDATE_SPEAKER}: ")))
+            .is_some_and(|line| is_unrecognized_turn(line))
+    {
+        return Err(
+            "the candidate's latest turn was not recognized as English; ask them to repeat it, and record speech evidence from their clarified answer",
+        );
+    }
+
     // Before the duplicate check, since a repeat is still the analysis given
     // again, now: "still O(n log n)" for rewritten code comes back under the
     // summary it had before. Nothing below refuses an Optimizations record.

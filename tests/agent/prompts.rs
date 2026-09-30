@@ -627,6 +627,47 @@ fn an_unrecognized_turn_is_left_out_of_assessment() {
     assert!(interim_system_instruction().contains(UNRECOGNIZED_TURN));
 }
 
+/// The interviewer hears the audio the recognizer garbled, so what it records
+/// from that turn would reach the report as the candidate's speech although
+/// the report never reads the turn. Speech evidence waits for the repeat; the
+/// editor and a test run are not the recognizer's to garble.
+#[test]
+fn speech_evidence_waits_for_a_turn_the_report_can_read() {
+    let mut state = RuntimeState {
+        transcript: vec![
+            "Candidate: I restate it as finding two positions.".to_string(),
+            "Candidate: \u{662f}\u{554a}\u{3002}\u{8863}\u{670d}\u{7684}\u{5c3a}\u{5bf8}"
+                .to_string(),
+            "Interviewer: I may have misheard. Could you repeat that?".to_string(),
+        ],
+        ..RuntimeState::default()
+    };
+    let speech = json!({
+        "phase": "example", "source": "candidate_speech", "kind": "observed",
+        "confidence": 90, "summary": "The candidate did not give the indices.",
+    });
+    let refused = record_framework_evidence(&mut state, &speech).unwrap_err();
+    assert!(refused.contains("not recognized as English"), "{refused}");
+    assert!(state.framework_evidence.is_empty());
+
+    let editor = json!({
+        "phase": "algorithm", "source": "editor_snapshot", "kind": "observed",
+        "confidence": 80, "summary": "The editor outlines a single pass with a map.",
+    });
+    record_framework_evidence(&mut state, &editor).expect("the editor is not speech");
+
+    let session_timing = json!({
+        "phase": "situation", "source": "session_timing", "kind": "skipped",
+        "confidence": 100, "summary": "The session ended first.",
+    });
+    record_framework_evidence(&mut state, &session_timing).expect("a skip is not speech");
+
+    state
+        .transcript
+        .push("Candidate: Indices zero and one, since two plus seven is nine.".to_string());
+    record_framework_evidence(&mut state, &speech).expect("the repeat is readable");
+}
+
 #[test]
 fn report_transcript_keeps_the_tail_within_the_prompt_budget() {
     let short = vec![

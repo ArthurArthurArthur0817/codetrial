@@ -27,7 +27,9 @@ in a non-Latin script: the English interview makes such a turn the
 recognizer's output, and they read a fixed marker saying it was not recognized
 as English in its place. A turn of only one or two such letters, a symbol the
 question is about, is kept. The live interviewer, the replay and the stored
-transcript keep the recognizer's text. Recognition errors that come back in
+transcript keep the recognizer's text, and because the interviewer heard that
+turn, the server refuses evidence it records from the candidate's speech until
+the candidate's latest turn is one the report can read. Recognition errors that come back in
 Latin letters, into Spanish or into unrelated English, are not marked, and
 there the live, interim and report prompts, with the scan below, are what
 enforces this policy. The recognition hints sent at live setup shape only the
