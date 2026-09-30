@@ -53,8 +53,8 @@ fn prompt_golden_digest_matches_versions() {
     // its hash is a string nothing checks. The pair is still asserted, because
     // the failure worth catching is a version bumped with the golden left
     // alone, which a digest comparison on its own reads as fine.
-    let recorded_versions = (12, 13);
-    let recorded_digest = "78665792abe7ef8640fca05db6fdfa72647db7f0b0abd970addb4b29fe1029a9";
+    let recorded_versions = (13, 14);
+    let recorded_digest = "aaedd160db3d4fa2bbb27a43732b300cb800bdabca387495c8cce8f517fa0d97";
 
     assert_eq!(
         (LIVE_PROMPT_VERSION, REPORT_PROMPT_VERSION),
@@ -579,6 +579,54 @@ fn report_schema_uses_only_what_gemini_accepts() {
     assert!(bad.is_empty(), "the API will 400 on: {}", bad.join(", "));
 }
 
+/// A candidate turn the recognizer returned in another script reaches neither
+/// assessment pass, and the report prompt says what stands in for it. Escapes
+/// keep this source ASCII; the scripts are the point.
+#[test]
+fn an_unrecognized_turn_is_left_out_of_assessment() {
+    use codetrial::agent::{UNRECOGNIZED_TURN, mark_unrecognized_turns};
+
+    let lines = [
+
+        // Fluent Simplified Chinese for an English answer, as the report had
+        // it.
+        "Candidate: \u{662f}\u{554a}\u{3002}\u{5982}\u{679c}\u{8863}\u{670d}\u{7684}\u{5c3a}\u{5bf8}",
+        // Katakana for "nums, left product".
+        "Candidate: \u{30ce}\u{30f3}\u{30b9} \u{30ec}\u{30d5}\u{30c8} \u{30d7}\u{30ed}\u{30c0}\u{30af}\u{30c8}",
+        // The report's short Devanagari line for "bad", as short as one gets.
+        "Candidate: \u{92c}\u{948}\u{921} \u{939}\u{948}\u{964}",
+        // Two symbols the question is about are not an invented sentence.
+        "Candidate: \u{3b8} \u{3c6}",
+
+        // English quoting a short string in another script stays English: three
+        // kana, past the floor, so the Latin majority is what keeps it.
+        "Candidate: If the input is \u{3042}\u{3044}\u{3046} I return three, because each character counts once.",
+        "Candidate: The na\u{ef}ve approach compares every pair.",
+
+        // Accented Latin with no ASCII at all, Latin-1 and the Vietnamese range
+        // both, is still Latin.
+        "Candidate: \u{e0}\u{e9}\u{ee}\u{f5}\u{fc} \u{1ea1}\u{1ea3}\u{1ea5}\u{1ea7}",
+
+        // A tie is not "mostly": three Latin letters and three kana, past the
+        // floor, so only the majority rule keeps it.
+        "Candidate: abc \u{3042}\u{3044}\u{3046}",
+        // Misrecognized, but in Latin letters: the prompt rules cover it.
+        "Candidate: \u{bf}Comprendiste?",
+        // The interviewer's own line is never assessed as the candidate's.
+        "Interviewer: \u{662f}\u{554a}",
+    ]
+    .map(String::from);
+    let marked = mark_unrecognized_turns(&lines);
+    let unrecognized = format!("Candidate: {UNRECOGNIZED_TURN}");
+    assert_eq!(marked[0], unrecognized);
+    assert_eq!(marked[1], unrecognized);
+    assert_eq!(marked[2], unrecognized);
+    assert_eq!(marked[3..], lines[3..]);
+    assert!(!transcript_for_report(&lines).contains('\u{8863}'));
+    assert!(report_system_instruction().contains(UNRECOGNIZED_TURN));
+    assert!(interim_system_instruction().contains(UNRECOGNIZED_TURN));
+}
+
 #[test]
 fn report_transcript_keeps_the_tail_within_the_prompt_budget() {
     let short = vec![
@@ -996,17 +1044,17 @@ fn interview_contract_versions_are_one_closed_bundle() {
         "the bundle table has no row for {INTERVIEW_CONTRACT_BUNDLE_VERSION}"
     );
 
-    assert_eq!(INTERVIEW_CONTRACT_BUNDLE_VERSION, 20);
-    assert_eq!(LIVE_PROMPT_VERSION, 12);
-    assert_eq!(REPORT_PROMPT_VERSION, 13);
+    assert_eq!(INTERVIEW_CONTRACT_BUNDLE_VERSION, 21);
+    assert_eq!(LIVE_PROMPT_VERSION, 13);
+    assert_eq!(REPORT_PROMPT_VERSION, 14);
     assert_eq!(RUBRIC_VERSION, 1);
     assert_eq!(REPORT_SCHEMA_VERSION, 2);
     assert_eq!(
         interview_contract_json(),
         json!({
-            "bundleVersion": 20,
-            "livePromptVersion": 12,
-            "reportPromptVersion": 13,
+            "bundleVersion": 21,
+            "livePromptVersion": 13,
+            "reportPromptVersion": 14,
             "rubricVersion": 1,
             "reportSchemaVersion": 2,
         })

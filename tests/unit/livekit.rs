@@ -1222,6 +1222,35 @@ fn the_browser_escape_hatch_outlasts_the_report_deadline() {
 /// The cursor is the whole of what makes this cheap. Left unmoved, every pause
 /// re-reads the interview from the beginning, which is the cost this exists to
 /// remove, and the notes would pile up restating the opening minutes.
+/// A pause note is read by the final reviewer, so a turn the recognizer
+/// returned in another script is left out of the window the note is written
+/// from, the same way the report leaves it out. Escaped: the script is the
+/// point, not the words.
+#[test]
+fn a_pause_review_does_not_read_an_unrecognized_turn() {
+    let config = crate::config::load_from_pairs([
+        ("LIVEKIT_URL", "wss://example.livekit.cloud"),
+        ("LIVEKIT_API_KEY", "devkey"),
+        ("LIVEKIT_API_SECRET", "devsecret"),
+        ("GOOGLE_API_KEY", "google"),
+    ])
+    .unwrap();
+    let boot = crate::runtime::bootstrap(&config, "interview-fixed", Some("two-sum"), 45);
+    let mut state = RuntimeState {
+        transcript: vec![
+            "Candidate: \u{662f}\u{554a}\u{3002}\u{8863}\u{670d}\u{7684}\u{5c3a}\u{5bf8}"
+                .to_string(),
+            "Candidate: I check the map before inserting".to_string(),
+        ],
+        ..RuntimeState::default()
+    };
+    let window = take_interim_review_window(&mut state, &boot);
+    assert!(window.contains(crate::agent::UNRECOGNIZED_TURN));
+    assert!(!window.contains('\u{8863}'));
+    assert!(window.contains("I check the map before inserting"));
+    assert_eq!(state.transcript[0].chars().nth(11), Some('\u{662f}'));
+}
+
 #[test]
 fn each_pause_reviews_the_speech_since_the_last_one() {
     let config = crate::config::load_from_pairs([

@@ -163,12 +163,92 @@ fn unsupported_delivery_and_personality_judgments_are_rejected_atomically() {
     assert!(errors.contains("$.improvementPlan[0].selfReview[0]"));
 }
 
+/// The language a transcript came out in is the recognizer's, so no field may
+/// pin it on the candidate: the summary is where a report once cited "an
+/// irrelevant response in Mandarin" for an English speaker.
+#[test]
+fn the_recognizers_language_is_not_the_candidates() {
+    for claim in [
+        "Your communication included an irrelevant response in Mandarin.",
+        "You answered the delimiter question in Japanese.",
+        "Your non-English answers were hard to follow.",
+        "A language barrier limited the discussion.",
+        "Improve your English fluency when explaining the loop.",
+        "You gave a Japanese response to the delimiter question.",
+        "One Spanish-language answer did not address the recursion.",
+        "Your Portuguese remarks were unrelated to the tree.",
+        "The Korean utterance about clothing sizes was off topic.",
+        "You explained the base case in Portuguese.",
+    ] {
+        let mut report = valid_strict_report();
+        report["summary"] = json!(claim);
+        let errors = validate_report_candidate(&report, get_problem(Some("two-sum")))
+            .unwrap_err()
+            .join("\n");
+        assert!(
+            errors.contains("$.summary: the recognizer's language attributed to the candidate"),
+            "{claim}: {errors}"
+        );
+    }
+}
+
+/// A recognition gap may be named in the summary, and never as something the
+/// candidate should fix: the improvements, and the plan copied from them, are
+/// where a report once asked for answers "in English to avoid transcription
+/// ambiguity" after one misrecognized turn.
+#[test]
+fn a_recognition_gap_is_not_an_improvement() {
+    let problem = get_problem(Some("two-sum"));
+    for weakness in [
+        "Ensure all technical explanations are provided in English to avoid transcription ambiguity.",
+        "Keep answers clearly audible and relevant to the question.",
+        "Speak more clearly when explaining the complement lookup.",
+        "Work on your pronunciation of identifiers such as nums.",
+        "Improve your English when explaining the complement lookup.",
+        "Ensure all responses are clearly articulated to avoid transcription ambiguity.",
+    ] {
+        let mut report = valid_strict_report();
+        report["communicationFeedback"]["improvements"][0] = json!(weakness);
+        report["improvementPlan"][2]["weakness"] = json!(weakness);
+        let errors = validate_report_candidate(&report, problem)
+            .unwrap_err()
+            .join("\n");
+        assert!(
+            errors.contains("$.communicationFeedback.improvements[0]: a speech-recognition gap"),
+            "{weakness}: {errors}"
+        );
+    }
+
+    let mut report = valid_strict_report();
+
+    // Outside the improvements the same words are description, not a fix asked
+    // of the candidate, so the rule's scope is what lets this through.
+    report["summary"] = json!(
+        "Reliable communication evidence was limited by transcription in one exchange; your answers in English elsewhere were clear."
+    );
+    report["communicationFeedback"]["improvements"][0] =
+        json!("When a transcription gap occurs, summarize the key point as a code comment.");
+    report["improvementPlan"][2]["weakness"] =
+        report["communicationFeedback"]["improvements"][0].clone();
+    report["communicationFeedback"]["improvements"][1] =
+        json!("Describe the approach in plain English before coding the lookup.");
+    report["improvementPlan"][3]["weakness"] =
+        report["communicationFeedback"]["improvements"][1].clone();
+    validate_report_candidate(&report, problem)
+        .unwrap_or_else(|errors| panic!("a neutral mention was refused: {errors:?}"));
+}
+
 #[test]
 fn technical_confidence_language_remains_valid() {
     for allowed in [
         "You calculated a 95 percent confidence interval for the estimate.",
         "You were confident that the loop invariant held and justified it with code.",
         "The evidence confidence value is metadata, not a performance score.",
+        "You switched languages from Python to C++ and kept every test passing.",
+        "Reliable communication evidence was limited by transcription.",
+        "Your parser accepts identifiers in another language's alphabet.",
+        "Your tokenizer kept Japanese text and Korean characters intact.",
+        "You tested the Spanish-language input and the French locale.",
     ] {
         let mut report = valid_strict_report();
         report["summary"] = json!(allowed);
