@@ -144,6 +144,19 @@ export function failFetchWith(handler) {
   };
 }
 
+/// Replaces a global for the length of one test, restored even when an
+/// assertion fails. Shared for the fetch stub's reason: the save-and-restore
+/// had been written out by hand in half a dozen files, and a restore one of
+/// them forgets leaks a fake into every test that runs after it.
+export function stubGlobal(t, name, value) {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, name);
+  Object.defineProperty(globalThis, name, { configurable: true, value });
+  t.after(() => {
+    if (previous) Object.defineProperty(globalThis, name, previous);
+    else delete globalThis[name];
+  });
+}
+
 /// A `localStorage` stand-in backed by a Map. Shared for the same reason as the
 /// fetch stub above: two copies had appeared and they had drifted apart. One of
 /// them read a stored empty string back as `null` and did not stringify what it

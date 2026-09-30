@@ -107,7 +107,8 @@ builds it: import the same vendored bundle, do not add an import map.
 | `loading` | the page is asking whether a model exists | neutral panel |
 | `ready` | a VRM is loaded and rendering | the canvas |
 | `unavailable` | no model, no WebGL, a load failure, or a load timeout | neutral panel, with the reason in `#jim-avatar-note` |
-| `stopped` | the interview ended or the room was left | neutral panel |
+| `degraded` | Jim's audio was arriving late, or the live render budget was exceeded | neutral voice-only panel with an explanation |
+| `stopped` | the interview ended, the room was left, or the candidate hid the avatar | neutral panel |
 
 Only `ready` hides the neutral panel, so a state nobody has invented yet
 degrades to the panel rather than to an empty box.
@@ -296,9 +297,10 @@ sidebar. The sidebar already carries the problem, timer, status pill, captions,
 controls and the Meet panel; adding a face made it crowded, and the point of
 the avatar is that the candidate glances at it while working, so it belongs
 where their eyes already are. The stage takes no pointer events, so it can
-never swallow a click meant for the editor, and the credit link re-enables them
-for itself. Below 1200px wide the stage is hidden rather than allowed to cover
-code.
+never swallow a click meant for the editor; the Hide avatar button and the
+captions re-enable them for themselves. Below 1200px wide the avatar and its
+button are hidden rather than allowed to cover code, and the captions move to
+the bottom corner.
 
 Every VRM loads in a T-pose and the format ships no idle animation, so
 `loadVrm` drops the upper arms once at load. This is model-independent: without
@@ -354,11 +356,20 @@ The canvas is `role="img"` with the label "Jim, the AI interviewer". It carried
 `aria-hidden="true"` while it had no name, which was the right answer then: an
 unlabeled canvas announced to a screen reader is worse than a hidden one. A
 picture of a person whose whole useful content is "this is the interviewer"
-needs one sentence, not a live region.
+needs one sentence, not a live region. The one live region on the stage is
+`#jim-avatar-status`, a visually hidden `role="status"` that speaks only when
+the avatar is retired automatically; a manual Hide moves focus to the note
+instead, so the change is read once either way.
 
-The render loop stops scheduling frames while the document is hidden and starts
-again on `visibilitychange`. Browsers already throttle `requestAnimationFrame`
-in a background tab, so what this buys is the analyser read and the humanoid
+The render loop stops scheduling frames while the document is hidden, the stage
+is narrower than the breakpoint, or the preflight overlay covers it. It starts
+again on `visibilitychange`, when a `ResizeObserver` on the mount sees it widen,
+and when the page reports the preflight closed (`setStageCovered(false)`). The
+stage is `inert` while covered, so nothing on it can be reached by keyboard
+under the overlay. While running it draws 30 frames a second on average,
+whatever the display refresh rate. Browsers already throttle
+`requestAnimationFrame` in a background tab, so what this buys is the analyser
+read and the humanoid
 update stopping too. There is one door into the loop, `resumeAvatar`, which
 refuses to open a second one and refuses to open any while the model is still
 loading: `createAvatar` returns before the model has arrived, and a visibility
@@ -368,3 +379,58 @@ The media contract is unchanged by any of this. No first-party script captures a
 canvas stream, the only tracks published are the candidate's microphone and
 camera, and the recording template renders the same avatar from the same
 vendored bundle rather than subscribing to a second one.
+
+### Rendering under load
+
+The live interview retires the avatar for the rest of the page session on
+either of two signals. This policy belongs to the live stage, not the recording
+renderer.
+
+- **Late audio.** Every two seconds while frames are being drawn, the stage
+  reads Jim's inbound audio stats (`getRTCStatsReport()` on his LiveKit track)
+  and computes the jitter-buffer delay accrued in that window,
+  `Δ jitterBufferDelay / Δ jitterBufferEmittedCount`. Two consecutive windows
+  above 200 ms retire the avatar. A window with no audio emitted, as in a
+  silent stretch, is no evidence either way; a window with nothing drawn, or a
+  new receiver, starts the count again. This is the quantity the problem was
+  measured in on a CPU-bound Windows laptop: 75-104 ms with the avatar hidden
+  and 172-1187 ms with it drawn, and a 30 fps cap with a lower pixel ratio left
+  page fps at 38-57 while Jim's audio was still hundreds of milliseconds late,
+  which no frame metric can see. Network jitter that persists retires the
+  avatar too, which is intended: when Jim is already late, decoration goes
+  first.
+- **Render budget.** Two consecutive visible windows, each lasting at least two
+  seconds and closing at ten drawn frames or four seconds, whichever comes
+  first. A window is overloaded when more than half its time went to gaps past
+  45 ms between frames, or when more than half its synchronous draws took over
+  8 ms. Cadence is judged by time because counting slow frames missed a page
+  frozen in bursts: three quick frames and a 1.5 s stall, repeated, is 94%
+  stalled with only a quarter of its frames slow. Cost is judged by frames so
+  that one shader compilation or long task, however long, cannot decide on its
+  own. One window was not enough: the first one after the preflight lands on
+  the page joining the room and publishing its tracks, which is start-up work
+  rather than sustained load. With the four-second close, a page frozen by
+  rendering is retired within about ten seconds however slow or bursty its
+  frames are. Hidden tabs, the preflight overlay and the narrow layout pause
+  the loop and reset the window, and the playout watch stops with it: its timer
+  runs only while frames are drawn, and a stats answer that arrives after a
+  pause or a track replacement is discarded.
+
+Retiring the avatar cancels its frame callback, stops the stats poll, disposes
+the model and releases its audio analyser and context. Jim's audio playback and
+captions continue, and the neutral panel explains the change. It stays off
+rather than repeatedly testing whether rendering can compete with audio again.
+The console records which signal fired and the number that decided it, as
+`codetrial avatar_playout_delayed 412ms` or `codetrial avatar_budget_exceeded
+stalled=62% expensive=8%`, since the thresholds above are calibrated on one
+reported machine and real sessions are how they get checked.
+
+The Hide avatar button gives the candidate the same voice-only path at any
+time once the preflight has closed, including while the model is still
+loading. Hiding, or leaving, during the load aborts the download and stops
+before the renderer is imported or a WebGL context is built, so the CPU the
+candidate asked for is not spent on a model that would only be disposed.
+
+The Windows/Chrome CPU-stress experiment described above remains the end-to-end
+validation for jitter-buffer delay; deterministic tests cover both signals, the
+fallback and its lifecycle.

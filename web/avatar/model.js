@@ -106,7 +106,11 @@ export async function evictSuperseded(caches) {
 /// so naming it is mandatory. A wrong deadline is a wait, and the only caller
 /// that wants a different one is a test: expiring a real 60-second signal is not
 /// something `node --test` can sit through.
-export async function modelBytes(url, cache, expected, deadline) {
+///
+/// `cancel` is the candidate turning the avatar off mid-load. It joins the
+/// deadline rather than replacing it, so the download stops for whichever comes
+/// first, and `onceMore` sees an aborted signal and does not retry.
+export async function modelBytes(url, cache, expected, deadline, cancel) {
   // The whole read is inside the catch, not just the open. `match` and the body
   // read reject on a storage backend that went away mid-session, and `delete`
   // rejects for the same reasons `put` does. Every one of those is a cache that
@@ -141,6 +145,9 @@ export async function modelBytes(url, cache, expected, deadline) {
   // twice fails the second time for the reason it failed the first, and the
   // read above has already deleted it anyway.
   deadline ??= AbortSignal.timeout(LOAD_TIMEOUT_MS);
+  // Older engines without `AbortSignal.any` still stop at the steps in
+  // `loadAvatarModel`, just not mid-download.
+  if (cancel && AbortSignal.any) deadline = AbortSignal.any([deadline, cancel]);
   const bytes = await onceMore(
     () => download(url, expected, deadline),
     deadline,
@@ -390,13 +397,19 @@ async function store(cache, url, bytes) {
 /// demonstrated, and it is the one place where quietly loading 11 MB of
 /// unverified third-party geometry would matter most. A browser that cannot
 /// check the pin gets the neutral panel, which is a state the page already has.
-export async function loadModelBytes() {
+export async function loadModelBytes(signal) {
   if (!globalThis.crypto?.subtle) {
     throw new Error(
       "the avatar model cannot be verified without a secure context",
     );
   }
-  return modelBytes(MODEL_URL, await openModelCache(), MODEL_SHA256);
+  return modelBytes(
+    MODEL_URL,
+    await openModelCache(),
+    MODEL_SHA256,
+    undefined,
+    signal,
+  );
 }
 
 /// Bytes first, then the renderer, in the one place that knows both.
@@ -409,8 +422,15 @@ export async function loadModelBytes() {
 ///
 /// `vrm.js` is still reached by dynamic import and only from here, so nothing
 /// pulls Three.js into a `node --test` run that merely imports this module.
-export async function loadAvatarModel(mount) {
-  const bytes = await loadModelBytes();
+///
+/// An aborted `signal` stops before each expensive step: the 730 KB renderer
+/// import, and the WebGL context and glTF parse after it. Hiding the avatar is
+/// how a candidate under load asks for their CPU back, and a load that ran to
+/// the end only to be disposed spent it anyway.
+export async function loadAvatarModel(mount, signal) {
+  const bytes = await loadModelBytes(signal);
+  signal?.throwIfAborted();
   const renderer = await import("./vrm.js");
+  signal?.throwIfAborted();
   return renderer.loadVrm({ mount, bytes });
 }

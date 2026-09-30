@@ -1,0 +1,6 @@
+# The rule set is named rather than inherited. Ruff 0.16 widened its defaults,
+# so the same tree passed under the version CI pins and failed 32 times under
+# the one a contributor had installed. These are the defaults the gate was
+# written against; adopting another rule is a decision made here.
+[lint]
+select = ["E4", "E7", "E9", "F"]

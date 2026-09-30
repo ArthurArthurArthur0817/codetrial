@@ -470,7 +470,8 @@ p {
 /* Floating, not docked. Fixed to the editor's top-right and clear of the
    toolbar, so it never covers Run tests and never competes with the sidebar
    for width. pointer-events are off for the stage and back on only for the
-   credit link, so the avatar can never swallow a click meant for the editor. */
+   Hide avatar control and captions, so the panel itself never swallows a click
+   meant for the editor. */
 .jim-stage {
   position: fixed;
   top: 4.25rem;
@@ -511,13 +512,29 @@ p {
   display: block;
 }
 
+.hide-avatar {
+  pointer-events: auto;
+  margin-top: 0.35rem;
+}
+
+/* Read by assistive technology, never drawn. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 @media (max-width: 1200px) {
   /* Below this the editor is narrow enough that a floating panel starts eating
      code rather than decorating it. The AVATAR goes, not the stage: captions
      are the accessible transcript of what Jim is saying, and hiding the whole
      stage took them away from exactly the narrow windows most likely to need
      them. They move to the bottom corner, clear of the toolbar entirely. */
-  .jim-avatar {
+  .jim-avatar,
+  .hide-avatar {
     display: none;
   }
 

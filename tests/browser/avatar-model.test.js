@@ -966,3 +966,23 @@ test("a warm cache hit builds no deadline it will not use", async () => {
     "the network was never reached, so nothing needed a deadline",
   );
 });
+
+test("a cancelled load stops the download and is not retried", async () => {
+  // Hiding the avatar mid-load is a candidate asking for their CPU back. The
+  // cancel joins the deadline, so the transfer stops and `onceMore` sees an
+  // aborted signal rather than a blip worth a second attempt.
+  const cancel = new AbortController();
+  const signals = [];
+  await assert.rejects(
+    withFetch(
+      async (_url, init) => {
+        signals.push(init.signal);
+        cancel.abort();
+        throw new TypeError("aborted");
+      },
+      () => modelBytes("model-url", null, PIN, undefined, cancel.signal),
+    ),
+  );
+  assert.equal(signals.length, 1, "an abort is not retried");
+  assert.equal(signals[0].aborted, true, "the fetch carried the cancel");
+});
