@@ -1,6 +1,6 @@
 ---
 name: codetrial-contribute
-description: Help CodeTrial contributors turn observations into clear English GitHub issues, small contribution plans, and pull request descriptions. Use to draft, improve or file a CodeTrial issue, prepare a PR description, ask a focused maintainer question, or choose a bounded first contribution with an AI agent. The deliverable is copy-ready text; judging an existing backlog for duplicates is codetrial-issue-triage. Opening a PR goes through gh-submit when it is installed; this skill covers it otherwise.
+description: Help CodeTrial contributors turn observations into clear English GitHub issues, small contribution plans, and pull request descriptions. Use to draft, improve or file a CodeTrial issue, prepare a PR description, ask a focused maintainer question, or choose a bounded first contribution with an AI agent. The deliverable is copy-ready text; judging an existing backlog for duplicates is codetrial-triage. Opening a PR goes through gh-submit when it is installed; this skill covers it otherwise.
 ---
 
 # Contribute to CodeTrial
@@ -25,10 +25,10 @@ the artifact the user asked for.
 
 Check existing open and closed issues and related PRs first, using the retrieval
 and comparison workflow in
-[codetrial-issue-triage](../codetrial-issue-triage/SKILL.md). If a report already
+[codetrial-triage](../codetrial-triage/SKILL.md). If a report already
 covers the problem, offer a focused addition to that thread with new evidence.
 When the deliverable is instead a verdict on someone else's thread, that comment
-is codetrial-issue-triage's. If GitHub access is unavailable, still prepare the
+is codetrial-triage's. If GitHub access is unavailable, still prepare the
 draft and explicitly mark the duplicate search as unverified.
 
 Use the information already available in notes, logs and the checkout. Ask only

@@ -111,8 +111,11 @@ timeout check whether the write landed before retrying.
 
 Drafting an issue or PR body, or planning a first contribution, is
 [codetrial-contribute](../codetrial-contribute/SKILL.md). Reviewing the backlog
-for duplicates and incomplete reports is
-[codetrial-issue-triage](../codetrial-issue-triage/SKILL.md).
+for duplicates and incomplete reports, and sweeping the open pull requests, is
+[codetrial-triage](../codetrial-triage/SKILL.md). Approving a held workflow
+run, resolving an outdated review thread, hiding a superseded review and
+posting its fixed rebase request need no per-thread approval of text; that
+skill says when a sweep applies them without a separate confirmation.
 
 ## Pull request branches and review replies
 
