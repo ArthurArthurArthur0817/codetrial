@@ -118,19 +118,15 @@ without running it is caught here.
 
 ## Writing a test
 
-No test code goes under `src/`; codetrial-conventions has the rule and the
-four things that bite when it is applied carelessly. Which of the two kinds you
-are writing is decided by what the test needs to see:
+No test code goes under `src/`; codetrial-conventions has that rule and the four
+things that bite when it is applied carelessly. Which of the two kinds you are
+writing follows from what the test needs to see:
 
-- Reaching a private or `pub(crate)` item makes it a unit test. It goes in
-  `tests/unit/`, mirroring the path under `src/`, and the `src/` file declares
-  it with `#[cfg(test)] #[path = "..."] mod tests;`. Adding a new one means
-  adding that declaration too, or the file compiles and the test never runs.
-- Reaching only the public API makes it an integration test, and it goes in
-  `tests/*.rs` beside the suites already there. Those link the plain rlib, so a
-  `#[cfg(test)]` item is invisible to them: the two halves cannot share a
-  module, which is why `tests/common/` exists for what the integration tests
-  share and why the same credential predicate is deliberately written twice.
+- Reaching a private or `pub(crate)` item makes it a unit test. It goes under
+  `tests/unit/`, mirroring the path under `src/`, declared from the `src/` file
+  with `#[cfg(test)] #[path = "..."] mod tests;`.
+- Reaching only the public API makes it an integration test, so it goes in
+  `tests/*.rs` beside the suites already there.
 
 Browser tests go in `tests/browser/*.test.js` under `node --test`, Python tests
 in `tests/test_*.py` under `scripts/run-python-tests.py`, which runs a file's
