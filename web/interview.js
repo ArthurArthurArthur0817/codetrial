@@ -526,6 +526,34 @@ function bindEvents() {
   nodes.forceReport.addEventListener("click", showReport);
   nodes.leaveRoom.addEventListener("click", leaveRoom);
   nodes.run.addEventListener("click", runTests);
+  // Cmd+Enter or Ctrl+Enter runs the tests from anywhere but another text
+  // field. Those keep the chord, since on some platforms it types a line break
+  // there, as in the report's STAR answers. The button's disabled state is the
+  // guard, but the button stays enabled during the media preflight and after
+  // the interview ends, so those are checked here. Everywhere else the chord
+  // is taken, so it never types a newline into the code or presses the
+  // focused button.
+  document.addEventListener("keydown", (event) => {
+    // Some input methods end composition before its confirming keydown. The
+    // legacy IME code remains 229 even when isComposing is already false.
+    if (
+      event.key !== "Enter" ||
+      !(event.metaKey || event.ctrlKey) ||
+      event.shiftKey ||
+      event.altKey ||
+      event.isComposing ||
+      event.keyCode === 229
+    )
+      return;
+    if (
+      event.target !== nodes.editor &&
+      event.target.matches?.("textarea, input")
+    )
+      return;
+    event.preventDefault();
+    if (event.repeat) return;
+    if (nodes.audioCheck.hidden && !codingClosed()) nodes.run.click();
+  });
   nodes.candidateCaseAdd.addEventListener(
     "click",
     () => void addCandidateCase(),
