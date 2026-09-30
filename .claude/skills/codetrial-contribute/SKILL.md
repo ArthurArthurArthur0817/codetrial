@@ -26,8 +26,9 @@ Check existing open and closed issues and related PRs first, using the retrieval
 and comparison workflow in
 [codetrial-issue-triage](../codetrial-issue-triage/SKILL.md). If a report already
 covers the problem, offer a focused addition to that thread with new evidence.
-If GitHub access is unavailable, still prepare the draft and explicitly mark
-the duplicate search as unverified.
+When the deliverable is instead a verdict on someone else's thread, that comment
+is codetrial-issue-triage's. If GitHub access is unavailable, still prepare the
+draft and explicitly mark the duplicate search as unverified.
 
 Use the information already available in notes, logs and the checkout. Ask only
 for missing facts that change the report's meaning. Never invent reproduction
@@ -38,13 +39,11 @@ Choose the smallest useful structure:
 
 - **Bug**: concrete symptom, expected and actual results, numbered minimal
   reproduction steps, relevant version/environment, and a short sanitized error
-  or other evidence. Identify the build by revision, not by date: published
-  binaries move under a rolling tag, as `docs/install.md` explains, so a date
-  does not name a build and triage cannot separate a regression from a stale
-  report without it. Ask first what the binary reports about itself; when it
-  reports nothing, say the revision is unknown and give the exact download
-  timestamp, which still bounds the build from above and rules a later fix out
-  of it.
+  or other evidence. Identify the build by revision rather than by date, since
+  published binaries move under a rolling tag (`docs/install.md`); triage has why
+  that makes a date one-directional. Ask first what the binary reports about
+  itself; when it reports nothing, say the revision is unknown and give the exact
+  download timestamp, which still bounds the build from above.
   For an interview failure, browser/OS, interview mode, provider, session stage
   and reconnect timing are the usual candidates; ask only for those that
   matter. Record frequency or regression range when known.

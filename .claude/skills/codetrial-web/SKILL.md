@@ -90,5 +90,6 @@ claim than it looks: the tree carries none, and the few `#[allow]`s on the Rust
 half each have their reason on the same line. Match that bar or do not suppress
 the rule.
 
-Browser behavior gets a Node test in `tests/browser/*.test.js` and, where it
-needs a real browser, `scripts/browser-check.sh` with Playwright and Chromium.
+Browser behavior also gets a test, in `tests/browser/*.test.js` or, where it
+needs a real browser, `scripts/browser-check.sh`; codetrial-verify has what each
+lane requires.

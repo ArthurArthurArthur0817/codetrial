@@ -195,7 +195,9 @@ The indirection is what keeps both halves of the promise. A test under
 the public API, so moving these outright would have meant publishing internals
 for the tests' benefit. Declared this way they are still unit tests -- same
 module path, `super::` still the containing module, private and `pub(crate)`
-items still in reach -- and none of it is visible to a dependent.
+items still in reach -- and none of it is visible to a dependent. The two halves
+cannot share a module, which is why `tests/common/` exists and why the credential
+predicate is deliberately written twice.
 
 Four rules follow, and each of them cost something to learn:
 
@@ -214,6 +216,5 @@ Four rules follow, and each of them cost something to learn:
   because something in `src/` names it.
 
 Generated files live under `web/` but are owned by `problem-bank/` and by the
-generators in `scripts/`. Editing one by hand is a drift the gate catches.
-See codetrial-verify for what regenerates them and codetrial-web for how
-`web/` reaches a browser.
+generators in `scripts/`; editing one by hand is a drift the gate catches.
+codetrial-verify names the generators.
