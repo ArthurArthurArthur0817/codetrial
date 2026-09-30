@@ -92,7 +92,10 @@ fi
 
 # Prettier finds .prettierrc.json and .prettierignore in the checkout above, so
 # a vendored file staged by name is skipped here as it is in the gate.
-web=$(matching '\.(html|js|mjs|cjs)$')
+#
+# The issue forms come along for the parse, on the grounds in scripts/indent.sh.
+# The hook and the gate have to agree, or a commit passes here and fails there.
+web=$(matching '\.(html|js|mjs|cjs)$|^\.github/ISSUE_TEMPLATE/.*\.ya?ml$')
 if [ -n "$web" ]; then
     if [ -x node_modules/.bin/prettier ]; then
         # shellcheck disable=SC2086

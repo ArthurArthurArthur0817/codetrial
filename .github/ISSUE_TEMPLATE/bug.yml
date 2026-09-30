@@ -1,0 +1,76 @@
+name: Bug report
+description: Report reproducible unexpected behavior
+type: Bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Write the report in English and title it with the concrete symptom, without a category prefix such as `[Bug]`. [CONTRIBUTING.md](https://github.com/sysprog21/codetrial/blob/main/CONTRIBUTING.md) has the rest of the reporting rules; a feature idea, a question, or a design objection goes in a blank issue instead.
+
+        This is a public report. Do not include credentials, session tokens, candidate recordings, or personal interview content. Sanitize logs and screenshots before attaching them.
+
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed behavior
+      description: Describe the concrete symptom and its impact.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: Describe what should have happened instead. For interviewer behavior, say what Jim should have done at that point.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Give minimal numbered steps. If the problem is intermittent, include what preceded it and how often it occurs.
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: CodeTrial version
+      description: Paste the output of `codetrial --version`, or `cargo run -- --version` from a checkout. If neither runs, say so and give the exact time you downloaded the binary, which is what bounds the build when published binaries move under a rolling tag.
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Give the ones that apply, in the shape below. For a disconnect, say how far into the interview it happened and how long it lasted.
+      placeholder: |
+        OS:
+        Browser:
+        Language:
+        Interview loop:
+        Problem:
+        REACTO or STAR step:
+        Reconnect:
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Sanitized evidence
+      description: Add the shortest relevant error, log excerpt, or screenshot.
+
+  - type: checkboxes
+    id: public-data
+    attributes:
+      label: Public data confirmation
+      options:
+        - label: I removed credentials, session tokens, candidate recordings, and personal interview content from this public report.
+          required: true

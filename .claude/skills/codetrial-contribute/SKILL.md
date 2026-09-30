@@ -11,8 +11,9 @@ outcome. Explain unfamiliar terms briefly in their language, then produce an
 English issue or PR draft they can understand and check. Never make a
 questionnaire, skills survey or quiz a prerequisite for help.
 
-Titles, body formatting, issue references, redaction and the rules for writing
-to GitHub follow the GitHub section of
+Titles, body formatting, issue references and redaction follow
+[CONTRIBUTING.md](../../../CONTRIBUTING.md); the rules for writing to GitHub,
+approval included, are in the GitHub section of
 [codetrial-conventions](../codetrial-conventions/SKILL.md). Keep technical
 identifiers and quoted errors exact.
 
@@ -44,9 +45,11 @@ Choose the smallest useful structure:
   that makes a date one-directional. Ask first what the binary reports about
   itself; when it reports nothing, say the revision is unknown and give the exact
   download timestamp, which still bounds the build from above.
-  For an interview failure, browser/OS, interview mode, provider, session stage
-  and reconnect timing are the usual candidates; ask only for those that
-  matter. Record frequency or regression range when known.
+  For an interview failure, `.github/ISSUE_TEMPLATE/bug.yml` is the field list;
+  ask only for the ones that matter. The problem language matters because Python
+  and JavaScript run in the browser while C, C++ and Java run remotely, so one
+  symptom means two different things across that split. Record frequency or
+  regression range when known.
   Unknown details can stay explicitly unknown; a useful report need not
   diagnose a fix.
 - **Feature**: who is affected (candidate, operator or contributor) and in which

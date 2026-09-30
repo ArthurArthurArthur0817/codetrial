@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Search existing issues first
+    url: https://github.com/sysprog21/codetrial/issues?q=is%3Aissue+sort%3Aupdated-desc
+    about: Search open and closed issues before opening a new one.
+  - name: Contributing guide
+    url: https://github.com/sysprog21/codetrial/blob/main/CONTRIBUTING.md
+    about: How a change gets in, and what stays out of a public thread.

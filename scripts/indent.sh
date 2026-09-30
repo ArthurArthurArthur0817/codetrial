@@ -5,6 +5,9 @@
 #
 # One file list and one order, used by `make indent` through --write and by
 # scripts/test.sh through --check, so what gets rewritten is what gets checked.
+# scripts/git-pre-commit.sh mirrors these lists against the index in its own
+# matcher language, and .claude/skills/codetrial-verify/SKILL.md describes them,
+# so a lane added here needs adding in both.
 #
 # The order is not a preference. commentflow puts a blank line before a comment
 # that sits inside a method chain, an array literal or an argument list, and
@@ -47,7 +50,15 @@ shell=$(list '*.sh')
 # calibration harnesses, and leaving it out of the formatter while `ruff check`
 # reads it in the gate is a split nobody can keep track of.
 python=$(list 'scripts/*.py' 'tests/*.py')
-web=$(list '*.html' '*.js' '*.mjs' '*.cjs')
+
+# The issue forms are in this list because Prettier is the only lane here that
+# reads YAML: actionlint takes .github/workflows and stops. An unquoted colon in
+# a description is a mapping where YAML wants a scalar, and GitHub answers the
+# issue chooser with a parse error for it. Syntax only, so a mistyped key or an
+# element `type` the schema does not have formats clean and still breaks the
+# chooser: a green lane here is not a rendered form.
+web=$(list '*.html' '*.js' '*.mjs' '*.cjs' \
+    '.github/ISSUE_TEMPLATE/*.yml' '.github/ISSUE_TEMPLATE/*.yaml')
 prettier=node_modules/.bin/prettier
 
 have()

@@ -42,9 +42,10 @@ puts a blank line before a comment inside a method chain and `cargo fmt` takes
 it straight back out, so `commentflow --check` alone can never be satisfied on
 Rust. `make indent` runs the same script with `--write`, so the fix for a
 failure is always that one command. Never pass `shfmt` a style flag; it reads
-`.editorconfig`. Prettier, for HTML and JavaScript, sits beside the chain
-rather than in it: it shares no file with the others, so the check runs it in
-place with `--cache`, alongside the copy. Without `npm ci` it skips with a note.
+`.editorconfig`. Prettier sits beside the chain rather than in it: it shares no
+file with the others, so the check runs it in place with `--cache`, alongside
+the copy. Its file set is in `scripts/indent.sh` and includes the issue forms,
+which ride along to be parsed. Without `npm ci` it skips with a note.
 
 ## Drift is the usual failure
 
@@ -101,7 +102,7 @@ retry.
 commit nor sneaks through one, plus `commentflow --check` and `shfmt -d` on
 staged shell. It does not build, test or check generated-artifact drift; that
 is what the gate is for. `scripts/git-commit-msg.sh` holds the message to the
-rules in codetrial-conventions, `scripts/git-prepare-commit-msg.sh` splices the
+rules it prints with `--rules`, `scripts/git-prepare-commit-msg.sh` splices the
 template above a `commit -v` scissors line, and `scripts/git-pre-push.sh`
 replays the rules over commits a rebase or an amend rewrote after the fact.
 `make hooks` installs every `scripts/git-*.sh`, so adding one there installs

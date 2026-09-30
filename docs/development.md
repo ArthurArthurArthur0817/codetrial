@@ -58,15 +58,22 @@ indent` runs it with `--write` and the gate runs it with `--check`, against a
 copy of the tree so a check never rewrites what it is judging. `shfmt` takes
 its style from `.editorconfig` and is passed no style flags anywhere.
 
-`npm ci` installs the pinned Prettier version used for HTML and JavaScript
-(`.js`, `.mjs` and `.cjs`). Its style lives in `.prettierrc.json`;
-`.prettierignore` excludes vendored and generated files. Prettier shares no
-file with the rest of the chain, so the check runs it in place rather than on
-the copy, alongside the chain, with `--cache` so a rerun skips unchanged
-files. The generated problem-card section in `web/index.html` has a
-`prettier-ignore` marker so the rest of the page can be formatted without
-changing the generator's output. As with the other formatter lanes, an absent
-Prettier is reported and skipped locally; CI installs it through `npm ci`.
+`npm ci` installs the pinned Prettier version used for HTML, JavaScript (`.js`,
+`.mjs` and `.cjs`) and the issue forms under `.github/ISSUE_TEMPLATE/`. The
+forms ride along because Prettier is the only lane that parses their YAML, for
+the reason `scripts/indent.sh` gives. It checks syntax and not the form schema,
+so a mistyped key or an unknown element `type` formats clean and still breaks
+the issue chooser: only GitHub, or the published schema at
+`json.schemastore.org`, judges that.
+
+Prettier's style lives in `.prettierrc.json`; `.prettierignore` excludes
+vendored and generated files. Prettier shares no file with the rest of the
+chain, so the check runs it in place rather than on the copy, alongside the
+chain, with `--cache` so a rerun skips unchanged files. The generated
+problem-card section in `web/index.html` has a `prettier-ignore` marker so the
+rest of the page can be formatted without changing the generator's output. As
+with the other formatter lanes, an absent Prettier is reported and skipped
+locally; CI installs it through `npm ci`.
 
 The commits that only reformatted are listed in `.git-blame-ignore-revs`, so
 `git blame` skips them. GitHub reads the file on its own; a local blame needs

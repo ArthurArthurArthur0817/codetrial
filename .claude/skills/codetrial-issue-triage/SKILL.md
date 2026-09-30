@@ -6,8 +6,10 @@ description: Review CodeTrial GitHub issues, find duplicates or incomplete repor
 # Triage CodeTrial issues
 
 Make the backlog easier to act on without discouraging people learning through
-AI-assisted contributions. Title, redaction and repository rules are in the
-GitHub section of [codetrial-conventions](../codetrial-conventions/SKILL.md). Use
+AI-assisted contributions. Title and redaction rules are in
+[CONTRIBUTING.md](../../../CONTRIBUTING.md); which repository `gh` is pointed at
+and what needs approval first are in the GitHub section of
+[codetrial-conventions](../codetrial-conventions/SKILL.md). Use
 [codetrial-contribute](../codetrial-contribute/SKILL.md) when the deliverable is a
 new issue or PR draft rather than a backlog report.
 
