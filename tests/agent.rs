@@ -21,6 +21,7 @@ fn instructions(problem: &Problem, duration_min: u32) -> String {
         &InterviewProfile::default(),
         &InterviewGrounding::default(),
         InterviewLoop::CodingBehavioral,
+        false,
     )
 }
 
@@ -266,6 +267,15 @@ fn prompt_samples() -> Value {
             &full_profile,
             &InterviewGrounding::default(),
             InterviewLoop::CodingBehavioral,
+            false,
+        ),
+        "instructionsExamplesHidden": build_instructions_for_plan(
+            problem,
+            45,
+            &InterviewProfile::default(),
+            &InterviewGrounding::default(),
+            InterviewLoop::CodingBehavioral,
+            true,
         ),
         "greeting": greeting(problem),
         "languageChoice": language_choice("C++", LanguageChoiceContext::Start),

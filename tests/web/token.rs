@@ -264,6 +264,33 @@ fn token_grounding_is_signed_only_after_valid_consent_and_shape() {
     }
 }
 
+/// Only a literal true hides the examples. Any other value, or none, mints the
+/// metadata a session that never saw the checkbox would, so the interviewer is
+/// told the examples are on screen.
+#[test]
+fn token_carries_hidden_examples_only_when_true() {
+    let config = TokenConfig {
+        api_key: "key",
+        api_secret: "secret",
+        server_url: "wss://example.test",
+        recording_max_min: None,
+    };
+    let metadata = |body: &[u8]| -> Value {
+        let response = token_response(&config, body, "room", "candidate", 2_000).unwrap();
+        serde_json::from_str(claims(&response.token)["metadata"].as_str().unwrap()).unwrap()
+    };
+
+    assert_eq!(metadata(br#"{"hideExamples":true}"#)["hideExamples"], true);
+    for body in [
+        br#"{}"#.as_slice(),
+        br#"{"hideExamples":false}"#.as_slice(),
+        br#"{"hideExamples":"true"}"#.as_slice(),
+        br#"{"hideExamples":1}"#.as_slice(),
+    ] {
+        assert!(metadata(body).get("hideExamples").is_none());
+    }
+}
+
 /// The server names the candidate; a name the body carries is ignored.
 ///
 /// Both halves are one assertion pair on purpose. The body below asks for

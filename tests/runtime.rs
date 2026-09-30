@@ -107,6 +107,7 @@ fn bootstrap_owns_validated_round_plan_and_budgets() {
             profile: InterviewProfile::default(),
             grounding: InterviewGrounding::default(),
             interview_loop: InterviewLoop::CodingOnly,
+            ..RuntimeOptions::default()
         },
     );
     assert_eq!((coding.coding_minutes, coding.behavioral_minutes), (45, 0));
@@ -124,6 +125,7 @@ fn bootstrap_owns_validated_round_plan_and_budgets() {
             profile: InterviewProfile::default(),
             grounding: InterviewGrounding::default(),
             interview_loop: InterviewLoop::CodingBehavioral,
+            ..RuntimeOptions::default()
         },
     );
     assert_eq!(

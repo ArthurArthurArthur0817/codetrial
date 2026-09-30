@@ -995,6 +995,9 @@ async function connect(preflight, presenting = false) {
       throw new Error("Agree to the recording notice before starting.");
     const interviewId = await recordConsent();
     state.interviewId = interviewId;
+    // `hideExamples` goes only when ticked, so Jim is not told the examples are
+    // on a screen that does not show them. The preflight holding the box is
+    // closed for good by now, so this is the choice the page renders.
     const response = await fetch("/api/token", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1005,6 +1008,7 @@ async function connect(preflight, presenting = false) {
         interviewLoop,
         interviewProfile,
         ...(interviewGrounding ? { interviewGrounding } : {}),
+        ...(nodes.hideExamples.checked ? { hideExamples: true } : {}),
       }),
     });
     if (!response.ok)

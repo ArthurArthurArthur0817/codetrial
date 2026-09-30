@@ -144,8 +144,8 @@ const ROUND_TRANSITION_SKEW: std::time::Duration = std::time::Duration::from_sec
 /// `the_time_warning_threshold_is_the_same_number_on_both_sides`.
 pub const TIME_WARNING_S: u64 = 300;
 
-pub const INTERVIEW_CONTRACT_BUNDLE_VERSION: u32 = 22;
-pub const LIVE_PROMPT_VERSION: u32 = 14;
+pub const INTERVIEW_CONTRACT_BUNDLE_VERSION: u32 = 23;
+pub const LIVE_PROMPT_VERSION: u32 = 15;
 pub const REPORT_PROMPT_VERSION: u32 = 15;
 pub const RUBRIC_VERSION: u32 = 1;
 pub const REPORT_SCHEMA_VERSION: u32 = 2;
@@ -1861,6 +1861,8 @@ pub struct MetadataConfig {
     pub interview_loop: InterviewLoop,
     pub profile: InterviewProfile,
     pub grounding: InterviewGrounding,
+    /// The candidate hid the worked examples in the preflight.
+    pub examples_hidden: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -2134,6 +2136,7 @@ pub fn parse_participant_metadata(metadata: Option<&str>) -> MetadataConfig {
     );
     let profile = sanitize_interview_profile(value.get("interviewProfile"));
     let grounding = sanitize_interview_grounding(value.get("interviewGrounding"));
+    let examples_hidden = value.get("hideExamples") == Some(&serde_json::Value::Bool(true));
 
     MetadataConfig {
         problem,
@@ -2141,6 +2144,7 @@ pub fn parse_participant_metadata(metadata: Option<&str>) -> MetadataConfig {
         interview_loop,
         profile,
         grounding,
+        examples_hidden,
     }
 }
 

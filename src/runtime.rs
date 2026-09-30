@@ -46,6 +46,7 @@ pub struct RuntimeOptions {
     pub profile: InterviewProfile,
     pub grounding: InterviewGrounding,
     pub interview_loop: InterviewLoop,
+    pub examples_hidden: bool,
 }
 
 pub fn bootstrap<'a>(
@@ -74,6 +75,7 @@ pub fn bootstrap_with_rounds<'a>(
         profile,
         grounding,
         interview_loop,
+        examples_hidden,
     } = options;
     let problem = get_problem(problem_id);
     let duration_min = duration_min.clamp(MIN_DURATION_MIN, MAX_DURATION_MIN);
@@ -95,6 +97,7 @@ pub fn bootstrap_with_rounds<'a>(
             &profile,
             &grounding,
             interview_loop,
+            examples_hidden,
         ),
         profile,
         grounding,

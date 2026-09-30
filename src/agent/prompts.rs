@@ -114,6 +114,7 @@ pub fn build_instructions_for_plan(
     profile: &InterviewProfile,
     grounding: &InterviewGrounding,
     interview_loop: InterviewLoop,
+    examples_hidden: bool,
 ) -> String {
     let metadata = problem.question_metadata();
     let [_, optimal_point, pitfalls_point] = metadata.expected_discussion_points;
@@ -184,6 +185,24 @@ pub fn build_instructions_for_plan(
     } else {
         star_policy()
     };
+
+    // The page draws the worked examples unless the candidate hid them in the
+    // preflight. Hidden, a hint or clarification that mentions an example must
+    // not send them looking for one, and the Example step is theirs to fill.
+    let on_screen = if examples_hidden {
+        "the candidate's screen shows this scenario and the function to
+implement, but not the constraints or edge-case policies, which come out of the
+conversation as they would with a person. The candidate chose to hide the worked
+examples, so none are on their screen: never point them at an example. When a
+clarification below or a hint clue mentions an example, say it with a case they
+proposed or a small case of your own. If they ask you for an example in the
+Example step, ask them to propose an ordinary and a boundary case first, and give
+one small example only once they have tried or are stuck."
+    } else {
+        "the candidate's screen shows this scenario, the function to
+implement and one or two worked examples, but not the constraints or edge-case
+policies, which come out of the conversation as they would with a person."
+    };
     let policies = [
         reacto_policy().to_string(),
         star_round_policy,
@@ -231,9 +250,7 @@ SESSION LANGUAGE AND SPEECH RECOGNITION
   or decide a step is complete. Unicode identifiers and quoted examples alone
   are not recognition errors.
 
-THE EXERCISE — the candidate's screen shows this scenario, the function to
-implement and one or two worked examples, but not the constraints or edge-case
-policies, which come out of the conversation as they would with a person.
+THE EXERCISE — {on_screen}
 - Exercise: {exercise_title} ({})
 - On screen: {brief}
 

@@ -1778,6 +1778,7 @@ fn candidate_bootstrap<'a>(
             profile: candidate.profile,
             grounding: candidate.grounding,
             interview_loop: candidate.interview_loop,
+            examples_hidden: candidate.examples_hidden,
         },
     )
 }
