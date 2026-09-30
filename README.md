@@ -227,6 +227,7 @@ recorded rather than left implicit. See
 
 | Document | Covers |
 |---|---|
+| [Contributing](CONTRIBUTING.md) | Reporting a bug, the commit and title rules, opening a pull request |
 | [Development](docs/development.md) | The gate, formatters, hooks, generated files, releases |
 | [Installing a binary](docs/install.md) | Published binaries, platform notes, the config beside them |
 | [Interview length](docs/interview-length.md) | What the lobby offers and what the endpoints enforce |

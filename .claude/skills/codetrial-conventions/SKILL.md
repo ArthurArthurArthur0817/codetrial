@@ -8,39 +8,32 @@ description: The CodeTrial conventions the gate does not settle on its own, seve
 The gate settles formatting and correctness. `cargo fmt`, Prettier, ESLint,
 `ruff` and `shellcheck` run in `scripts/test.sh`, so none of that is here. What
 is here is what a reviewer would otherwise have to say out loud, plus the rules
-the git hooks enforce, so an agent knows them before a hook refuses: the commit
-message, the staged-content checks, and the branch a pull request is opened
-from. Install them with `make hooks`.
+the git hooks enforce, so an agent knows them before a hook refuses. Install
+them with `make hooks`.
 
-`README.md` is the tracked half and this file does not restate it. Where the
-two speak to the same thing, `README.md` wins.
+Two tracked files carry the rest, and this one restates neither. `README.md`
+wins on what the project is and how it runs.
+[CONTRIBUTING.md](../../../CONTRIBUTING.md) is the public half of the rules
+below, the commit message, the issue and pull request register, and the branch a
+pull request comes from, and it wins where the two disagree. Read it. What is
+left here is the agent's half: the calibration this tree's own log gives, which
+repository `gh` is pointed at, how drafted text reaches it, and what needs the
+user's approval first.
 
 ## Commit messages
 
-The house style is Chris Beams' seven rules, and `scripts/git-commit-msg.sh`
-enforces the mechanical ones: subject within 50 characters, capitalized,
-imperative, no trailing period, no backticks, no conventional-commit prefix,
-body wrapped at 72, printable ASCII throughout. Run
-`git log --no-merges --format=%s | awk '{print length}' | sort -n` if you want
-the calibration set rather than a number here that drifts with every commit.
-
-The rule the hook cannot check is what the body says. This tree keeps its
-detailed reasoning in the comment next to the code, often several paragraphs
-per decision. A body that retells the mechanics duplicates that comment and
-then goes stale on its own. Write the premise and the trade, once, usually a
-single paragraph:
+`./scripts/git-commit-msg.sh --rules` prints what the hook enforces, and
+`CONTRIBUTING.md` says what the body has to carry. Neither gives the
+calibration, so run this when a subject is hard to fit:
 
 ```
-Bound a video frame by the memory it will take
-Refuse a permission listing that may be truncated
-Prove an empty test run is not a pass
+git log --no-merges --format=%s | awk '{print length}' | sort -n
 ```
 
 ## Prose register
 
-Source comments and commit messages are ASCII: no em dash, no typographic
-quote, no arrow character, no CJK. Markdown files are exempt and use ordinary
-GitHub Markdown, so a backtick belongs in `docs/` and not in a commit subject.
+Markdown files are exempt from the ASCII rule and use ordinary GitHub Markdown,
+so a backtick belongs in `docs/` and not in a commit subject.
 
 Chinese, and CJK generally, stays out of `src/`, `web/` and `tests/` even when
 the conversation that produced the change was in Chinese. The product's
@@ -51,10 +44,9 @@ the comment that the byte width is the point.
 
 ## Comments
 
-Brevity is part of correctness, but the bar here is rationale rather than
-length: this tree carries long comments where the reasoning is long, and the
-rule is that every line of one says something the code cannot. Delete anything
-restating the statement below it.
+Every line of a comment says something the code cannot, and this tree carries
+long ones where the reasoning is long. Delete anything restating the statement
+below it.
 
 - Bad: `let deadline = start + duration; // add the duration`
 - Good: `let deadline = start + duration; // truncated to whole minutes above,
@@ -75,61 +67,35 @@ of the tree the same way: a scratch directory, not a new tracked file.
 
 ## Contracts that refuse a change
 
-`docs/` holds decisions already made, and some of them refuse a change that
-looks obviously right. Find the owning document and read the rule there before
-proposing work in its area. Never restate one of these rules from memory or
-from this file: a paraphrase drifts, and the document is what binds.
+`CONTRIBUTING.md` names the owning documents and the rule that a document
+refusing your change is the answer rather than an oversight. Two things it does
+not say.
 
-`docs/provider-cost-and-degradation.md` owns what an interview may spend, what
-bounds a misbehaving provider, what may be cached, and what the candidate sees
-when a provider fails. `docs/observable-delivery-policy.md` owns what a report
-may say about a person, `docs/recording-contract.md` owns what happens to
-candidate media, and the rest of `docs/` owns its area the same way. The
-compatibility promise is below, under deleting a surface.
+Never restate one of these rules from memory or from this file: a paraphrase
+drifts, and the document is what binds.
 
-A document that refuses your change is the answer, not an oversight waiting to
-be fixed. "Persist the finished session and regenerate the report later" reads
-as an obvious improvement, and the caching rule refuses it. The move is to
-propose changing that document on purpose, with the reason, or to leave it
-alone.
+And what being refused looks like. "Persist the finished session and regenerate
+the report later" reads as an obvious improvement, and the caching rule in
+`docs/provider-cost-and-degradation.md` refuses it. The move is to propose
+changing that document on purpose, with the reason, or to leave it alone.
 
 ## Deleting a surface
 
-A subcommand, flag or helper that turns out to be redundant gets deleted,
-along with its call sites in the Makefile, the scripts, the README and the
-tests. It does not become an alias and it does not get a deprecation warning.
-"Never break userspace" here means the compatibility contract the golden
-fixtures in `tests/golden/` and the versions recorded in
-`docs/interview-contract-versions.md` describe, not the convenience surface of
-the CLI.
+In `CONTRIBUTING.md`, together with the compatibility promise it answers to.
 
 ## GitHub issues and pull requests
+
+`CONTRIBUTING.md` has the register, the titles, the bodies, the redaction rule
+and the branch rules. What follows is only what an agent needs on top of them.
 
 Conversation may use the contributor's language; everything posted to GitHub is
 clear English, with identifiers and error messages kept verbatim. The target is
 `sysprog21/codetrial`; pass `--repo sysprog21/codetrial` to `gh`, because on a
 fork or a copy the checkout's default resolves elsewhere.
 
-A title carries no category, type or area prefix: no `[Bug]`, `[Feature]`,
-`Bug:`, `feat:`, `fix(web):` or `web:`. Labels do the classifying. Brackets that
-are part of the text, such as `argv[0]`, stay. An issue title names the symptom
-or the desired outcome:
-
-- `[Bug] Interview broken` becomes `Interview does not resume after reconnecting`.
-- `[Feature] Add export` becomes `Allow candidates to download interview feedback`.
-
-A PR title follows the commit subject rules above; a single-commit PR reuses
-its subject.
-
-Issue and PR bodies are read in a browser, so write each paragraph as one line;
-the 72-column wrap is for commit messages only. A PR that finishes an issue ends
-with `Closes #N` alone on the last line; one that only touches it ends with
-`Refs #N` there instead.
-
-Nothing public carries credentials, session tokens, candidate recordings or
-personal interview content; redact logs before pasting them. The repository has
-no private security channel, so a vulnerability report goes to the user to hand
-to a maintainer, never into a public issue.
+A vulnerability report goes to the user to hand to a maintainer, never into a
+public issue. A public thread may carry a request for a private contact and
+nothing else.
 
 Nothing is written to GitHub until the user has approved the exact text, by
 saying yes to it or by dictating it and asking for it to be posted. The approval
@@ -150,19 +116,10 @@ for duplicates and incomplete reports is
 
 ## Pull request branches and review replies
 
-Open a pull request from a topic branch, never from `main`, and that includes
-the `main` of a fork. A pull request follows its head branch rather than a set
-of commits, so one opened from `main` takes in every later push there, and the
-next change cannot start until it merges. Branch from an up-to-date `main`, keep
-one change per branch, and update the pull request by pushing to that same
-branch, force-pushing after a rebase. The pre-push hook refuses new work on a
-fork's `main`, and CI fails a pull request opened from one; syncing a fork's
-`main` with upstream is still allowed.
-
-The commit body carries what and why. A review thread carries a correction, a
-measurement or nothing: no pasted agent walkthroughs, no severity tables, no
-re-summarizing a diff git already shows. Close an addressed thread with
-"Resolve conversation".
+The branch rules and what a review thread may carry are in `CONTRIBUTING.md`.
+The addition here is why the thread stays thin: the commit body already carries
+what and why, so a reply that re-summarizes the diff is telling the reviewer
+what git is showing them.
 
 ## Layout
 
@@ -178,8 +135,8 @@ tests/common/   What the integration tests share
 
 `src/` holds implementation. A file there may declare a test module, and may
 carry a `#[cfg(test)]` item that a test needs to reach, but must not contain a
-test body. `grep -rn '#\[test\]' src/` returns nothing, and that is the check
-that keeps being true.
+test body. No gate lane enforces that, so `grep -rn '#\[test\]' src/` is the
+check, and it returns nothing today.
 
 ```rust
 #[cfg(test)]
