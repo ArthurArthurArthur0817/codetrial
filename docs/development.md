@@ -14,10 +14,18 @@ no static analysis of the shell, the workflows, the Python, or the dependency
 tree. The summary names each one; these are what they need.
 
 ```bash
-npx playwright install chromium   # ~30 browser tests, the whole lobby flow
-npm install                       # eslint
+npm ci                            # ESLint and Prettier, pinned
+npx playwright install chromium   # the browser tests, the whole lobby flow
 cargo install cargo-audit         # the dependency advisory scan
 ```
+
+The gate picks its own compiler and Python, so running it directly builds with
+the same Clang `make` would. On Linux x86_64 with no `CXX` set, it uses the checksum-pinned
+Clang that `make` fetches into `target/clang`, fetching it just before the
+first lane that compiles. It runs the Python lanes with the first Python 3.9 or
+newer it finds; set `PYTHON` to name one. `ruff.toml` pins the rule set the gate
+was written against, so a newer `ruff` with wider defaults does not fail an
+unchanged tree.
 
 Lint levels live in `Cargo.toml` rather than only in the gate's command line.
 `[lints.clippy] all = "deny"` is why an editor running a bare `cargo clippy`

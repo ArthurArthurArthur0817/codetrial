@@ -400,7 +400,9 @@ p {
 }
 
 .history th,
-.history td {
+.history td,
+.phase-scores th,
+.phase-scores td {
   padding: 0.5rem;
   border-bottom: 1px solid var(--hairline);
   text-align: left;
@@ -1090,6 +1092,21 @@ p {
 .score-grid span {
   color: var(--muted);
   font-size: 1rem;
+}
+
+/* `table.` and the explicit color, because a saved report also renders inside
+   `.history`, whose table and caption rules would otherwise win there. */
+table.phase-scores {
+  width: 100%;
+  max-width: 24rem;
+  margin: 0.5rem 0 1rem;
+  border-collapse: collapse;
+}
+
+.phase-scores caption {
+  text-align: left;
+  font-weight: 600;
+  color: var(--ink);
 }
 
 .report-actions {
