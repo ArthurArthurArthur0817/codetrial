@@ -279,18 +279,40 @@ test("a class candidate case matches the judge operation signatures", () => {
   );
 });
 
-test("runBrowserTests reports the output of a candidate case", async () => {
+test("runBrowserTests keeps inputs on every non-passing case", async () => {
   const restoreFetch = failFetchWith(async (url) => {
     if (String(url).startsWith("/judges/")) {
       return new Response(
         JSON.stringify({
           kind: "function",
-          entry: "sum",
-          paramNames: ["value"],
-          paramTypes: ["integer"],
-          returnType: "integer",
-          checker: "exact",
-          cases: [{ label: "judge", input: [1], expected: 1 }],
+          entry: "pair",
+          paramNames: ["values", "target"],
+          paramTypes: ["integer[]", "integer"],
+          returnType: "integer[]",
+          checker: "indexPair",
+          cases: [
+            { label: "judge pass", input: [[2, 7], 9], expected: [0, 1] },
+            {
+              label: "judge mismatch",
+              input: [[3, 4], 99],
+              expected: [0, 1],
+            },
+            {
+              label: "judge exception",
+              input: [[5, 6], 11],
+              expected: [0, 1],
+            },
+            {
+              label: "judge missing",
+              input: [[7, 8], 15],
+              expected: [0, 1],
+            },
+            {
+              label: "judge checker exception",
+              input: [null, 0],
+              expected: [0, 1],
+            },
+          ],
         }),
       );
     }
@@ -298,22 +320,37 @@ test("runBrowserTests reports the output of a candidate case", async () => {
       JSON.stringify({
         stdout: [
           {
-            text: '{"results":[{"actual":1,"timeMs":1},{"actual":7,"timeMs":2}]}',
+            text: JSON.stringify({
+              results: [
+                { actual: [0, 1], timeMs: 1 },
+                { actual: [0, 1], timeMs: 2 },
+                { error: "built-in boom", timeMs: 3 },
+                null,
+                { actual: [0, 1], timeMs: 4 },
+                { actual: [1, 1], timeMs: 5 },
+                { error: "candidate boom", timeMs: 6 },
+                { actual: [9, 8], timeMs: 7 },
+                { actual: "<output>", timeMs: 8 },
+              ],
+            }),
           },
         ],
       }),
     );
   });
   try {
-    const summary = await runBrowserTests(
-      "candidate-case-runner",
-      "",
-      "cpp",
-      null,
-      [{ input: [7] }],
-    );
+    const summary = await runBrowserTests("failed-inputs", "", "cpp", null, [
+      {
+        label: "candidate mismatch",
+        input: [[5, 5], 10],
+        expected: [0, 1],
+      },
+      { label: "candidate exception", input: [[1], 1] },
+      { label: "candidate output one", input: [[9, 8], 17] },
+      { label: "candidate output two", input: [[4], 4] },
+    ]);
     assert.equal(summary.passed, 1);
-    assert.equal(summary.total, 1);
+    assert.equal(summary.total, 5);
     assert.equal(
       summary.code,
       "",
@@ -324,56 +361,92 @@ test("runBrowserTests reports the output of a candidate case", async () => {
       undefined,
       "a run that reached the runner never says it is missing",
     );
-    assert.deepEqual(summary.cases.at(-1), {
-      label: "Your case 1",
-      pass: null,
-      got: "7",
-      expected: undefined,
-      input: "[7]",
-      timeMs: 2,
-      candidate: true,
-    });
-  } finally {
-    restoreFetch();
-  }
-});
-
-test("an observed candidate error keeps its expectation absent", async () => {
-  const restoreFetch = failFetchWith(async (url) => {
-    if (String(url).startsWith("/judges/")) {
-      return new Response(
-        JSON.stringify({
-          kind: "function",
-          entry: "sum",
-          paramNames: ["value"],
-          paramTypes: ["integer"],
-          returnType: "integer",
-          checker: "exact",
-          cases: [{ label: "judge", input: [1], expected: 1 }],
-        }),
-      );
-    }
-    return new Response(
-      JSON.stringify({
-        stdout: [
-          {
-            text: '{"results":[{"actual":1,"timeMs":1},{"error":"boom","timeMs":2}]}',
-          },
-        ],
-      }),
-    );
-  });
-  try {
-    const summary = await runBrowserTests(
-      "candidate-case-error",
-      "",
-      "cpp",
-      null,
-      [{ input: [7] }],
-    );
-    assert.equal(summary.cases.at(-1).input, "[7]");
-    assert.equal(summary.cases.at(-1).expected, undefined);
-    assert.equal(summary.cases.at(-1).error, "boom");
+    assert.deepEqual(summary.cases, [
+      {
+        label: "judge pass",
+        pass: true,
+        got: "[0,1]",
+        expected: "[0,1]",
+        timeMs: 1,
+        candidate: false,
+      },
+      {
+        label: "judge mismatch",
+        pass: false,
+        got: "[0,1]",
+        expected: "[0,1]",
+        input: "[[3,4],99]",
+        timeMs: 2,
+        candidate: false,
+      },
+      {
+        label: "judge exception",
+        pass: false,
+        got: "-",
+        expected: "[0,1]",
+        input: "[[5,6],11]",
+        error: "built-in boom",
+        timeMs: 3,
+        candidate: false,
+      },
+      {
+        label: "judge missing",
+        pass: false,
+        got: "-",
+        expected: "[0,1]",
+        input: "[[7,8],15]",
+        error: "No result produced.",
+        timeMs: 0,
+        candidate: false,
+      },
+      {
+        label: "judge checker exception",
+        pass: false,
+        got: "[0,1]",
+        expected: "[0,1]",
+        input: "[null,0]",
+        error: "Cannot read properties of null (reading 'length')",
+        timeMs: 4,
+        candidate: false,
+      },
+      {
+        label: "candidate mismatch",
+        pass: false,
+        got: "[1,1]",
+        expected: "[0,1]",
+        input: "[[5,5],10]",
+        timeMs: 5,
+        candidate: true,
+      },
+      {
+        label: "candidate exception",
+        pass: false,
+        got: "-",
+        expected: undefined,
+        input: "[[1],1]",
+        error: "candidate boom",
+        timeMs: 6,
+        candidate: true,
+      },
+      {
+        label: "candidate output one",
+        pass: null,
+        got: "[9,8]",
+        expected: undefined,
+        input: "[[9,8],17]",
+        timeMs: 7,
+        candidate: true,
+      },
+      {
+        label: "candidate output two",
+        pass: null,
+        got: '"<output>"',
+        expected: undefined,
+        input: "[[4],4]",
+        timeMs: 8,
+        candidate: true,
+      },
+    ]);
   } finally {
     restoreFetch();
   }

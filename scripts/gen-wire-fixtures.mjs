@@ -121,6 +121,7 @@ function testResultsCases() {
             {
               label: "example 2",
               pass: false,
+              input: "[[3,2,4],6]",
               expected: "[1,2]",
               got: "[]",
               timeMs: 2,
@@ -128,6 +129,7 @@ function testResultsCases() {
             {
               label: "example 3",
               pass: false,
+              input: "[null,0]",
               expected: "[2,3]",
               got: "",
               error: "TypeError: nums is not iterable",
@@ -150,6 +152,7 @@ function testResultsCases() {
           cases: [1, 2, 3, 4, 5].map((index) => ({
             label: `example ${index}`,
             pass: false,
+            input: `[[${index}],${index}]`,
             expected: `[${index}]`,
             got: "[]",
             timeMs: index,

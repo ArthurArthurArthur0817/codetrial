@@ -215,6 +215,7 @@ test("results markup reports counts and marks each case", () => {
       {
         label: "bad case",
         pass: false,
+        input: "[[2,7],9]",
         expected: "[0,1]",
         got: "[1,0]",
         error: "",
@@ -234,9 +235,76 @@ test("results markup reports counts and marks each case", () => {
   assert.match(body, />FAIL</);
   assert.match(
     body,
-    /expected \[0,1\]\ngot \[1,0\]/,
-    "expected and got sit on separate lines",
+    /input \[\[2,7\],9\]\nexpected \[0,1\]\ngot \[1,0\]/,
+    "input, expected, and got sit on separate lines in that order",
   );
+});
+
+test("only a strict pass hides details and observed cases remain output", () => {
+  const { body } = resultsMarkup({
+    passed: 1,
+    total: 2,
+    cases: [
+      {
+        label: "strict pass",
+        pass: true,
+        input: "must stay hidden",
+        timeMs: 1,
+      },
+      {
+        label: "ordinary failure",
+        pass: false,
+        input: "[1]",
+        expected: "1",
+        got: "2",
+        timeMs: 2,
+      },
+      {
+        label: "truthy non-boolean",
+        pass: 1,
+        input: "[5]",
+        expected: "5",
+        got: "6",
+        timeMs: 2,
+      },
+      {
+        label: "output one",
+        pass: null,
+        input: "[2]",
+        got: "2",
+        timeMs: 3,
+        candidate: true,
+      },
+      {
+        label: "output two",
+        pass: null,
+        input: "[3]",
+        got: "3",
+        timeMs: 4,
+        candidate: true,
+      },
+      {
+        label: "missing pass state",
+        input: "[4]",
+        expected: "4",
+        got: "5",
+        timeMs: 5,
+      },
+    ],
+  });
+
+  assert.doesNotMatch(body, /must stay hidden/);
+  assert.equal((body.match(/>OUTPUT</g) || []).length, 2);
+  assert.match(body, /class="good">OK<\/span> strict pass/);
+  assert.match(body, />FAIL<\/span> ordinary failure/);
+  assert.match(body, /class="critical">FAIL<\/span> truthy non-boolean/);
+  assert.doesNotMatch(body, /class="good">OK<\/span> truthy non-boolean/);
+  assert.match(body, /input \[5\]\nexpected 5\ngot 6/);
+  assert.match(body, />FAIL<\/span> missing pass state/);
+  assert.match(body, /class="critical">OUTPUT<\/span> output one/);
+  assert.match(body, /class="critical">OUTPUT<\/span> output two/);
+  assert.match(body, /input \[2\]\ngot 2/);
+  assert.match(body, /input \[3\]\ngot 3/);
 });
 
 test("results markup can include runner status without changing counts", () => {
@@ -327,6 +395,7 @@ test("results markup escapes everything a candidate's code can produce", () => {
       {
         label: "<script>l</script>",
         pass: false,
+        input: "<script>i</script>",
         expected: "<script>e</script>",
         got: "<script>g</script>",
         error: "",
@@ -1667,6 +1736,7 @@ test("a case that threw shows the exception instead of an expected/got pair", ()
       {
         label: "throws",
         pass: false,
+        input: "[[2,7],9]",
         expected: "[0,1]",
         got: "",
         error: "TypeError: x is not a function",
@@ -1674,7 +1744,10 @@ test("a case that threw shows the exception instead of an expected/got pair", ()
       },
     ],
   });
-  assert.match(body, /<pre>TypeError: x is not a function<\/pre>/);
+  assert.match(
+    body,
+    /<pre>input \[\[2,7\],9\]\nTypeError: x is not a function<\/pre>/,
+  );
   assert.doesNotMatch(
     body,
     /expected/,

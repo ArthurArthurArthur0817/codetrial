@@ -347,7 +347,7 @@ export async function runBrowserTests(
           pass: false,
           got: "-",
           expected: observed ? undefined : renderValue(testCase.expected),
-          ...(candidate ? { input: renderValue(testCase.input) } : {}),
+          input: renderValue(testCase.input),
           error: result?.error || "No result produced.",
           timeMs: Math.round(result?.timeMs || 0),
           candidate,
@@ -368,7 +368,9 @@ export async function runBrowserTests(
         pass,
         got: renderValue(result.actual),
         expected: observed ? undefined : renderValue(testCase.expected),
-        ...(candidate ? { input: renderValue(testCase.input) } : {}),
+        ...(candidate || pass !== true
+          ? { input: renderValue(testCase.input) }
+          : {}),
         ...(error ? { error } : {}),
         timeMs: Math.round(result.timeMs),
         candidate,

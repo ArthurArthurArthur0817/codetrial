@@ -215,6 +215,24 @@ fn prompt_samples() -> Value {
         ],
         ..RuntimeState::default()
     };
+    let sample_test_run = sanitize_test_run(&json!({
+        "language": "python",
+        "passed": 2,
+        "total": 3,
+        "failures": [{
+            "label": "duplicate values",
+            "input": "[[3,3],6]",
+            "expected": "[0,1]",
+            "got": "[]",
+        }],
+        "candidateCases": [{
+            "label": "empty input",
+            "input": "[[]]",
+            "got": "[]",
+        }],
+    }));
+    let reaction_test_summary = format_test_run_for_reaction(&sample_test_run, 1);
+    let report_test_summary = format_test_run(Some(&sample_test_run), 1);
     let mut prompts = json!({
         "resume": resume(false),
         "resumeBehavioral": resume(true),
@@ -285,7 +303,7 @@ fn prompt_samples() -> Value {
         "reportSystem": report_system_instruction(),
         "testsPass": test_results_reaction("3/3 passed", true, TestRecord::Record, None, &RuntimeState::default(), SincePrevious::Other,),
         "testsFail": test_results_reaction(
-            "2/3 passed",
+            &reaction_test_summary,
             false,
             TestRecord::Record,
             changed_excerpt("python", "", "def two_sum(nums, target):\n    return []").as_deref(),
@@ -307,7 +325,7 @@ fn prompt_samples() -> Value {
             volunteered_hints: 0,
             duration_min: 45,
             elapsed_min: 12.4,
-            test_summary: "Latest test run: 2/3 cases passed.\n- CANDIDATE CASE empty input with input [[]]: got []",
+            test_summary: &report_test_summary,
             practice_level: None,
             evidence: &working_report,
         }),

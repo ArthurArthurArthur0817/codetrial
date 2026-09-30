@@ -343,10 +343,11 @@ export function testPayload(summary) {
     // it; a run too large to send is reported to the candidate by `runTests`.
     code: summary.code ?? null,
     failures: summary.cases
-      .filter((item) => !item.candidate && !item.pass)
+      .filter((item) => !item.candidate && item.pass !== true)
       .slice(0, 4)
       .map((item) => ({
         label: item.label,
+        input: item.input,
         expected: item.expected,
         got: item.got,
         error: item.error || null,
@@ -604,9 +605,9 @@ const textEncoder = new TextEncoder();
 /// function-local, moving it left the whole suite green with the supported-card
 /// branch no longer rendering, which is the defect a local constant invites.
 export const ACTIVE_CONTRACT = {
-  bundleVersion: 21,
-  livePromptVersion: 13,
-  reportPromptVersion: 14,
+  bundleVersion: 22,
+  livePromptVersion: 14,
+  reportPromptVersion: 15,
   reportSchemaVersion: 2,
   rubricVersion: 1,
 };
