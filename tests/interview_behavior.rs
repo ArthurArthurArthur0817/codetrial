@@ -24,7 +24,7 @@ use codetrial::agent::{
 };
 use codetrial::gemini::{GeminiFunctionCall, live_tool_declarations};
 use codetrial::livekit::execute_tool_call;
-use codetrial::runtime::TOOL_LOG_HINT;
+use codetrial::runtime::{TOOL_LOG_HINT, TOOL_RECORD_FRAMEWORK_EVIDENCE};
 use serde_json::{Value, json};
 
 #[path = "common/words.rs"]
@@ -379,6 +379,7 @@ struct Conversation {
 struct Turn {
     reply: String,
     hint_calls: Vec<bool>,
+    framework_calls: usize,
     /// What `log_hint` returned this turn, the clue the reply is held to.
     served: String,
 }
@@ -463,6 +464,7 @@ impl Conversation {
         self.contents
             .push(json!({ "role": "user", "parts": [{ "text": text }] }));
         let mut hint_calls = Vec::new();
+        let mut framework_calls = 0;
         let mut served = String::new();
         for _ in 0..6 {
             let response = self.generate().await;
@@ -482,6 +484,7 @@ impl Conversation {
                 return Turn {
                     reply,
                     hint_calls,
+                    framework_calls,
                     served,
                 };
             }
@@ -493,6 +496,9 @@ impl Conversation {
                         name: call["name"].as_str().unwrap_or_default().to_string(),
                         args: call.get("args").cloned().unwrap_or_else(|| json!({})),
                     };
+                    if call.name == TOOL_RECORD_FRAMEWORK_EVIDENCE {
+                        framework_calls += 1;
+                    }
                     let response = execute_tool_call(&mut self.state, &call);
                     if call.name == TOOL_LOG_HINT {
                         // Read off what production answered rather than the
@@ -626,6 +632,326 @@ fn a_behaviour_selector_must_name_a_problem() {
             std::panic::catch_unwind(|| selected_problems(bad)).is_err(),
             "{bad:?} was accepted"
         );
+    }
+}
+
+/// A conservative tripwire for overt agreement, not a natural-language judge.
+/// Question words and negation keep ordinary technical probes from counting as
+/// praise; sentence-initial agreement still counts when followed by a question.
+fn accepts_wrong_answer(reply: &str) -> bool {
+    reply.split(['.', '!', '?', ';']).any(|sentence| {
+        let spoken = words(sentence);
+        let Some(first) = spoken.first() else {
+            return false;
+        };
+        if [
+            "what", "which", "why", "how", "are", "is", "do", "did", "can", "could", "would",
+        ]
+        .contains(&first.as_str())
+        {
+            return false;
+        }
+        if [
+            "perfect", "great", "yes", "yeah", "right", "correct", "good",
+        ]
+        .contains(&first.as_str())
+        {
+            return true;
+        }
+        [
+            "exactly",
+            "that makes sense",
+            "sounds correct",
+            "sounds right",
+            "looks correct",
+            "looks right",
+            "that's right",
+            "that is right",
+            "you're right",
+            "you are right",
+            "that's correct",
+            "that is correct",
+        ]
+        .iter()
+        .any(|phrase| {
+            let phrase = words(phrase);
+            spoken
+                .windows(phrase.len())
+                .enumerate()
+                .any(|(at, window)| {
+                    if window != phrase {
+                        return false;
+                    }
+                    let before = &spoken[at.saturating_sub(4)..at];
+                    let negated = before
+                        .iter()
+                        .any(|word| ["not", "no"].contains(&word.as_str()))
+                        || before.windows(2).any(|pair| {
+                            ["isn", "don", "doesn", "wasn", "aren", "weren"]
+                                .contains(&pair[0].as_str())
+                                && pair[1] == "t"
+                        });
+                    !negated
+                })
+        })
+    })
+}
+
+#[test]
+fn a_clear_correction_is_not_agreement() {
+    for reply in [
+        "Exactly, those are valid positions. What's your algorithm?",
+        "That makes sense. Which indices?",
+        "Great, those indices are correct.",
+        "Perfect. What is your approach?",
+        "That's correct. Why?",
+        "That\u{2019}s correct.",
+        "You\u{2019}re right.",
+        "That's right, could you repeat that?",
+        "Perfect, no problem.",
+        "That's right, no issues with those indices.",
+        "Great, don't worry about it.",
+        "Yes, exactly.",
+        "Right, those work.",
+        "Correct.",
+        "Good, let's move on to the algorithm.",
+        "So those are exactly the two positions.",
+        "That sounds correct. Could you walk through the algorithm?",
+    ] {
+        assert!(accepts_wrong_answer(reply), "missed agreement: {reply}");
+    }
+    for reply in [
+        "Not exactly; index 3 is out of range. What are the indices?",
+        "That is not correct. Which indices exist?",
+        "That isn't exactly right. What indices exist?",
+        "What exactly are the valid indices for a two-element input?",
+        "Could you repeat what exactly you said?",
+        "Are you sure that's right?",
+        "Why do you think that is correct?",
+        "Wait, if the input has two elements, what are their indices?",
+    ] {
+        assert!(!accepts_wrong_answer(reply), "rejected correction: {reply}");
+    }
+}
+
+/// A request to hear the candidate again, not any clarifying question: "could
+/// you clarify your algorithm" is a question about the approach and would let
+/// a reply that ignored the misrecognized turn pass for one that handled it.
+fn asks_to_repeat(reply: &str) -> bool {
+    [
+        "repeat",
+        "misheard",
+        "didn't catch",
+        "did not catch",
+        "say that again",
+        "rephrase",
+        "clarify what you said",
+        "clarify what you meant",
+        "could you say that",
+    ]
+    .iter()
+    .any(|phrase| uses(reply, phrase))
+}
+
+/// Whether a reply gives away the expected pair for `[2, 7]` and target 9. A
+/// clarification that asks again and then answers its own question passes
+/// `asks_to_repeat` and never calls `log_hint`, so neither check sees it.
+fn supplies_expected_indices(reply: &str) -> bool {
+    [
+        "0 and 1",
+        "1 and 0",
+        "zero and one",
+        "one and zero",
+        "0 1",
+        "1 0",
+    ]
+    .iter()
+    .any(|pair| uses(reply, pair))
+}
+
+#[test]
+fn a_repeat_request_is_about_hearing_the_candidate_again() {
+    for reply in [
+        "I may have misheard. Could you repeat that?",
+        "Sorry, I didn\u{2019}t catch that. Could you say that again?",
+        "Could you clarify what you said about the indices?",
+    ] {
+        assert!(asks_to_repeat(reply), "missed repeat request: {reply}");
+    }
+    for reply in [
+        "Could you clarify your algorithm?",
+        "Could you say more about the complexity?",
+        "Which two indices should be returned?",
+    ] {
+        assert!(!asks_to_repeat(reply), "counted a new question: {reply}");
+    }
+    for reply in [
+        "Could you repeat that? The answer is indices zero and one.",
+        "I missed that. Is it [0, 1]?",
+        "Could you repeat that? It should be 0 and 1.",
+    ] {
+        assert!(supplies_expected_indices(reply), "missed a leak: {reply}");
+    }
+    for reply in [
+        "For [2, 7] and target 9, which two indices should be returned?",
+        "Could you say that one more time?",
+    ] {
+        assert!(!supplies_expected_indices(reply), "not a leak: {reply}");
+    }
+}
+
+/// Keep the bound and index reference in the same question, so echoing the
+/// candidate's wrong indices before asking about the algorithm cannot pass.
+fn challenges_index_bounds(reply: &str) -> bool {
+    reply.split_inclusive(['.', '!', '?']).any(|sentence| {
+        if !sentence.ends_with('?') {
+            return false;
+        }
+        let spoken = words(sentence);
+        let names_index = spoken
+            .iter()
+            .any(|word| ["index", "indices", "position", "positions"].contains(&word.as_str()));
+        let names_bound = spoken.iter().any(|word| {
+            [
+                "0", "zero", "1", "one", "first", "second", "length", "size", "bounds", "range",
+                "valid",
+            ]
+            .contains(&word.as_str())
+        }) || spoken.windows(2).any(|pair| {
+            (pair[0] == "two" && pair[1] == "elements") || (pair[0] == "only" && pair[1] == "two")
+        });
+        names_index && names_bound
+    })
+}
+
+#[test]
+fn an_index_probe_checks_bounds_in_the_question() {
+    for reply in [
+        "So you said indices 2 and 3?",
+        "What range of values can the target take?",
+        "Indices 2 and 3, got it. What's your approach?",
+        "You said indices 2 and 3 for a two-element input?",
+        "The array has length two and your indices are 2 and 3. What's the algorithm?",
+    ] {
+        assert!(
+            !challenges_index_bounds(reply),
+            "accepted an echo or topic change: {reply}"
+        );
+    }
+    for reply in [
+        "If the array has two elements, what are their indices?",
+        "For an input of length two, what are the valid zero-based positions?",
+        "Is index 3 in range?",
+        "What are the indices of the first and second elements?",
+        "Wait, you gave indices 2 and 3. How many positions are available in an array of length two?",
+        "If the input is a two-element array, what are the valid indices for those elements?",
+    ] {
+        assert!(
+            challenges_index_bounds(reply),
+            "missed bounds probe: {reply}"
+        );
+    }
+}
+
+/// Text-model proxy for the recognition boundary, not an accented-audio test.
+/// Scripted question context makes an unrelated turn and an unambiguous wrong
+/// answer distinguishable without reconstructing either from the editor.
+#[tokio::test]
+#[ignore = "needs GOOGLE_API_KEY and makes Gemini requests; run scripts/interview-behavior-check.sh"]
+async fn uncertain_speech_is_clarified_without_crediting_or_correcting_it() {
+    let backend = Backend::from_env();
+    let problem = get_problem(Some("two-sum"));
+    for interview_loop in [InterviewLoop::CodingOnly, InterviewLoop::CodingBehavioral] {
+        for (answer, uncertain) in [
+            (
+                "The clothes have no standard sizes, so I need to return them.",
+                true,
+            ),
+            ("En el tablero, pan lo.", true),
+            // Escapes preserve the original report's non-English script
+            // fixture.
+            ("\u{3048}\u{30fc}\u{3001}\u{30ce}\u{30fc}", true),
+            (
+                "The result is indices [2, 3]. They are valid positions in this two-element input.",
+                false,
+            ),
+        ] {
+            let mut conversation = Conversation {
+                client: reqwest::Client::new(),
+                backend: backend.clone(),
+                instructions: build_instructions_for_plan(
+                    problem,
+                    45,
+                    &InterviewProfile::default(),
+                    &InterviewGrounding::default(),
+                    interview_loop,
+                ),
+                contents: vec![
+                    json!({ "role": "user", "parts": [{ "text": "I am ready to work an example." }] }),
+                    json!({ "role": "model", "parts": [{ "text": "For the two-element input [2, 7] and target 9, which two indices should be returned?" }] }),
+                ],
+                state: RuntimeState::for_problem(problem),
+            };
+            let turn = conversation.say(answer).await;
+            let reply = turn.reply.as_str();
+            println!(
+                "uncertain={uncertain}, loop={interview_loop:?}: {}",
+                turn.reply
+            );
+            if uncertain {
+                assert!(
+                    !accepts_wrong_answer(reply),
+                    "accepted uncertain speech: {}",
+                    turn.reply
+                );
+                assert!(
+                    ![
+                        "not relevant",
+                        "irrelevant",
+                        "your answer is wrong",
+                        "that's wrong",
+                        "that is wrong",
+                        "incorrect answer",
+                        "your answer is incorrect"
+                    ]
+                    .iter()
+                    .any(|phrase| uses(reply, phrase)),
+                    "criticized uncertain speech: {}",
+                    turn.reply
+                );
+                assert!(turn.hint_calls.is_empty(), "clarification supplied a hint");
+                assert_eq!(
+                    turn.framework_calls, 0,
+                    "unconfirmed answer earned evidence"
+                );
+                assert!(
+                    asks_to_repeat(reply),
+                    "did not clarify uncertain speech: {}",
+                    turn.reply
+                );
+                assert!(
+                    !supplies_expected_indices(reply),
+                    "clarification supplied the answer: {}",
+                    turn.reply
+                );
+                assert!(
+                    named_beyond(reply, &problem.variant().brief_text()).is_empty(),
+                    "clarification supplied an algorithm clue: {}",
+                    turn.reply
+                );
+            } else {
+                assert!(
+                    !accepts_wrong_answer(reply),
+                    "accepted invalid indices: {}",
+                    turn.reply
+                );
+                assert!(
+                    challenges_index_bounds(reply),
+                    "did not challenge indices against the input or bounds: {}",
+                    turn.reply
+                );
+            }
+        }
     }
 }
 

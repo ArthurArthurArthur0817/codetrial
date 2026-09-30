@@ -144,9 +144,9 @@ const ROUND_TRANSITION_SKEW: std::time::Duration = std::time::Duration::from_sec
 /// `the_time_warning_threshold_is_the_same_number_on_both_sides`.
 pub const TIME_WARNING_S: u64 = 300;
 
-pub const INTERVIEW_CONTRACT_BUNDLE_VERSION: u32 = 20;
-pub const LIVE_PROMPT_VERSION: u32 = 12;
-pub const REPORT_PROMPT_VERSION: u32 = 13;
+pub const INTERVIEW_CONTRACT_BUNDLE_VERSION: u32 = 21;
+pub const LIVE_PROMPT_VERSION: u32 = 13;
+pub const REPORT_PROMPT_VERSION: u32 = 14;
 pub const RUBRIC_VERSION: u32 = 1;
 pub const REPORT_SCHEMA_VERSION: u32 = 2;
 
@@ -1523,6 +1523,24 @@ pub fn record_framework_evidence(
         .ok_or("invalid summary")
         .map(|summary| bounded_model_text(summary, MAX_FRAMEWORK_SUMMARY_CHARS))?;
 
+    // The interviewer heard the audio the recognizer garbled, so a summary it
+    // writes from that turn ("did not give the indices") would reach the report
+    // as the candidate's speech even though the report never reads the turn
+    // itself. Speech evidence waits for a turn the report can read.
+    if source == EvidenceSource::CandidateSpeech
+        && kind != EvidenceKind::Skipped
+        && state
+            .transcript
+            .iter()
+            .rev()
+            .find(|line| line.starts_with(&format!("{CANDIDATE_SPEAKER}: ")))
+            .is_some_and(|line| is_unrecognized_turn(line))
+    {
+        return Err(
+            "the candidate's latest turn was not recognized as English; ask them to repeat it, and record speech evidence from their clarified answer",
+        );
+    }
+
     // Before the duplicate check, since a repeat is still the analysis given
     // again, now: "still O(n log n)" for rewritten code comes back under the
     // summary it had before. Nothing below refuses an Optimizations record.
@@ -1918,7 +1936,73 @@ pub const MAX_TRANSCRIPT_BYTES: usize = 60_000;
 /// Joins the session transcript for the report prompt, keeping the most recent
 /// entries when the whole thing would not fit.
 pub fn transcript_for_report(lines: &[String]) -> String {
-    transcript_tail(lines, MAX_TRANSCRIPT_BYTES)
+    transcript_tail(&mark_unrecognized_turns(lines), MAX_TRANSCRIPT_BYTES)
+}
+
+/// What an assessment reads in place of a candidate turn the recognizer did
+/// not return as English. The report prompt names it, so a change here that
+/// left the prompt describing the old marker fails
+/// `prompts_match_frozen_fixture`.
+pub const UNRECOGNIZED_TURN: &str = "(this turn was not recognized as English and is left out)";
+
+/// `lines` with every candidate turn written mostly in a non-Latin script
+/// replaced by `UNRECOGNIZED_TURN`, for the passes that assess the candidate.
+///
+/// The interview is in English, so such a turn is the recognizer's output
+/// rather than what the candidate said: fluent Mandarin about clothing sizes
+/// came back for an English answer about delimiters. Shown the text, the
+/// report model cited it, and once told not to, still rewrote it into an
+/// improvement about staying on topic, however each wording was refused. A
+/// turn it never reads cannot be coached. The live interviewer, the replay and
+/// the stored transcript keep what the recognizer produced; only assessment is
+/// spared it.
+///
+/// Most of the letters, not any: a sentence that quotes a string in another
+/// script is still English, and accented Latin is still Latin. English that
+/// the recognizer turned into Spanish or into unrelated English stays, and the
+/// prompts' uncertainty rules are what cover it.
+pub fn mark_unrecognized_turns(lines: &[String]) -> Vec<String> {
+    lines
+        .iter()
+        .map(|line| {
+            if is_unrecognized_turn(line) {
+                format!("{CANDIDATE_SPEAKER}: {UNRECOGNIZED_TURN}")
+            } else {
+                line.clone()
+            }
+        })
+        .collect()
+}
+
+/// Whether `line` is a candidate turn `mark_unrecognized_turns` hides.
+fn is_unrecognized_turn(line: &str) -> bool {
+    line.strip_prefix(CANDIDATE_SPEAKER)
+        .and_then(|rest| rest.strip_prefix(": "))
+        .is_some_and(mostly_non_latin)
+}
+
+/// More than two non-Latin letters as well as a majority, so a turn that is
+/// only a symbol the question is about, "theta" come back as a Greek letter,
+/// survives: the prompts call that Unicode, not a recognition error, and a
+/// hidden turn gives them nothing to apply it to. The sentence-length turns the
+/// recognizer invents carry many more.
+fn mostly_non_latin(speech: &str) -> bool {
+    let (latin, other) = speech
+        .chars()
+        .filter(|character| character.is_alphabetic())
+        .fold((0usize, 0usize), |(latin, other), character| {
+            // ASCII, Latin-1 and Latin Extended-A/B, and Latin Extended
+            // Additional, where Vietnamese lives.
+            if character.is_ascii_alphabetic()
+                || ('\u{00C0}'..='\u{024F}').contains(&character)
+                || ('\u{1E00}'..='\u{1EFF}').contains(&character)
+            {
+                (latin + 1, other)
+            } else {
+                (latin, other + 1)
+            }
+        });
+    other > latin && other > 2
 }
 
 /// The newest entries that fit in `budget` bytes, joined.

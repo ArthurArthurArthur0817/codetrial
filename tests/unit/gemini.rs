@@ -1307,6 +1307,168 @@ fn live_config(overrides: &[(&str, &str)]) -> crate::config::AgentConfig {
     load_from_pairs(pairs).unwrap()
 }
 
+/// The report the original complaint was about: correct code, every test
+/// passing, clear English everywhere but one answer the recognizer returned as
+/// fluent, unrelated Mandarin. The report once cited that line as "an
+/// irrelevant response in Mandarin" and failed the candidate on it. A report
+/// that reads the prompt correctly neither names the line nor lets it decide.
+///
+/// Here rather than beside the live-interviewer checks so it runs the report
+/// path production runs, its repairs and its salvage included: the candidate
+/// sees what that path returns, not the model's first answer.
+#[tokio::test]
+#[ignore = "needs GOOGLE_API_KEY and makes Gemini requests; run scripts/interview-behavior-check.sh"]
+async fn a_misrecognized_turn_neither_appears_in_nor_decides_the_report() {
+    let problem = crate::agent::get_problem(Some("two-sum"));
+    let transcript = [
+        "Interviewer: Could you restate the problem in your own words?",
+        "Candidate: I get a list of amounts, nums, and a target. I return the two positions whose amounts add up to target. Exactly one pair exists, and I cannot use the same position twice.",
+        "Interviewer: Can you walk an example?",
+        "Candidate: For 2, 7, 11, 15 with target 9, I see 2 at position 0, I need 7, and 7 is at position 1, so I return 0 and 1.",
+        "Interviewer: What happens if the complement is the current element itself?",
+        // Escapes keep the source ASCII; the recognizer's output is the point.
+        "Candidate: \u{662f}\u{554a}\u{3002}\u{5982}\u{679c}\u{8863}\u{670d}\u{7684}\u{5c3a}\u{5bf8}\u{4e0d}\u{5408}\u{9002}\u{7684}\u{8bdd}\u{ff0c}\u{6211}\u{8fd8}\u{9700}\u{8981}\u{9000}\u{6362}\u{8d27}\u{7684}\u{3002}",
+        "Interviewer: I may have misheard. Could you repeat that?",
+        "Candidate: I check the map before I insert the current amount, so an element can only pair with an earlier position, never with itself.",
+        "Interviewer: What is your approach and its complexity?",
+        "Candidate: One pass with a hash map from amount to position. For each amount I look up target minus amount; if it is there I return both positions, otherwise I store the current one. That is O(n) time and O(n) space.",
+        "Interviewer: How would you test it?",
+        "Candidate: The example, a pair at the two ends, duplicates like 3 and 3 with target 6, and negative amounts. I ran the tests and all seven pass.",
+    ]
+    .map(String::from);
+    // What production hands the report, which is not the stored transcript.
+    let transcript = crate::agent::transcript_for_report(&transcript);
+    let final_code = "class Solution:\n    def matchDisputedCharge(self, nums: list[int], target: int) -> list[int]:\n        seen = {}\n        for i, amount in enumerate(nums):\n            if target - amount in seen:\n                return [seen[target - amount], i]\n            seen[amount] = i\n        return []\n";
+    let prompt = crate::agent::report_prompt(crate::agent::ReportPromptInput {
+        problem,
+        transcript: &transcript,
+        rolling_assessment: "",
+        final_code,
+        language: "python",
+        hints_used: 0,
+        hint_rung: 0,
+        volunteered_hints: 0,
+        duration_min: 45,
+        elapsed_min: 30.0,
+        test_summary: "Latest test run (run #1, python): 7/7 cases passed.",
+        practice_level: None,
+        evidence: "",
+    });
+    let key = std::env::var("CODETRIAL_ENV")
+        .ok()
+        .and_then(|path| crate::config::read_config_file(std::path::Path::new(&path)).ok())
+        .and_then(|pairs| {
+            pairs
+                .into_iter()
+                .rev()
+                .find(|(name, _)| name == "GOOGLE_API_KEY")
+        })
+        .map(|(_, key)| key)
+        .or_else(|| std::env::var("GOOGLE_API_KEY").ok())
+        .expect("GOOGLE_API_KEY is set in the config file or the environment");
+    let model = std::env::var("GEMINI_REPORT_MODEL")
+        .unwrap_or_else(|_| crate::config::DEFAULT_GEMINI_REPORT_MODEL.to_string());
+    let report = generate_report_with_keys(&GeminiKeys::single(&key), &model, &prompt, problem)
+        .await
+        .expect("production returns a report");
+    println!("{}", serde_json::to_string_pretty(&report).unwrap());
+
+    let narrative = [
+        "summary",
+        "codingFeedback",
+        "communicationFeedback",
+        "improvementPlan",
+    ]
+    .iter()
+    .map(|key| report[*key].to_string().to_ascii_lowercase())
+    .collect::<Vec<_>>()
+    .join("\n");
+
+    // The rest are the gap turned into coaching, which a report did after this
+    // exact turn: "clearly audible and relevant" answers, explanations "in
+    // English to avoid transcription ambiguity".
+    for cited in [
+        "mandarin",
+        "chinese",
+        "clothes",
+        "clothing",
+        "irrelevant",
+        "unrelated",
+        "audibl",
+        "in english",
+        "speak english",
+        "avoid transcription",
+        "prevent transcription",
+    ] {
+        assert!(
+            !narrative.contains(cited),
+            "the report cites the misrecognized turn ({cited})"
+        );
+    }
+    assert_eq!(
+        report["decision"], "HIRE",
+        "correct optimal code with clear English reasoning failed on a recognition error"
+    );
+}
+
+/// The vocabulary is what the candidate reads off their own screen, for every
+/// exercise: never the published title the name check refuses, never a
+/// language keyword, and never a name from a commented-out node definition.
+#[test]
+fn recognition_vocabulary_is_the_exercise_names_on_screen() {
+    for problem in crate::agent::PROBLEMS {
+        let variant = problem.variant();
+        let terms = recognition_vocabulary(problem);
+        assert_eq!(terms[0], variant.title, "{}", problem.id);
+        let names = &terms[1..terms.len() - INTERVIEW_TERMS.len()];
+        assert!(!names.is_empty(), "{}: no starter names", problem.id);
+        assert!(terms.ends_with(INTERVIEW_TERMS), "{}", problem.id);
+        for term in names {
+            assert!(!STARTER_WORDS.contains(term), "{}: {term}", problem.id);
+            assert!(
+                !term.starts_with(|character: char| character.is_ascii_digit() || character == '_'),
+                "{}: {term} is a dunder or a number, not a name",
+                problem.id
+            );
+            assert!(
+                variant.starters.iter().any(|(_, code)| code.contains(term)),
+                "{}: {term} is not on the candidate's screen",
+                problem.id
+            );
+        }
+        if let Some(published) = problem.source_title() {
+            assert!(!terms.contains(&published), "{}", problem.id);
+        }
+    }
+    let path_sum = crate::agent::PROBLEMS
+        .iter()
+        .find(|problem| problem.variant().title == "Dungeon Route Budget")
+        .unwrap();
+    assert!(recognition_vocabulary(path_sum).contains(&"targetSum"));
+    // Two characters is a name ("l1"), one is not ("k").
+    let add_chains = crate::agent::PROBLEMS
+        .iter()
+        .find(|problem| problem.variant().title == "Odometer Digit Chains")
+        .unwrap();
+    let chains = recognition_vocabulary(add_chains);
+    assert!(
+        chains.contains(&"l1") && chains.contains(&"l2"),
+        "{chains:?}"
+    );
+    let clone_graph = crate::agent::PROBLEMS
+        .iter()
+        .find(|problem| problem.variant().title == "Sandbox Topology Replica")
+        .unwrap();
+    assert!(!recognition_vocabulary(clone_graph).contains(&"Node"));
+    // Docstrings hold a node definition or an in-place instruction, not names.
+    for problem in crate::agent::PROBLEMS {
+        let terms = recognition_vocabulary(problem);
+        for prose in ["random", "not", "anything", "instead", "import"] {
+            assert!(!terms.contains(&prose), "{}: {prose}", problem.id);
+        }
+    }
+}
+
 #[test]
 fn live_setup_uses_native_audio_voice_tools_and_transcription() {
     let config = live_config(&[("GEMINI_VOICE", "Kore")]);
@@ -1408,7 +1570,24 @@ fn live_setup_uses_native_audio_voice_tools_and_transcription() {
         .collect::<Vec<_>>();
     assert_eq!(names.len(), 3);
     assert!(!names.contains(&json!(TOOL_END_INTERVIEW)));
-    assert_eq!(setup["inputAudioTranscription"], json!({}));
+    assert_eq!(
+        setup["inputAudioTranscription"],
+        json!({
+            "languageCodes": ["en-US"],
+            "customVocabulary": [
+                "Chargeback Pair Match",
+                "matchDisputedCharge",
+                "nums",
+                "target",
+                "time complexity",
+                "space complexity",
+                "Big O",
+                "edge case",
+                "base case",
+                "recursion"
+            ]
+        })
+    );
     assert_eq!(setup["outputAudioTranscription"], json!({}));
     assert_eq!(
         setup["realtimeInputConfig"]["activityHandling"],

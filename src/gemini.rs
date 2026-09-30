@@ -1254,6 +1254,99 @@ pub fn live_tool_declarations(interview_loop: crate::agent::InterviewLoop) -> Va
     Value::Array(tools)
 }
 
+/// Words a starter spells that are Python's or the node definitions', not the
+/// exercise's: biasing recognition toward `int` helps nobody. Only words some
+/// starter uses; `recognition_vocabulary_is_the_exercise_names_on_screen`
+/// fails when a new one needs adding.
+const STARTER_WORDS: &[&str] = &[
+    "class",
+    "def",
+    "self",
+    "pass",
+    "return",
+    "None",
+    "False",
+    "int",
+    "str",
+    "bool",
+    "float",
+    "list",
+    "Optional",
+    "List",
+    "Solution",
+    "ListNode",
+    "TreeNode",
+    "Node",
+    "val",
+    "next",
+    "left",
+    "right",
+    "neighbors",
+];
+
+/// Terms every interview asks about, whatever the exercise. Recognition turned
+/// "time complexity" into "high capacity" and "tank capacity" for different
+/// speakers on different problems, and that error comes back in Latin letters,
+/// which the unrecognized-turn marker never hides.
+const INTERVIEW_TERMS: &[&str] = &[
+    "time complexity",
+    "space complexity",
+    "Big O",
+    "edge case",
+    "base case",
+    "recursion",
+];
+
+/// The scenario title and the names the candidate reads aloud from the starter
+/// on their screen: the function, its parameters, a design problem's methods.
+/// These are what recognition turned into "target song" and "nonce" for
+/// `targetSum` and `nums`. The published title is never among them, because
+/// nothing in a starter spells it.
+///
+/// The Python starter, which every problem has, because the setup is sent
+/// before the candidate picks a language and the generated starters share
+/// their names. Comments, docstrings and imports are skipped: they carry a
+/// node definition, an in-place instruction in prose, or `typing`, and none of
+/// it is the exercise. `INTERVIEW_TERMS` come last.
+fn recognition_vocabulary(problem: &crate::agent::Problem) -> Vec<&'static str> {
+    let variant = problem.variant();
+    let starter = variant
+        .starters
+        .iter()
+        .find(|(language, _)| *language == "python")
+        .map_or("", |(_, code)| *code);
+    let mut terms = vec![variant.title];
+    let mut in_docstring = false;
+    for line in starter.lines() {
+        let trimmed = line.trim_start();
+        if let Some(rest) = trimmed.strip_prefix("\"\"\"") {
+            // A docstring closed on the line that opens it leaves the state as
+            // it was.
+            in_docstring ^= !rest.contains("\"\"\"");
+            continue;
+        }
+        if in_docstring || trimmed.starts_with("from ") || trimmed.starts_with("import ") {
+            continue;
+        }
+        let code = line.split('#').next().unwrap_or("");
+        for token in
+            code.split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+        {
+            if token.len() < 2
+                || token
+                    .starts_with(|character: char| character.is_ascii_digit() || character == '_')
+                || STARTER_WORDS.contains(&token)
+                || terms.contains(&token)
+            {
+                continue;
+            }
+            terms.push(token);
+        }
+    }
+    terms.extend(INTERVIEW_TERMS);
+    terms
+}
+
 /// `resume` carries a handle from a previous connection's
 /// `sessionResumptionUpdate`. Absent, this asks the server to start a fresh
 /// resumable session; present, it continues the earlier one with its history
@@ -1288,7 +1381,15 @@ fn live_setup_message(boot: &RuntimeBootstrap<'_>, resume: Option<&str>) -> Valu
                 ]
             },
             "tools": [{ "functionDeclarations": live_tool_declarations(boot.interview_loop) }],
-            "inputAudioTranscription": {},
+
+            // Both fields are documented as hints, not locks, and they shape
+            // only the transcript the notes, the report and recovery read: the
+            // model hears the audio itself. So the uncertainty policy in the
+            // prompts still carries assessment when recognition drifts anyway.
+            "inputAudioTranscription": {
+                "languageCodes": ["en-US"],
+                "customVocabulary": recognition_vocabulary(boot.problem)
+            },
             "outputAudioTranscription": {},
             "realtimeInputConfig": {
                 "activityHandling": "START_OF_ACTIVITY_INTERRUPTS",

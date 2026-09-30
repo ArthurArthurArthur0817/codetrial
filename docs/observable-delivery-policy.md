@@ -13,6 +13,30 @@ attractiveness, presentation-derived nervousness or confidence, and personality
 or psychological traits. Camera and audio presence and integrity events describe
 session conditions, not candidate performance.
 
+Speech-recognition failures are session conditions too. Unexpected language
+switches, garbled speech and contextually unrelated transcripts require
+clarification, not an inference about the candidate. Uncertain turns and
+unsupported notes must not earn or lose assessment credit or justify a verdict;
+interviewer agreement does not establish that the candidate answered correctly.
+Use clear candidate clarification or independent engineering evidence, and state
+when reliable communication evidence is insufficient. The gap itself is neither
+clear nor unclear communication, so it cannot by itself decide the verdict.
+
+The interim notes and the report never read a candidate turn written mostly
+in a non-Latin script: the English interview makes such a turn the
+recognizer's output, and they read a fixed marker saying it was not recognized
+as English in its place. A turn of only one or two such letters, a symbol the
+question is about, is kept. The live interviewer, the replay and the stored
+transcript keep the recognizer's text, and because the interviewer heard that
+turn, the server refuses evidence it records from the candidate's speech until
+the candidate's latest turn is one the report can read. Recognition errors that come back in
+Latin letters, into Spanish or into unrelated English, are not marked, and
+there the live, interim and report prompts, with the scan below, are what
+enforces this policy. The recognition hints sent at live setup shape only the
+transcript that notes, reports and recovery read; the interviewer hears the
+audio itself. None of this is a guarantee that provider-generated transcripts
+are accurate.
+
 ## What enforces it
 
 The report prompt states the boundary, and the server independently scans every
@@ -20,6 +44,14 @@ provider-authored narrative field before accepting a report. A prohibited claim
 gets a path-specific semantic validation error, and the provider has one bounded
 repair opportunity. If it remains, the report is incomplete and carries no score
 or verdict.
+
+The same scan refuses a report that names the natural language a transcript
+came out in, such as "a response in Mandarin", or judges English proficiency,
+and an improvement or plan item that asks the candidate to speak English,
+audibly or more clearly. The language is the recognizer's output, not the
+candidate's, and a candidate switching programming languages remains a coding
+event the report may name. A neutral mention of transcription passes, because
+refusing it through every repair would leave the report incomplete.
 
 Technical uses such as a confidence interval, or an evidence record's explicit
 confidence value, are not presentation judgments and remain allowed.

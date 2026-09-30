@@ -800,7 +800,7 @@ fn take_interim_review_window(state: &mut RuntimeState, boot: &RuntimeBootstrap<
     // and the editor is unbounded on the way in -- either one would otherwise
     // hand a call that has twelve seconds an input too large to read.
     let window = transcript_tail(
-        &state.transcript[unreviewed_from(state)..],
+        &crate::agent::mark_unrecognized_turns(&state.transcript[unreviewed_from(state)..]),
         INTERIM_WINDOW_BYTES,
     );
     state.interim_transcript_lines = state.transcript.len();

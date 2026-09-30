@@ -360,7 +360,7 @@ pub(crate) fn sanitize_report_candidate(
         checks.retain(|check| {
             check
                 .as_str()
-                .and_then(unsupported_observable_judgment)
+                .and_then(|check| refused_judgment(check, true))
                 .is_none()
         });
         let removed = before - checks.len();
@@ -532,83 +532,223 @@ fn sort_improvement_plan(report: &mut serde_json::Value) {
 
 fn validate_observable_judgments(value: &serde_json::Value, path: &str, errors: &mut Vec<String>) {
     visit_strings(value, path, &mut |path, text| {
-        if let Some(phrase) = unsupported_observable_judgment(text) {
-            errors.push(format!(
-                "{path}: unsupported delivery or personality judgment ({phrase:?})"
-            ));
+        let improvement = IMPROVEMENT_PATHS
+            .iter()
+            .any(|prefix| path.starts_with(prefix));
+        if let Some((reason, phrase)) = refused_judgment(text, improvement) {
+            errors.push(format!("{path}: {reason} ({phrase:?})"));
         }
     });
 }
 
-/// The phrase `text` judges delivery or personality with, if any. Named in the
-/// error because the list is ours and the model cannot see it: told only that
-/// a check is unsupported, a repair swaps "appeared nervous" for "sounded
-/// confident" and fails again.
-fn unsupported_observable_judgment(text: &str) -> Option<&'static str> {
-    let normalized = text
-        .chars()
-        .map(|character| {
-            if character.is_alphanumeric() {
-                character.to_ascii_lowercase()
-            } else {
-                ' '
-            }
-        })
-        .collect::<String>()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
-    let padded = format!(" {normalized} ");
-    const UNSUPPORTED: &[&str] = &[
-        " accent ",
-        " accents ",
-        " dialect ",
-        " dialects ",
-        " typing speed ",
-        " typing pace ",
-        " typed slowly ",
-        " typed quickly ",
-        " type slowly ",
-        " type quickly ",
-        " speech rate ",
-        " filler word ",
-        " filler words ",
-        " disfluency ",
-        " disfluencies ",
-        " eye contact ",
-        " posture ",
-        " body language ",
-        " facial expression ",
-        " facial expressions ",
-        " voice tone ",
-        " vocal tone ",
-        " tone of voice ",
-        " attractiveness ",
-        " physical appearance ",
-        " nervous ",
-        " nervousness ",
-        " nervously ",
-        " anxious ",
-        " anxiety ",
-        " confident demeanor ",
-        " lacked confidence ",
-        " lack of confidence ",
-        " personality ",
-        " introvert ",
-        " extrovert ",
-        " charisma ",
-        " appeared confident ",
-        " appears confident ",
-        " seemed confident ",
-        " looked confident ",
-        " sounded confident ",
-        " come across as confident ",
-        " comes across as confident ",
-    ];
-    UNSUPPORTED
+/// Where a report tells the candidate what to fix: the two improvement lists
+/// and the plan copied from them, self-review checks included.
+const IMPROVEMENT_PATHS: [&str; 3] = [
+    "$.codingFeedback.improvements",
+    "$.communicationFeedback.improvements",
+    "$.improvementPlan",
+];
+
+/// A class of claim a report may not make about a person, the reason the
+/// repair is told, and the phrases that make it. Phrases are named in the
+/// error because the lists are ours and the model cannot see them: told only
+/// that a check is unsupported, a repair swaps "appeared nervous" for "sounded
+/// confident" and fails again. Each phrase is whole words, spelled with the
+/// spaces `refused_judgment` pads the text with.
+struct JudgmentRule {
+    reason: &'static str,
+    /// Only where the report says what to fix, rather than everywhere.
+    improvements_only: bool,
+    phrases: &'static [&'static str],
+    /// Words that break the rule only when a speech word follows, directly or
+    /// through "language", as "a Japanese response" or "a Spanish-language
+    /// answer" does.
+    before_speech: &'static [&'static str],
+}
+
+/// What a report calls a candidate's spoken turn. Not "text" or "characters",
+/// which a text exercise's input has too.
+const SPEECH_WORDS: &[&str] = &[
+    "response",
+    "responses",
+    "answer",
+    "answers",
+    "reply",
+    "replies",
+    "remark",
+    "remarks",
+    "statement",
+    "statements",
+    "explanation",
+    "explanations",
+    "utterance",
+    "utterances",
+    "speech",
+    "transcript",
+    "transcripts",
+    "transcription",
+    "turn",
+    "turns",
+];
+
+const JUDGMENT_RULES: [JudgmentRule; 3] = [
+    JudgmentRule {
+        reason: "unsupported delivery or personality judgment",
+        improvements_only: false,
+        phrases: &[
+            " accent ",
+            " accents ",
+            " dialect ",
+            " dialects ",
+            " typing speed ",
+            " typing pace ",
+            " typed slowly ",
+            " typed quickly ",
+            " type slowly ",
+            " type quickly ",
+            " speech rate ",
+            " filler word ",
+            " filler words ",
+            " disfluency ",
+            " disfluencies ",
+            " eye contact ",
+            " posture ",
+            " body language ",
+            " facial expression ",
+            " facial expressions ",
+            " voice tone ",
+            " vocal tone ",
+            " tone of voice ",
+            " attractiveness ",
+            " physical appearance ",
+            " nervous ",
+            " nervousness ",
+            " nervously ",
+            " anxious ",
+            " anxiety ",
+            " confident demeanor ",
+            " lacked confidence ",
+            " lack of confidence ",
+            " personality ",
+            " introvert ",
+            " extrovert ",
+            " charisma ",
+            " appeared confident ",
+            " appears confident ",
+            " seemed confident ",
+            " looked confident ",
+            " sounded confident ",
+            " come across as confident ",
+            " comes across as confident ",
+        ],
+        before_speech: &[],
+    },
+    // The language a transcript came out in is the recognizer's output, not the
+    // candidate's: a report that said "an irrelevant response in Mandarin"
+    // failed an English speaker for it. Named languages only with "in", except
+    // the two that name nothing but speech, and none of "another language" or
+    // "switched languages", because a candidate changing C++ for Python is a
+    // coding event. The cost is a technical sentence such as "input in Chinese
+    // characters" on a text exercise, refused and repaired; matching only after
+    // a speech word would miss "answered the question in Japanese". The
+    // adjective, "a Japanese response", is refused only before a speech word,
+    // where it names the transcript's language rather than an input's.
+    JudgmentRule {
+        reason: "the recognizer's language attributed to the candidate",
+        improvements_only: false,
+        phrases: &[
+            " in chinese ",
+            " in japanese ",
+            " in korean ",
+            " in hindi ",
+            " in spanish ",
+            " in french ",
+            " in german ",
+            " in portuguese ",
+            " mandarin ",
+            " cantonese ",
+            " non english ",
+            " foreign language ",
+            " native language ",
+            " broken english ",
+            " english proficiency ",
+            " english fluency ",
+            " fluent english ",
+            " language barrier ",
+        ],
+        before_speech: &[
+            "chinese",
+            "japanese",
+            "korean",
+            "hindi",
+            "spanish",
+            "french",
+            "german",
+            "portuguese",
+        ],
+    },
+    // Improvements only: the summary may say evidence was limited by
+    // transcription. After one misrecognized turn a report asked for
+    // explanations "in English to avoid transcription ambiguity", which is what
+    // this refuses. A neutral mention of transcription is left alone: a report
+    // that suggested typing a key point as a code comment "when a transcription
+    // gap occurs" was refused through both repairs, and an incomplete report
+    // costs the candidate their verdict. Not "english" alone either: "describe
+    // the approach in plain English" is ordinary advice, and the live prompt
+    // asks the interviewer for it. "Avoid" and "prevent" are what turn a
+    // mention into blame: a seeded report asked for answers "clearly
+    // articulated to avoid transcription ambiguity".
+    JudgmentRule {
+        reason: "a speech-recognition gap is not the candidate's weakness",
+        improvements_only: true,
+        phrases: &[
+            " avoid transcription ",
+            " prevent transcription ",
+            " in english ",
+            " speak english ",
+            " your english ",
+            " spoken english ",
+            " primary language ",
+            " interview language ",
+            " language of the interview ",
+            " audible ",
+            " audibly ",
+            " speak more clearly ",
+            " speak clearly ",
+            " enunciate ",
+            " enunciation ",
+            " pronounce ",
+            " pronunciation ",
+        ],
+        before_speech: &[],
+    },
+];
+
+/// The first rule `text` breaks and the phrase it breaks it with, if any,
+/// with `improvement` saying whether the text tells the candidate what to fix.
+fn refused_judgment(text: &str, improvement: bool) -> Option<(&'static str, &'static str)> {
+    let words = spelled_words(text);
+    let padded = format!(" {} ", words.join(" "));
+    JUDGMENT_RULES
         .iter()
-        .find(|phrase| padded.contains(**phrase))
-        .map(|phrase| phrase.trim())
+        .filter(|rule| improvement || !rule.improvements_only)
+        .find_map(|rule| {
+            let phrase = rule.phrases.iter().find(|phrase| padded.contains(**phrase));
+            let adjective = || {
+                words.iter().enumerate().find_map(|(at, word)| {
+                    let adjective = rule.before_speech.iter().find(|name| **name == word)?;
+                    let mut next = words.get(at + 1)?;
+                    if next == "language" {
+                        next = words.get(at + 2)?;
+                    }
+                    SPEECH_WORDS.contains(&next.as_str()).then_some(*adjective)
+                })
+            };
+            phrase
+                .map(|phrase| phrase.trim())
+                .or_else(adjective)
+                .map(|phrase| (rule.reason, phrase))
+        })
 }
 
 fn exact_keys(
