@@ -4,6 +4,7 @@
 // into. interview.js owns the wiring, this owns the output.
 
 import {
+  FRAMEWORKS,
   escapeHtml,
   formatTime,
   loopLabel,
@@ -191,7 +192,7 @@ export function reportSaveStatus(result) {
 /// that produced nothing. Forking the whole card duplicated the header, the
 /// evidence section, the code block and the actions row, including the
 /// `download-report` and `done` ids that `web/interview.js` binds listeners to.
-/// Exactly one expression in this file emits `/ 100`, and it sits behind the
+/// Every expression in this card that emits `/ 100` sits behind the same
 /// guard, so "no scores in an incomplete report" is structural rather than
 /// something a test has to catch after the fact.
 export function reportMarkup({
@@ -248,9 +249,17 @@ export function reportMarkup({
     </details>`
     : "";
   const frameworkTimeline = frameworkEvidenceMarkup(report.frameworkEvidence);
-  const frameworkCalibration = report.frameworkAssessment
-    ? `<p class="muted small">REACTO/STAR phase scores are formative coaching signals, not calibrated hiring evidence.</p>`
-    : "";
+  const phaseTable = (group) => {
+    const rows = group.rows.map(
+      (row) =>
+        `<tr><th scope="row">${row.label}</th><td>${phaseScoreText(row.score, escapeHtml)}</td></tr>`,
+    );
+    return `<table class="phase-scores"><caption>${group.name}</caption><tbody>${rows.join("")}</tbody></table>`;
+  };
+  const phaseGroups = phaseScoreGroups(report);
+  const phaseScores = !phaseGroups.length
+    ? ""
+    : `<section><h3>Phase scores</h3>${phaseGroups.map(phaseTable).join("")}<p class="muted small">${PHASE_SCORE_NOTE}</p></section>`;
   // Only where the report recorded one, like the mode beside it in the header.
   const loop = report.interviewLoop
     ? ` · ${loopLabel(report.interviewLoop)}`
@@ -277,7 +286,7 @@ export function reportMarkup({
       ${practiceNext}
       ${debrief}
       ${rounds}
-      ${frameworkCalibration}
+      ${phaseScores}
       ${frameworkTimeline}
       ${integrityEvidenceMarkup(report)}
       <details><summary>Your final code (${escapeHtml(language)})</summary><pre>${escapeHtml(code.trimEnd() || "(editor was empty)")}</pre></details>
@@ -411,6 +420,23 @@ export function reportMarkdown({
         "",
       ]
     : [];
+  const phaseGroups = phaseScoreGroups(report);
+  const phaseScores = !phaseGroups.length
+    ? []
+    : [
+        "## Phase scores",
+        "",
+        ...phaseGroups.flatMap((group) => [
+          `| ${group.name} | Score |`,
+          "|---|---|",
+          ...group.rows.map(
+            (row) => `| ${row.label} | ${phaseScoreText(row.score, mdText)} |`,
+          ),
+          "",
+        ]),
+        PHASE_SCORE_NOTE,
+        "",
+      ];
   const frameworkTimeline = report.frameworkEvidence?.length
     ? [
         "## Framework evidence",
@@ -501,14 +527,10 @@ export function reportMarkdown({
               .join("; "),
         ]
       : []),
-    ...(report.frameworkAssessment
-      ? [
-          "REACTO/STAR phase scores are formative coaching signals, not calibrated hiring evidence.",
-        ]
-      : []),
     "",
     ...head,
     "",
+    ...phaseScores,
     ...practiceNext,
     ...debrief,
     ...frameworkTimeline,
@@ -533,6 +555,44 @@ export function reportMarkdown({
 
 function frameworkTime(atMs) {
   return formatTime(Math.max(0, Math.floor(Number(atMs) / 1000)));
+}
+
+const PHASE_SCORE_NOTE =
+  "REACTO/STAR phase scores are formative coaching signals, not calibrated hiring evidence. They are not weighted parts of the Coding or Communication score.";
+
+const phaseScoreText = (score, escape) =>
+  score === null ? "Not assessed" : `${escape(score)} / 100`;
+
+/// The per-phase scores the grader already returns, grouped by framework. An
+/// all-null framework is shown only when its round ran: STAR is otherwise all
+/// null in a session that asked no behavioral question. A round that did not
+/// run is one `reportRounds` calls skipped or not configured; naming those two
+/// rather than the ones that ran keeps a status added there from hiding scores.
+/// Labels come from FRAMEWORKS, not the report, so only the score is untrusted.
+/// Empty for an incomplete report, and when no framework qualifies, so a caller
+/// emits no heading over nothing.
+function phaseScoreGroups(report) {
+  if (report.incomplete || !report.frameworkAssessment) return [];
+  const scores = new Map(
+    report.frameworkAssessment.phases.map((item) => [item.phase, item.score]),
+  );
+  const ran = new Set(
+    (report.rounds || [])
+      .filter((round) => !["skipped", "not_configured"].includes(round.status))
+      .map((round) => round.kind),
+  );
+  return Object.entries(FRAMEWORKS)
+    .map(([kind, framework]) => ({
+      ran: ran.has(kind),
+      name: framework.name,
+      rows: framework.steps.map((step) => ({
+        label: step.label,
+        score: scores.get(step.label) ?? null,
+      })),
+    }))
+    .filter(
+      (group) => group.ran || group.rows.some((row) => row.score !== null),
+    );
 }
 
 function frameworkEvidenceMarkup(items) {

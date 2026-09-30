@@ -33,11 +33,8 @@ the agent receives structured code rather than editor screenshots. Python and
 JavaScript run locally; C, C++, and Java run through Compiler Explorer, so
 source code leaves the browser for those three.
 
-Output confirmation and a microphone are required to start. A camera is also
-required when [recording](#recording) is enabled; otherwise a candidate can
-continue without one and the report records that condition. Audio and code
-snapshots stay in memory unless recording is enabled, which is off by default.
-Candidate video reaches Gemini only with
+Audio and code snapshots stay in memory unless [recording](#recording) is
+enabled, which is off by default. Candidate video reaches Gemini only with
 `CODETRIAL_GEMINI_CANDIDATE_VIDEO_ENABLED=true`. Face-presence analysis runs in
 the browser and reports itself unavailable rather than guessing.
 
@@ -74,15 +71,15 @@ Explorer service.
 
 One installation keeps its config file and its account database together in a
 `config/` directory: `config/` in a checkout, and a `config/` beside the
-executable for a downloaded binary. The binary looks in both, and in two older
-places it no longer writes to — `codetrial.env.local` in the current directory
-and beside the executable. Use `--config PATH` to point at a different file. Extra `codetrial.env.*` files in the same directory are optional
-providers used for pooling. If `web` mode finds no config file at all, it serves
-a Setup page instead and prints the URL to open — you can skip steps 2–3 above,
-fill in your keys there, and it writes them to `config/codetrial.env.local` for you. That page
-serves on a loopback address only; a start that would put it on any other
-address refuses instead, and writing the file yourself is the way to deploy for
-other people. See [docs/install.md](docs/install.md).
+executable for a downloaded binary. Use `--config PATH` to point at a different
+file. Extra `codetrial.env.*` files in the same directory are optional providers
+used for pooling.
+
+If `web` mode finds no config file at all, it serves a Setup page and prints the
+URL to open, so steps 2 and 3 above can be skipped: fill in your keys there and
+it writes `config/codetrial.env.local` for you. That page serves on a loopback
+address only and refuses any other, so writing the file yourself is the way to
+deploy for other people. See [docs/install.md](docs/install.md).
 
 ## Run
 
@@ -106,6 +103,7 @@ URL rather than the interview. See [docs/providers.md](docs/providers.md).
 | `cargo run -- web` | The server; hosts interviewers too when `GOOGLE_API_KEY` is set |
 | `cargo run -- run-livekit ROOM` | Interviewer only, for one named room |
 | `cargo run -- check-gemini` | Verify Gemini credentials |
+| `codetrial --version` | Print the version and the commit the binary was built from |
 
 `web` is the only serving mode, local and deployed alike: the difference between
 the two is the configuration, not the command. A `web` process hosts agents for
@@ -121,13 +119,15 @@ cannot be run cannot complete the REACTO Test step.
 Jim asks short, targeted questions between logical blocks, offers progressive
 conceptual hints, and uses the latest test run in the final assessment. Voice
 responses stop when the candidate interrupts. Say "can I get a hint?" when
-needed; hints affect the communication score.
+needed. In a coding-only session Jim never ends the interview early: only the
+timer or the candidate's End interview button closes it.
 
-The media preflight always requires confirmed output and a working microphone.
-For an interview that is not recorded, a candidate may continue without a
-camera when it is unavailable or declined; the signed integrity trail and the
-report record that neutral condition and why. A recorded interview still
-requires its camera before it can start.
+The media preflight always requires confirmed output and a working microphone,
+and its Back to lobby button releases every device without starting. For an
+interview that is not recorded, a candidate may continue without a camera when
+it is unavailable or declined; the signed integrity trail and the report record
+that neutral condition and why. A recorded interview still requires its camera
+before it can start.
 
 Candidates can present the interview in Google Meet by sharing the CodeTrial tab
 with tab audio enabled. Meet owns the shared tab after that, and face-presence
@@ -139,6 +139,45 @@ Recording lowers that ceiling to `CODETRIAL_RECORDING_MAX_MINUTES`, and the
 lobby is told the ceiling rather than left to discover it. The rules, and why
 the offered length and the enforced length come from one function, are in
 [docs/interview-length.md](docs/interview-length.md).
+
+## Scoring
+
+A report model reads the interview brief (the final code, the transcript, the
+test runs, the hints and Jim's running notes) and writes the report. Every
+score is that model's judgment of the evidence, not a formula, and every claim
+in the feedback has to point at something in that evidence.
+
+| Score | What it assesses |
+|---|---|
+| Coding, 0 to 100 | Correctness of the final code read against the problem (not the pass count), edge cases, the algorithm and its reasoning, implementation quality, testing, optimization, and how the approach compares with the optimal one. An empty or non-functional editor caps it below 30. |
+| Communication, 0 to 100 | How clearly you narrated: restating the problem, working an example, explaining the algorithm and its complexity, predicting tests, discussing optimization, and answering follow-ups accurately. STAR completeness counts only when a behavioral question was asked. |
+| Decision | HIRE only for a working, reasonably optimal solution and clear communication, judged against a mid-level onsite bar. The practice level you pick changes the wording of the summary, not the bar. |
+
+Speech is machine-transcribed, so filler words, accent, phrasing, and typing
+speed are ignored. Camera and microphone state are recorded as session
+conditions and never read as confidence, eye contact, or body language.
+
+The report also scores each phase of the framework you worked through: Repeat,
+Example, Algorithm, Coding, Test, and Optimizations for REACTO, and Situation,
+Task, Action, and Result for STAR when a behavioral question was asked. A phase
+with no evidence is shown as not assessed, never as zero.
+
+| Band | Meaning |
+|---|---|
+| 90 to 100 | Complete, precise, and independent |
+| 75 to 89 | Sound with a minor gap |
+| 60 to 74 | Partially demonstrated with a material gap |
+| 40 to 59 | Weak or substantially incomplete |
+| 0 to 39 | Observed incorrect or missing despite a clear opportunity |
+
+Phase scores are coaching feedback. They are not weighted parts of the Coding
+or Communication score, and they have not been [calibrated](docs/rubric-calibration.md)
+against human reviewers, so do not read them as hiring evidence.
+
+The report model sees how many hints you had, how far up the three-rung hint
+ladder you went, and how many Jim volunteered rather than you asked for. It
+treats them as context and never as a fixed deduction; a hint you asked for and
+then relied on weighs more than one Jim offered unprompted.
 
 ## Development
 
@@ -241,6 +280,7 @@ recorded rather than left implicit. See
 | [LiveKit troubleshooting](docs/livekit-connection-troubleshooting.md) | Telling four connection failures apart |
 | [Observable delivery policy](docs/observable-delivery-policy.md) | What a report may and may not assess |
 | [Interview contract versions](docs/interview-contract-versions.md) | The five versions every report carries |
+| [Evidence runtime](docs/evidence-runtime.md) | The session evidence ledger and how code and test observations are recorded |
 | [Adding a problem](docs/adding-a-problem.md) | Add an imported or original interview exercise |
 | [Rubric calibration](docs/rubric-calibration.md) | Calibration status of the framework scores |
 | [Provider cost and degradation](docs/provider-cost-and-degradation.md) | Gemini budgets, restarts, concurrency |

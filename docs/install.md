@@ -9,15 +9,21 @@ Every successful build of `main` replaces the `latest` release under
 while it was running. The binaries go to a draft first, and their sizes are
 checked against the files the build produced before that draft takes the name,
 so a truncated upload never reaches the download page. Two things that tag will
-not
-give you: replacing a release is not atomic, so each publish has a short window
-where `latest` resolves to nothing, and the tag moves, so a link does not keep
-serving the bytes it served last week. Pin a commit and keep your own checksum
-if you need the same binary twice. Nothing is required at runtime beyond the
-binary itself: the browser application, its vendored assets, and the WASM are
-compiled in, so there is no Node.js, no `node_modules`, and no `web/` directory
-to unpack alongside it. The avatar
-model is not in there either: the browser downloads it once from a pinned
+not give you: replacing a release is not atomic, so each publish has a short
+window where `latest` resolves to nothing, and the tag moves, so a link does not
+keep serving the bytes it served last week. Pin a commit and keep your own
+checksum if you need the same binary twice.
+
+Every binary knows the commit it was built from. `./codetrial --version` prints
+it without reading any configuration, and `web` mode prints the same line first
+on startup. Quote it when reporting a problem: the package version does not
+change from one build of `main` to the next, so the commit is the only thing
+that says which build you have.
+
+Nothing is required at runtime beyond the binary itself: the browser
+application, its vendored assets, and the WASM are compiled in, so there is no
+Node.js, no `node_modules`, and no `web/` directory to unpack alongside it. The
+avatar model is not in there either: the browser downloads it once from a pinned
 upstream URL, checks it against a pinned SHA-256, and keeps it in its own cache.
 Without that reachable, the interview falls back to Jim's voice-only panel and
 nothing else changes.

@@ -743,7 +743,14 @@ test("the markdown report shows the level practiced for", () => {
   );
 });
 
-test("framework phase scores are labeled formative in HTML and Markdown", () => {
+test("phase scores preserve an all-null framework only when its round ran", () => {
+  const scored = {
+    Repeat: 90,
+    Example: 72,
+    Algorithm: 64,
+    Coding: 55,
+    Test: null,
+  };
   const report = {
     codingScore: 70,
     communicationScore: 70,
@@ -752,7 +759,21 @@ test("framework phase scores are labeled formative in HTML and Markdown", () => 
     codingFeedback: { strengths: [], improvements: [] },
     communicationFeedback: { strengths: [], improvements: [] },
     hintsUsed: 0,
-    frameworkAssessment: { rubricVersion: 1, phases: [] },
+    rounds: [
+      { kind: "coding", budgetMin: 37, status: "complete" },
+      { kind: "behavioral", budgetMin: 8, status: "skipped" },
+    ],
+    frameworkAssessment: {
+      rubricVersion: 1,
+      phases: [
+        ...Object.entries(scored).map(([phase, score]) => ({ phase, score })),
+        { phase: "Optimizations", score: "<b>9</b>" },
+        ...["Situation", "Task", "Action", "Result"].map((phase) => ({
+          phase,
+          score: null,
+        })),
+      ],
+    },
   };
   const session = {
     report,
@@ -762,11 +783,67 @@ test("framework phase scores are labeled formative in HTML and Markdown", () => 
     transcript: [],
     at: "now",
   };
-  for (const output of [reportMarkup(session), reportMarkdown(session)]) {
+  const html = reportMarkup(session);
+  assert.match(html, /<th scope="row">Repeat<\/th><td>90 \/ 100<\/td>/);
+  assert.match(html, /<th scope="row">Test<\/th><td>Not assessed<\/td>/);
+  assert.match(html, /&lt;b&gt;9&lt;\/b&gt; \/ 100/);
+  assert.doesNotMatch(html, /Situation/);
+  const markdown = reportMarkdown(session);
+  assert.match(markdown, /\| REACTO \| Score \|/);
+  assert.match(markdown, /\| Algorithm \| 64 \/ 100 \|/);
+  assert.match(markdown, /\| Test \| Not assessed \|/);
+  assert.match(markdown, /\\<b>9\\<\/b> \/ 100/);
+  assert.doesNotMatch(markdown, /STAR \| Score/);
+  for (const output of [html, markdown]) {
     assert.match(
       output,
       /formative coaching signals, not calibrated hiring evidence/,
     );
+  }
+
+  report.rounds[1].status = "started";
+  for (const output of [reportMarkup(session), reportMarkdown(session)]) {
+    assert.match(output, /STAR/);
+    assert.match(output, /Situation[^\n]*Not assessed/);
+    assert.match(output, /Result[^\n]*Not assessed/);
+  }
+});
+
+test("phase scores draw no heading over nothing", () => {
+  const report = {
+    codingScore: 70,
+    communicationScore: 70,
+    decision: "HIRE",
+    summary: "Grounded",
+    codingFeedback: { strengths: [], improvements: [] },
+    communicationFeedback: { strengths: [], improvements: [] },
+    hintsUsed: 0,
+    rounds: [],
+    frameworkAssessment: {
+      rubricVersion: 1,
+      phases: ["Repeat", "Example", "Situation"].map((phase) => ({
+        phase,
+        score: null,
+      })),
+    },
+  };
+  const session = {
+    report,
+    problemTitle: "Two Sum",
+    language: "python",
+    code: "pass",
+    transcript: [],
+    at: "now",
+  };
+  for (const variant of [report, { ...report, incomplete: true }]) {
+    const outputs = [
+      reportMarkup({ ...session, report: variant }),
+      reportMarkdown({ ...session, report: variant }),
+    ];
+    for (const output of outputs) {
+      assert.doesNotMatch(output, /Phase scores/);
+      assert.doesNotMatch(output, /formative coaching signals/);
+    }
   }
 });
 
