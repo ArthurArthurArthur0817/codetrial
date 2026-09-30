@@ -154,7 +154,9 @@ function sourceEventMarkup(event) {
 // the interview poses, and the limits and edge-case policies are what the
 // candidate asks Jim for, the way they would ask a person. The published title
 // is named once, small, so the problem can be found again after the interview.
-export function problemMarkup(problem) {
+// The worked examples can be left out, so the Example step starts from cases
+// the candidate proposes instead of ones already on screen.
+export function problemMarkup(problem, { examples = true } = {}) {
   const example = (example, index) => `
           <section>
             <h2>Example ${index + 1}</h2>
@@ -173,9 +175,13 @@ export function problemMarkup(problem) {
       ${problem.source ? `<p class="problem-source">LeetCode: ${escapeHtml(problem.source)}</p>` : ""}
       ${problem.requestedPage ? `<p class="muted small">The link asked for an exercise this bank does not have, so this is the default exercise.</p>` : ""}
       ${problem.brief.map((text) => `<p>${escapeHtml(text)}</p>`).join("")}
-      <div class="examples">
+      ${
+        examples
+          ? `<div class="examples">
         ${problem.examples.map(example).join("")}
-      </div>
+      </div>`
+          : ""
+      }
       <div class="hint-box"><strong>Think out loud.</strong> Jim is listening to your voice and reading your editor in real time. Ask him about input sizes, edge cases and anything the description leaves open, narrate your approach like you would with a human interviewer, and say "can I get a hint?" if you need one.</div>
     </div>
   `;

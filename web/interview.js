@@ -152,6 +152,7 @@ const CODE_PUBLISH_DEBOUNCE_MS = 300;
 /// Long enough to read twice, short enough that it is gone before the answer
 /// it is about. Measured against the hint text, not chosen round.
 const FRAMEWORK_HINT_MS = 12000;
+const HIDE_EXAMPLES_KEY = "codetrial:hideExamples";
 
 // From /runtime-config.js, which is the only thing allowed to name what the
 // server does. A literal here would be a second answer to "does this server
@@ -282,6 +283,9 @@ const state = {
   runningTests: false,
   candidateCases: [],
   candidateCaseAddition: null,
+  /// The judge's first input, shown as the Add a case placeholder unless the
+  /// worked examples are hidden: it is a worked case in its own right.
+  candidateCaseHint: "",
   report: null,
   /// Set when the interviewer's report reached this page and could not be
   /// rendered. The offline summary that follows is written from what this page
@@ -373,6 +377,7 @@ const nodes = {
   audioJoin: document.querySelector("#audio-check-join"),
   audioLeave: document.querySelector("#audio-check-leave"),
   meetPresentation: document.querySelector("#meet-presentation"),
+  hideExamples: document.querySelector("#hide-examples"),
   recordingConsentStep: document.querySelector("#recording-consent-step"),
   recordingConsent: document.querySelector("#recording-consent"),
   meetMode: document.querySelector("#meet-mode"),
@@ -414,6 +419,7 @@ init();
 async function init() {
   state.transcript = createTranscriptView(document, nodes.transcriptPanel);
   renderRuntimeConfig();
+  nodes.hideExamples.checked = readStored(HIDE_EXAMPLES_KEY) === "1";
   renderProblem();
   applyLanguages(null);
   setLanguage("python");
@@ -560,6 +566,11 @@ function bindEvents() {
       MEET_PRESENTATION_KEY,
       nodes.meetPresentation.checked ? "1" : "0",
     );
+  });
+  nodes.hideExamples.addEventListener("change", () => {
+    writeStored(HIDE_EXAMPLES_KEY, nodes.hideExamples.checked ? "1" : "0");
+    renderProblem();
+    renderCandidateCasePlaceholder();
   });
   // Device labels and ids stay blank until a getUserMedia grant, so the list
   // built at load is stale by the time anyone opens the panel.
@@ -1495,7 +1506,9 @@ function renderProblem() {
   // happens in the lobby, before there is an interview to attach it to, which
   // is why `connect` sends it again once there is one.
   recordStage();
-  nodes.problemPanel.innerHTML = problemMarkup(problem);
+  nodes.problemPanel.innerHTML = problemMarkup(problem, {
+    examples: !nodes.hideExamples.checked,
+  });
 }
 
 function selectTab(tab) {
@@ -1894,7 +1907,14 @@ async function initializeCandidateCases() {
   // holds, so a prefilled value became a case the candidate never wrote.
   const spec = await judgePromise;
   if (spec?.cases?.[0]?.input)
-    nodes.candidateCaseInput.placeholder = JSON.stringify(spec.cases[0].input);
+    state.candidateCaseHint = JSON.stringify(spec.cases[0].input);
+  renderCandidateCasePlaceholder();
+}
+
+function renderCandidateCasePlaceholder() {
+  nodes.candidateCaseInput.placeholder = nodes.hideExamples.checked
+    ? ""
+    : state.candidateCaseHint;
 }
 
 /// Answers "added", "full" or "refused", and writes the status line itself.

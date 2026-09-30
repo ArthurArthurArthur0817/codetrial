@@ -5,7 +5,7 @@
   "difficulty": "Medium",
   "brief": [
     "Our chaos testing platform models a service mesh as a graph. Each service is a Node with an integer id in val and a list of the services it links to in neighbors, and links go both ways. Before an experiment mutates the mesh, we need a fully independent replica so the original is never touched.",
-    "Implement replicateTopology(node), where node is one Node of the mesh, and return the Node in the replica that corresponds to it, with every reachable service and link copied. The examples write a mesh as the neighbor ids of each service, starting from id 1."
+    "Implement replicateTopology(node), where node is one Node of the mesh, and return the Node in the replica that corresponds to it, with every reachable service and link copied. A mesh is written as a list holding the neighbor ids of each service in id order, starting from service 1."
   ],
   "examples": [
     {

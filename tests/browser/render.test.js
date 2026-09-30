@@ -1110,6 +1110,22 @@ test("problem markup omits the explanation line rather than printing undefined",
   assert.doesNotMatch(body, /undefined/);
 });
 
+test("problem markup can leave the worked examples for the candidate to propose", () => {
+  const problem = {
+    brief: ["Pay out the amount."],
+    examples: [{ input: "amount = 3", output: "[1, 2]" }],
+  };
+
+  const hidden = problemMarkup(problem, { examples: false });
+  assert.match(hidden, /Pay out the amount\./, "the scenario stays on screen");
+  assert.doesNotMatch(hidden, /Example 1|amount = 3|class="examples"/);
+
+  // Leaving the option out is today's page, so no caller changes by accident.
+  const shown = problemMarkup(problem);
+  assert.match(shown, /Example 1/);
+  assert.match(shown, /amount = 3/);
+});
+
 test("feedback markup escapes list items", () => {
   const body = feedbackMarkup("Coding", {
     strengths: ["<b>bold</b>"],
