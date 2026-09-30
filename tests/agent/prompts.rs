@@ -53,8 +53,8 @@ fn prompt_golden_digest_matches_versions() {
     // its hash is a string nothing checks. The pair is still asserted, because
     // the failure worth catching is a version bumped with the golden left
     // alone, which a digest comparison on its own reads as fine.
-    let recorded_versions = (13, 14);
-    let recorded_digest = "aaedd160db3d4fa2bbb27a43732b300cb800bdabca387495c8cce8f517fa0d97";
+    let recorded_versions = (14, 15);
+    let recorded_digest = "bd9b46de583c3f44ba313b8d7b63c0176ca2123244c97e5f471d3d7b50a5b597";
 
     assert_eq!(
         (LIVE_PROMPT_VERSION, REPORT_PROMPT_VERSION),
@@ -837,6 +837,7 @@ fn sanitize_test_run_bounds_every_field_the_prompt_renders() {
         "failures": (0..40)
             .map(|index| json!({
                 "label": "L".repeat(1_000),
+                "input": "i".repeat(1_000),
                 "expected": format!("e{index}"),
                 "got": "g".repeat(1_000),
                 "error": "r".repeat(1_000),
@@ -870,7 +871,7 @@ fn sanitize_test_run_bounds_every_field_the_prompt_renders() {
     let failures = clean["failures"].as_array().unwrap();
     assert_eq!(failures.len(), 4, "the failure list is capped");
     for failure in failures {
-        for key in ["label", "expected", "got", "error"] {
+        for key in ["label", "input", "expected", "got", "error"] {
             assert!(
                 failure[key].as_str().unwrap().chars().count() <= 200,
                 "`{key}` outgrew the bound",
@@ -1085,17 +1086,17 @@ fn interview_contract_versions_are_one_closed_bundle() {
         "the bundle table has no row for {INTERVIEW_CONTRACT_BUNDLE_VERSION}"
     );
 
-    assert_eq!(INTERVIEW_CONTRACT_BUNDLE_VERSION, 21);
-    assert_eq!(LIVE_PROMPT_VERSION, 13);
-    assert_eq!(REPORT_PROMPT_VERSION, 14);
+    assert_eq!(INTERVIEW_CONTRACT_BUNDLE_VERSION, 22);
+    assert_eq!(LIVE_PROMPT_VERSION, 14);
+    assert_eq!(REPORT_PROMPT_VERSION, 15);
     assert_eq!(RUBRIC_VERSION, 1);
     assert_eq!(REPORT_SCHEMA_VERSION, 2);
     assert_eq!(
         interview_contract_json(),
         json!({
-            "bundleVersion": 21,
-            "livePromptVersion": 13,
-            "reportPromptVersion": 14,
+            "bundleVersion": 22,
+            "livePromptVersion": 14,
+            "reportPromptVersion": 15,
             "rubricVersion": 1,
             "reportSchemaVersion": 2,
         })
@@ -1341,14 +1342,14 @@ fn a_reaction_reads_one_failing_case() {
     let run = json!({
         "language": "python", "passed": 0, "total": 3,
         "failures": [
-            {"label": "first", "expected": "1", "got": "2"},
+            {"label": "first", "input": "[1]", "expected": "1", "got": "2"},
             {"label": "second", "expected": "3", "got": "4"},
             {"label": "third", "expected": "5", "got": "6"}
         ]
     });
     let brief = format_test_run_for_reaction(&run, 2);
     assert!(
-        brief.contains("- FAILED first: expected 1, got 2"),
+        brief.contains("- FAILED first with input [1]: expected 1, got 2"),
         "{brief}"
     );
     assert!(!brief.contains("second"), "{brief}");

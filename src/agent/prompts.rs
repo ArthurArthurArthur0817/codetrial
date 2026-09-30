@@ -2156,13 +2156,16 @@ fn render_test_run(
         let unlisted = failing - listed;
         for failure in failures.into_iter().take(max_failures) {
             let label = value_string(failure.get("label")).unwrap_or_else(|| "?".to_string());
+            let input = optional_input(failure);
             if let Some(error) = truthy_string(failure.get("error")) {
-                lines.push(format!("- FAILED {label}: raised {error}"));
+                lines.push(format!("- FAILED {label}{input}: raised {error}"));
             } else {
                 let expected =
                     value_string(failure.get("expected")).unwrap_or_else(|| "None".to_string());
                 let got = value_string(failure.get("got")).unwrap_or_else(|| "None".to_string());
-                lines.push(format!("- FAILED {label}: expected {expected}, got {got}"));
+                lines.push(format!(
+                    "- FAILED {label}{input}: expected {expected}, got {got}"
+                ));
             }
         }
         if unlisted > 0 {
@@ -2183,15 +2186,7 @@ fn render_test_run(
             .take(MAX_CANDIDATE_CASES)
         {
             let label = value_string(case.get("label")).unwrap_or_else(|| "?".to_string());
-
-            // Filtered before rendering, the way `expected` below is: the
-            // sanitizer writes the key on every case, so a run recorded before
-            // the browser sent one carries a null here and `value_string`
-            // spells that "None". A replayed interview would read "with input
-            // None" rather than saying nothing about an input it never had.
-            let input = value_string(case.get("input").filter(|value| !value.is_null()))
-                .map(|input| format!(" with input {input}"))
-                .unwrap_or_default();
+            let input = optional_input(case);
             if let Some(error) = truthy_string(case.get("error")) {
                 lines.push(format!("- CANDIDATE CASE {label}{input}: raised {error}"));
             } else {
@@ -2211,6 +2206,15 @@ fn render_test_run(
     }
 
     lines.join("\n")
+}
+
+fn optional_input(case: &serde_json::Map<String, serde_json::Value>) -> String {
+    // The sanitizer writes the key on every case, so a run recorded before the
+    // browser sent one carries a null here. Omit that rather than claiming the
+    // case ran "with input None".
+    value_string(case.get("input").filter(|value| !value.is_null()))
+        .map(|input| format!(" with input {input}"))
+        .unwrap_or_default()
 }
 
 /// What `read_editor` answers, and what a requested hint carries after its

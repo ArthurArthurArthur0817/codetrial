@@ -37,22 +37,25 @@ export function resultsMarkup(summary, status = null) {
     };
   }
   const caseMarkup = (item) => {
+    const passed = item.pass === true;
     // `pass === null` is a candidate case with no expectation, so it is an
     // output to read rather than a result to judge. Named once: the three
     // places that used to re-derive it had to agree on what null meant.
     const observed = item.pass === null;
+    const input =
+      item.input === undefined ? "" : `input ${escapeHtml(item.input)}\n`;
     // Only a case that did not pass shows it, and most cases pass.
-    const detail = item.pass
+    const detail = passed
       ? ""
       : item.error
-        ? escapeHtml(item.error)
+        ? `${input}${escapeHtml(item.error)}`
         : observed
-          ? `got ${escapeHtml(item.got)}`
-          : `expected ${escapeHtml(item.expected)}\ngot ${escapeHtml(item.got)}`;
+          ? `${input}got ${escapeHtml(item.got)}`
+          : `${input}expected ${escapeHtml(item.expected)}\ngot ${escapeHtml(item.got)}`;
     return `
       <li>
-        <div><span class="${observed || item.pass ? "good" : "critical"}">${observed ? "OUTPUT" : item.pass ? "OK" : "FAIL"}</span> ${escapeHtml(item.label)} <span>${escapeHtml(item.timeMs)}ms</span></div>
-        ${item.pass ? "" : `<pre>${detail}</pre>`}
+        <div><span class="${passed ? "good" : "critical"}">${observed ? "OUTPUT" : passed ? "OK" : "FAIL"}</span> ${escapeHtml(item.label)} <span>${escapeHtml(item.timeMs)}ms</span></div>
+        ${passed ? "" : `<pre>${detail}</pre>`}
       </li>
     `;
   };

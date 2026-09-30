@@ -484,20 +484,96 @@ test("testPayload keeps the agent wire contract and caps failures at four", () =
     setupError: "",
     cases: [
       { label: "ok", pass: true },
-      ...Array.from({ length: 6 }, (_, index) => ({
-        label: `mine-${index}`,
+      {
+        label: "mine-0",
         candidate: true,
         pass: null,
-        input: `[${index}]`,
-        got: `[${index}]`,
-      })),
-      ...Array.from({ length: 6 }, (_, index) => ({
-        label: `bad-${index}`,
+        input: "[10]",
+        got: "[20]",
+      },
+      {
+        label: "mine-1",
+        candidate: true,
+        pass: null,
+        input: "[11]",
+        got: "[21]",
+      },
+      {
+        label: "mine-2",
+        candidate: true,
+        pass: null,
+        input: "[12]",
+        got: "[22]",
+      },
+      {
+        label: "mine-3",
+        candidate: true,
+        pass: null,
+        input: "[13]",
+        got: "[23]",
+      },
+      {
+        label: "mine-4",
+        candidate: true,
+        pass: null,
+        input: "[14]",
+        got: "[24]",
+      },
+      {
+        label: "mine-5",
+        candidate: true,
+        pass: null,
+        input: "[15]",
+        got: "[25]",
+      },
+      {
+        label: "bad-0",
         pass: false,
+        input: "[30]",
         expected: "1",
         got: "2",
         error: "",
-      })),
+      },
+      {
+        label: "bad-1",
+        pass: false,
+        input: "[31]",
+        expected: "3",
+        got: "4",
+        error: "boom",
+      },
+      {
+        label: "bad-2",
+        pass: false,
+        input: "[32]",
+        expected: "5",
+        got: "6",
+        error: "",
+      },
+      {
+        label: "bad-3",
+        pass: false,
+        input: "[33]",
+        expected: "7",
+        got: "8",
+        error: "",
+      },
+      {
+        label: "bad-4",
+        pass: false,
+        input: "[34]",
+        expected: "9",
+        got: "10",
+        error: "",
+      },
+      {
+        label: "bad-5",
+        pass: false,
+        input: "[35]",
+        expected: "11",
+        got: "12",
+        error: "",
+      },
     ],
   };
 
@@ -535,24 +611,49 @@ test("testPayload keeps the agent wire contract and caps failures at four", () =
     testPayload({ ...summary, runnerUnavailable: true }).runnerUnavailable,
     true,
   );
-  assert.equal(payload.failures.length, 4);
-  assert.deepEqual(Object.keys(payload.failures[0]).sort(), [
-    "error",
-    "expected",
-    "got",
-    "label",
+  assert.deepEqual(payload.failures, [
+    { label: "bad-0", input: "[30]", expected: "1", got: "2", error: null },
+    { label: "bad-1", input: "[31]", expected: "3", got: "4", error: "boom" },
+    { label: "bad-2", input: "[32]", expected: "5", got: "6", error: null },
+    { label: "bad-3", input: "[33]", expected: "7", got: "8", error: null },
   ]);
-  assert.equal(payload.failures[0].error, null);
-  assert.deepEqual(
-    payload.candidateCases,
-    Array.from({ length: 5 }, (_, index) => ({
-      label: `mine-${index}`,
-      input: `[${index}]`,
+  assert.deepEqual(payload.candidateCases, [
+    {
+      label: "mine-0",
+      input: "[10]",
       expected: null,
-      got: `[${index}]`,
+      got: "[20]",
       error: null,
-    })),
-  );
+    },
+    {
+      label: "mine-1",
+      input: "[11]",
+      expected: null,
+      got: "[21]",
+      error: null,
+    },
+    {
+      label: "mine-2",
+      input: "[12]",
+      expected: null,
+      got: "[22]",
+      error: null,
+    },
+    {
+      label: "mine-3",
+      input: "[13]",
+      expected: null,
+      got: "[23]",
+      error: null,
+    },
+    {
+      label: "mine-4",
+      input: "[14]",
+      expected: null,
+      got: "[24]",
+      error: null,
+    },
+  ]);
 });
 
 test("data-channel payloads keep the keys the Rust agent decodes", () => {
