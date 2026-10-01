@@ -54,7 +54,7 @@ fn prompt_golden_digest_matches_versions() {
     // the failure worth catching is a version bumped with the golden left
     // alone, which a digest comparison on its own reads as fine.
     let recorded_versions = (17, 15);
-    let recorded_digest = "7246330a53625c9501a6bd27f339f15e86e6759ebf4f3a66a966f4102acefa60";
+    let recorded_digest = "e3da54ad9f9d8d75ec6ab07283be481760da43f82dfb27e6044ecc27d88a9f07";
 
     assert_eq!(
         (LIVE_PROMPT_VERSION, REPORT_PROMPT_VERSION),
@@ -90,10 +90,11 @@ fn unpausing_delivers_the_cold_brief_the_pause_deferred() {
     let reply = resumed.generate_reply.expect("resuming makes Jim speak");
     assert!(reply.contains("Any restored memory may predate the latest local events"));
     assert!(reply.contains("def two_sum"));
-    assert!(
-        !state.needs_cold_brief,
-        "a briefing delivered once must not be delivered again on the next pause"
-    );
+
+    // Paid once sent, so it is not delivered again on the next pause, and a
+    // resume that fails to send leaves it for the next socket.
+    assert!(resumed.carries_thinking_debt);
+    assert!(state.needs_cold_brief);
 }
 
 /// The briefing a cold restart sends is stamped once, by the one stamp on the

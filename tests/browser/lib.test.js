@@ -3060,3 +3060,25 @@ test("more integrity rows than the report holds are trimmed to the cap", () => {
     [...Array(MAX_INTEGRITY_ROWS).keys()],
   );
 });
+
+test("requested thinking time marks response windows until a release or interviewer speech", () => {
+  const avatar = (at, state) => ({ kind: "avatar", at, payload: { state } });
+  const life = (at, state) => ({ kind: "lifecycle", at, payload: { state } });
+  // No pause anywhere: the marks can only come from the thinking rows.
+  const windows = responseWindows([
+    avatar(0, "speaking"),
+    avatar(1, "listening"),
+    life(2, "thinking_started"),
+    avatar(3, "speaking"),
+    avatar(4, "listening"),
+    life(5, "thinking_started"),
+    life(6, "thinking_ended"),
+    avatar(7, "speaking"),
+    avatar(8, "listening"),
+    avatar(9, "speaking"),
+  ]);
+  assert.deepEqual(
+    windows.map((window) => window.paused),
+    [true, true, false],
+  );
+});
