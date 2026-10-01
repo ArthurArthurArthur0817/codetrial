@@ -1810,6 +1810,13 @@ fn parse_server_message(text: &str) -> ServerMessage {
         return ServerMessage::default();
     };
     let mut events = Vec::new();
+    let interrupted = message
+        .pointer("/serverContent/interrupted")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let input_transcript = message
+        .pointer("/serverContent/inputTranscription/text")
+        .and_then(Value::as_str);
 
     let resumption_handle = message
         .get("sessionResumptionUpdate")
@@ -1824,11 +1831,9 @@ fn parse_server_message(text: &str) -> ServerMessage {
         .map(str::to_string);
 
     // A request to keep the floor in this frame must reach the room before any
-    // generated reply sharing it.
-    if let Some(text) = message
-        .pointer("/serverContent/inputTranscription/text")
-        .and_then(Value::as_str)
-    {
+    // generated reply sharing it. In an interrupted frame it waits instead for
+    // the old turn to be torn down, below.
+    if !interrupted && let Some(text) = input_transcript {
         events.push(GeminiEvent::InputTranscript(text.to_string()));
     }
     if let Some(parts) = message
@@ -1878,6 +1883,12 @@ fn parse_server_message(text: &str) -> ServerMessage {
         events.push(GeminiEvent::UsageRecorded);
     }
 
+    // Gemini's interrupted turn ends after the interruption. A frame carrying
+    // both must preserve that order; candidate speech in the same frame owns
+    // the next reply, so it is recorded after the old turn is torn down.
+    if interrupted {
+        events.push(GeminiEvent::Interrupted);
+    }
     if message
         .pointer("/serverContent/turnComplete")
         .and_then(Value::as_bool)
@@ -1885,12 +1896,8 @@ fn parse_server_message(text: &str) -> ServerMessage {
     {
         events.push(GeminiEvent::TurnComplete);
     }
-    if message
-        .pointer("/serverContent/interrupted")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-    {
-        events.push(GeminiEvent::Interrupted);
+    if interrupted && let Some(text) = input_transcript {
+        events.push(GeminiEvent::InputTranscript(text.to_string()));
     }
     if let Some(calls) = message
         .pointer("/toolCall/functionCalls")

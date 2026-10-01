@@ -85,6 +85,17 @@ pub const DEFAULT_MAX_CONCURRENT_INTERVIEWS: usize = 16;
 pub const DEFAULT_MAX_INTERIM_REVIEWS: usize = 6;
 pub const MAX_INTERIM_REVIEWS: usize = 72;
 
+/// How long an owed reply may go without output before the Live socket is
+/// replaced. Issue 95 logged a 39-second reply on a degraded provider that did
+/// arrive, so the default sits above it; a reply the watchdog replaces is paid
+/// for twice. Bounded below by the twenty seconds after which an unanswered
+/// prompt already hands the floor back, since a shorter timeout would replace
+/// sockets a held `GoAway` is still waiting on, and above so that a silent
+/// provider is still recovered while the candidate is waiting for it.
+pub const DEFAULT_GEMINI_REPLY_TIMEOUT_S: u32 = 45;
+pub const MIN_GEMINI_REPLY_TIMEOUT_S: u32 = 20;
+pub const MAX_GEMINI_REPLY_TIMEOUT_S: u32 = 120;
+
 const REQUIRED_KEYS: &[&str] = &[
     "LIVEKIT_URL",
     "LIVEKIT_API_KEY",
@@ -546,6 +557,7 @@ pub struct AgentConfig {
     pub default_duration_min: u32,
     pub gemini_candidate_video_enabled: bool,
     pub max_interim_reviews: usize,
+    pub gemini_reply_timeout_s: u32,
     pub pool: ProviderPool,
 }
 
@@ -736,6 +748,12 @@ pub fn load_from_pairs(
             DEFAULT_MAX_INTERIM_REVIEWS as u32,
         )
         .min(MAX_INTERIM_REVIEWS as u32) as usize,
+        gemini_reply_timeout_s: optional_u32(
+            &values,
+            "CODETRIAL_GEMINI_REPLY_TIMEOUT_S",
+            DEFAULT_GEMINI_REPLY_TIMEOUT_S,
+        )
+        .clamp(MIN_GEMINI_REPLY_TIMEOUT_S, MAX_GEMINI_REPLY_TIMEOUT_S),
         pool,
     })
 }

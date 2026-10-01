@@ -1129,6 +1129,11 @@ test("sanitizeReport clamps scores and strips markup from a hostile report", () 
     sanitizeReport({ endReason: "interview_complete" }).endReason,
     "interview_complete",
   );
+  // The agent giving up on a silent provider still reports, and says why.
+  assert.equal(
+    sanitizeReport({ endReason: "interviewer_unavailable" }).endReason,
+    "interviewer_unavailable",
+  );
   assert.equal(
     sanitizeReport({ endReason: "abandoned_by_llm" }).endReason,
     null,
@@ -2657,14 +2662,15 @@ test("a delayed turn is matched by when its stream started", () => {
   );
 });
 
-test("windows are computed from the two states the server actually publishes", () => {
-  // The whole feature rested on a state nothing emits. `src/livekit.rs` declares
-  // `listening` and `speaking` and every `set_agent_state` call writes one of
-  // them; `thinking` is a label in the browser and a pose on the avatar and is
-  // never published. A window that closed only on `thinking` never closed, so a
-  // real interview drew exactly one row reading "duration not recorded" however
-  // many questions it contained. This fixture is the sequence a real recording
-  // holds, and it must not contain a `thinking` row.
+test("windows are computed from the states the server actually publishes", () => {
+  // The whole feature once rested on a state nothing emitted: a window that
+  // closed only on `thinking` never closed while the server published nothing
+  // but `listening` and `speaking`, so a real interview drew exactly one row
+  // reading "duration not recorded" however many questions it contained.
+  // `src/livekit.rs` now publishes `thinking` too, but only for a reply that has
+  // gone a few seconds without starting, so most windows still close on
+  // `speaking`. This fixture is the sequence a real recording holds, one slow
+  // reply included, and it must contain only states the server sends.
   const recorded = [
     avatar(0, "listening"),
     avatar(1000, "speaking"),
@@ -2673,7 +2679,8 @@ test("windows are computed from the two states the server actually publishes", (
     avatar(47_000, "speaking"),
     avatar(60_000, "listening", 1),
     said(70_000, "you", "a hash map", 1),
-    avatar(72_000, "speaking"),
+    avatar(74_000, "thinking"),
+    avatar(80_000, "speaking"),
   ];
   // Read out of the server rather than asserted of the fixture. A check that
   // `recorded` holds no `thinking` cannot fail from any change to
@@ -2690,7 +2697,7 @@ test("windows are computed from the two states the server actually publishes", (
     ...livekit.matchAll(/const\s+(AGENT_STATE_\w+)\s*:\s*&str\s*=\s*"(\w+)"/g),
   ];
   const published = new Set(declared.map((match) => match[2]));
-  assert.deepEqual(published, new Set(["listening", "speaking"]));
+  assert.deepEqual(published, new Set(["listening", "speaking", "thinking"]));
   // And nothing publishes a state that is not one of those constants. Matched
   // across newlines and past a trailing comma, because rustfmt wraps a long call
   // and this file already contains one wrapped that way: a pattern requiring the
@@ -2734,14 +2741,13 @@ test("windows are computed from the two states the server actually publishes", (
     ]),
     [
       [20_000, 27_000, "linear"],
-      [60_000, 12_000, "a hash map"],
+      [60_000, 14_000, "a hash map"],
     ],
     "one window per question, each with a duration and the answer that closed it",
   );
 
-  // `thinking` still closes a window, for a deployment that publishes it, and
-  // closes it earlier than the reply would: the difference is the model round
-  // trip that closing on `speaking` puts inside the number.
+  // `thinking` closes a window earlier than the reply would: the difference is
+  // the model round trip that closing on `speaking` puts inside the number.
   assert.equal(
     responseWindows([
       avatar(0, "speaking"),

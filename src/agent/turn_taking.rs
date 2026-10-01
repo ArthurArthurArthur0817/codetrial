@@ -197,8 +197,11 @@ fn thinking_debt(state: &RuntimeState) -> Vec<String> {
     if state.thinking_unheard_reply {
         prompts.push(THINKING_UNHEARD.to_string());
     }
+
+    // Held as the raw event and phrased only here, so a request that is itself
+    // owed again is never wrapped inside another.
     if let Some(owed) = &state.owed_reply_on_resume {
-        prompts.push(owed.clone());
+        prompts.push(super::owed_reply(owed.as_deref()));
     }
     prompts
 }

@@ -277,7 +277,9 @@ test("the response window panel says what the number is worth, in words a test c
     "A response window is the time between the interviewer finishing a turn and the interviewer " +
       "speaking again. It is measured from the clock of the browser that recorded the interview, which " +
       "can jump forward as well as back, and it includes the time CodeTrial itself took to prepare the " +
-      "reply, which is not the same on every turn. The interviewer speaks again on its own after about " +
+      "reply, which is not the same on every turn. When a reply is slow to start, the window instead " +
+      "ends once the interviewer is shown as thinking, so on a slow connection it can stop before the " +
+      "candidate finished answering. The interviewer speaks again on its own after about " +
       "twenty-five seconds of silence, and neither talking nor typing counts as silence, so a window " +
       "runs long only while the candidate is working: a long window means they were busy, and a run of " +
       "short windows holding no transcript is what silence looks like. A window opens whenever the " +

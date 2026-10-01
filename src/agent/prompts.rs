@@ -1427,6 +1427,17 @@ pub fn owed_reply(owed_prompt: Option<&str>) -> String {
     }
 }
 
+/// A briefing or resume line, followed by the request for the reply a lost
+/// connection owed when one is owed. `Some(None)` owes a reply with no event
+/// to name. One join for every path that asks, so the unpause and a cold
+/// replacement cannot phrase the request differently.
+pub fn with_owed_reply(line: String, owed: Option<Option<&str>>) -> String {
+    match owed {
+        Some(owed_prompt) => format!("{line} {}", owed_reply(owed_prompt)),
+        None => line,
+    }
+}
+
 /// Why `end_interview` is refused: coding-only time belongs to the candidate,
 /// and an unfinished round needs only the steps still missing. With Test
 /// recorded, inviting a Run sends a

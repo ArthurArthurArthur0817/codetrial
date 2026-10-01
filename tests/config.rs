@@ -1,9 +1,11 @@
 use codetrial::config::{
     DEFAULT_COMPILER_EXPLORER_ENABLED, DEFAULT_DURATION_MIN,
-    DEFAULT_GEMINI_CANDIDATE_VIDEO_ENABLED, DEFAULT_GEMINI_LIVE_MODEL, DEFAULT_GEMINI_REPORT_MODEL,
-    DEFAULT_GEMINI_SILENCE_MS, DEFAULT_GEMINI_START_SENSITIVITY, DEFAULT_GEMINI_VOICE,
-    DEFAULT_MAX_CONCURRENT_INTERVIEWS, DEFAULT_MAX_INTERIM_REVIEWS, DEFAULT_ROOM_PREFIX,
-    MAX_GEMINI_SILENCE_MS, MAX_INTERIM_REVIEWS, load_from_pairs, max_concurrent_interviews,
+    DEFAULT_GEMINI_CANDIDATE_VIDEO_ENABLED, DEFAULT_GEMINI_LIVE_MODEL,
+    DEFAULT_GEMINI_REPLY_TIMEOUT_S, DEFAULT_GEMINI_REPORT_MODEL, DEFAULT_GEMINI_SILENCE_MS,
+    DEFAULT_GEMINI_START_SENSITIVITY, DEFAULT_GEMINI_VOICE, DEFAULT_MAX_CONCURRENT_INTERVIEWS,
+    DEFAULT_MAX_INTERIM_REVIEWS, DEFAULT_ROOM_PREFIX, MAX_GEMINI_REPLY_TIMEOUT_S,
+    MAX_GEMINI_SILENCE_MS, MAX_INTERIM_REVIEWS, MIN_GEMINI_REPLY_TIMEOUT_S, load_from_pairs,
+    max_concurrent_interviews,
 };
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -38,6 +40,32 @@ fn config_accepts_current_env_names() {
     assert_eq!(config.room_prefix, "room");
     assert_eq!(config.default_duration_min, 30);
     assert!(config.gemini_candidate_video_enabled);
+}
+
+/// The reply watchdog is tunable from the latency an operator sees in the
+/// `timing:` lines, but never below the prompt stall it would race, nor so
+/// high that a silent provider is left unrecovered.
+#[test]
+fn config_bounds_the_reply_timeout() {
+    let base = [
+        ("LIVEKIT_URL", "wss://example.livekit.cloud"),
+        ("LIVEKIT_API_KEY", "key"),
+        ("LIVEKIT_API_SECRET", "secret"),
+        ("GOOGLE_API_KEY", "google"),
+    ];
+    let timeout = |value: Option<&'static str>| {
+        load_from_pairs(
+            base.into_iter()
+                .chain(value.map(|value| ("CODETRIAL_GEMINI_REPLY_TIMEOUT_S", value))),
+        )
+        .expect("config")
+        .gemini_reply_timeout_s
+    };
+    assert_eq!(timeout(None), DEFAULT_GEMINI_REPLY_TIMEOUT_S);
+    assert_eq!(timeout(Some("60")), 60);
+    assert_eq!(timeout(Some("5")), MIN_GEMINI_REPLY_TIMEOUT_S);
+    assert_eq!(timeout(Some("9999")), MAX_GEMINI_REPLY_TIMEOUT_S);
+    assert_eq!(timeout(Some("soon")), DEFAULT_GEMINI_REPLY_TIMEOUT_S);
 }
 
 #[test]
