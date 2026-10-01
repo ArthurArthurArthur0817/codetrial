@@ -10,10 +10,16 @@ pinned files with `make verify-vendor`.
 | [Pyodide](https://github.com/pyodide/pyodide) | 0.26.4 | MPL-2.0 | In-browser Python runner |
 | CPython standard library | 3.12 | PSF-2.0 | Shipped inside Pyodide as `python_stdlib.zip` |
 | [pdf.js](https://github.com/mozilla/pdf.js) | 6.3.289 | Apache-2.0 | Local text extraction from JD and resume PDFs |
+| [web-tree-sitter](https://github.com/tree-sitter/tree-sitter) | 0.25.10 | MIT | Browser code parsing |
+| [Tree-sitter C](https://github.com/tree-sitter/tree-sitter-c) | 0.24.2 | MIT | C grammar |
+| [Tree-sitter C++](https://github.com/tree-sitter/tree-sitter-cpp) | 0.23.4 | MIT | C++ grammar |
+| [Tree-sitter Java](https://github.com/tree-sitter/tree-sitter-java) | 0.23.5 | MIT | Java grammar |
+| [Tree-sitter JavaScript](https://github.com/tree-sitter/tree-sitter-javascript) | 0.25.0 | MIT | JavaScript grammar |
+| [Tree-sitter Python](https://github.com/tree-sitter/tree-sitter-python) | 0.25.0 | MIT | Python grammar |
 | [Three.js](https://threejs.org/) | 0.185.1 | MIT | Avatar renderer |
 | [@pixiv/three-vrm](https://github.com/pixiv/three-vrm) | 3.5.5 | MIT | VRM support |
 
-The MediaPipe binaries, the Pyodide binaries and pdf.js are fetched at build time from
+The MediaPipe binaries, the Pyodide binaries, pdf.js and Tree-sitter are fetched at build time from
 the version or commit named in their `FETCH` manifests, and accepted only when
 they match the adjacent `SHA256SUMS`. The LiveKit client and the three-vrm
 bundle are committed and pinned in place.
@@ -21,6 +27,7 @@ bundle are committed and pinned in place.
 License texts and source details are shipped with the relevant assets:
 
 - `web/vendor/LICENSE-apache-2.0.txt` (LiveKit client, MediaPipe, pdf.js)
+- `web/vendor/tree-sitter/LICENSE` (browser runtime and five grammars)
 - `web/vendor/avatar/LICENSE-three.txt`
 - `web/vendor/avatar/LICENSE-three-vrm.txt`
 - `web/vendor/avatar/NOTICE`

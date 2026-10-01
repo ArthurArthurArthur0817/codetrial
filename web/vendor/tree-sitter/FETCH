@@ -1,0 +1,4 @@
+# Downloaded by scripts/fetch-vendor.sh; bump this URL and SHA256SUMS together.
+https://cdn.jsdelivr.net/npm/web-tree-sitter@0.25.10/
+tree-sitter.js
+tree-sitter.wasm

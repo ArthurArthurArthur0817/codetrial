@@ -8,6 +8,7 @@ import {
   videoTrackReady,
 } from "./audio-check.js";
 import { highlight } from "./highlight.js";
+import { prepareLanguage } from "./syntax-parser.js";
 import {
   indentNewline,
   indentSelection,
@@ -427,7 +428,9 @@ async function init() {
   // After bindEvents, so the callback cannot beat the row it edits: everything
   // above here is synchronous, and a `then` runs no earlier than the next
   // microtask.
-  void judgePromise.then(applyLanguages);
+  void judgePromise.then((spec) => {
+    applyLanguages(spec);
+  });
   // No enumeration here. Before the preflight grant the browser reports only a
   // blank placeholder, so the list is discarded and repainted a few lines down;
   // the `toggle` handler covers a panel opened while the preflight is still up.
@@ -1567,6 +1570,7 @@ function applyLanguages(spec) {
 
 function setLanguage(language) {
   if (!languages.includes(language)) return;
+  void prepareLanguage(language).catch(() => {});
   if (editorInitialized) {
     // A switch is a coalescer boundary. Flush the old tab before selecting the
     // new one so a quick click cannot replace an unreported edit with the new
