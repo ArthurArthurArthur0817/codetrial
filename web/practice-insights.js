@@ -14,3 +14,53 @@ export function filterProblems(
       (!topic || problem.topics.includes(topic)),
   );
 }
+
+const ASSESSED = new Set(["HIRE", "NO_HIRE"]);
+
+export function recentPerformance(problems, reports, limit = 8) {
+  const topicsByProblem = new Map(
+    problems.map((problem) => [problem.id, problem.topics ?? []]),
+  );
+  const attempts = reports
+    .filter(
+      (entry) =>
+        Number.isFinite(entry.at) && ASSESSED.has(entry.report?.decision),
+    )
+    .sort((left, right) => right.at - left.at)
+    .slice(0, limit);
+  if (!attempts.length) return null;
+
+  const passes = attempts.filter(
+    (entry) => entry.report.decision === "HIRE",
+  ).length;
+  const topicResults = new Map();
+  for (const entry of attempts) {
+    for (const topic of topicsByProblem.get(entry.problemId) ?? []) {
+      const result = topicResults.get(topic) ?? { passes: 0, misses: 0 };
+      result[entry.report.decision === "HIRE" ? "passes" : "misses"] += 1;
+      topicResults.set(topic, result);
+    }
+  }
+  const weakTopics = [...topicResults]
+    .filter(([, result]) => result.misses > result.passes)
+    .sort(
+      ([leftTopic, left], [rightTopic, right]) =>
+        right.misses - right.passes - (left.misses - left.passes) ||
+        leftTopic.localeCompare(rightTopic),
+    )
+    .map(([topic]) => topic);
+  const latestDecision = attempts[0].report.decision;
+  const streak = attempts.findIndex(
+    (entry) => entry.report.decision !== latestDecision,
+  );
+
+  return {
+    attempts: attempts.length,
+    passes,
+    misses: attempts.length - passes,
+    passRate: Math.round((passes / attempts.length) * 100),
+    streak: streak === -1 ? attempts.length : streak,
+    latestDecision,
+    weakTopics,
+  };
+}

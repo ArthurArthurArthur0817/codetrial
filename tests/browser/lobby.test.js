@@ -394,6 +394,56 @@ lobbyTest(
 );
 
 lobbyTest(
+  "recent assessed reports produce a practice snapshot",
+  async (page) => {
+    reports = [
+      {
+        problemId: EASY[0],
+        createdAt: 30,
+        payload: { report: { decision: "NO_HIRE" } },
+      },
+      {
+        problemId: EASY[1],
+        createdAt: 20,
+        payload: { report: { decision: "HIRE" } },
+      },
+      {
+        problemId: MEDIUM[0],
+        createdAt: 10,
+        payload: { report: { decision: "NO_HIRE" } },
+      },
+    ];
+    await lobby(page);
+
+    assert.equal(
+      await page.locator("#recent-performance-summary").textContent(),
+      "Last 3 assessed interviews: 1 passed, 2 missed (33%).",
+    );
+    assert.equal(await page.locator("#recent-performance").isHidden(), false);
+  },
+);
+
+lobbyTest(
+  "a failed report load hides the recent practice snapshot",
+  async (page) => {
+    failing = new Set(["/api/reports"]);
+    await page.goto(`${base}/`, { waitUntil: "domcontentloaded" });
+    await settles(
+      page,
+      () =>
+        document.querySelector("#progress-summary").textContent ===
+        "Could not load saved account progress.",
+    );
+
+    assert.equal(await page.locator("#recent-performance").isHidden(), true);
+    assert.equal(
+      await page.locator("#recent-performance-summary").textContent(),
+      "",
+    );
+  },
+);
+
+lobbyTest(
   "a candidate who touches nothing gets the server's own default length",
   async (page) => {
     const state = await lobby(page);

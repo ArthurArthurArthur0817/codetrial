@@ -331,6 +331,23 @@ p {
   margin-top: 1rem;
 }
 
+.recent-performance {
+  margin-top: 1.5rem;
+  padding: 1rem;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.recent-performance h2,
+.recent-performance p {
+  margin: 0;
+}
+
+.recent-performance p + p {
+  margin-top: 0.5rem;
+}
+
 .interview-context {
   margin-top: 1rem;
   padding: 0.75rem;

@@ -19,7 +19,11 @@ import {
 import { reportMarkdown, reportMarkup } from "./render.js";
 import { downloadMarkdown, reportFilename } from "./download.js";
 import { loadPageMap } from "./problem-data.js";
-import { availableTopics, filterProblems } from "./practice-insights.js";
+import {
+  availableTopics,
+  filterProblems,
+  recentPerformance,
+} from "./practice-insights.js";
 import {
   parseGroundingFile,
   retainedSelection,
@@ -115,6 +119,11 @@ const nodes = {
   problemTopic: document.querySelector("#problem-topic"),
   problemFiltersReset: document.querySelector("#problem-filters-reset"),
   problemFilterSummary: document.querySelector("#problem-filter-summary"),
+  recentPerformance: document.querySelector("#recent-performance"),
+  recentPerformanceSummary: document.querySelector(
+    "#recent-performance-summary",
+  ),
+  recentWeakTopics: document.querySelector("#recent-weak-topics"),
 };
 
 // Every card carries the pressed state from the start, not only the one that
@@ -1169,6 +1178,7 @@ function showProgressError(message) {
   reports = [];
   progressNormalized = [];
   renderPracticeFocus();
+  hideRecentPerformance();
   nodes.historyHeader.hidden = false;
   nodes.history.hidden = false;
   nodes.progressSummary.textContent = message;
@@ -1180,6 +1190,7 @@ function showProgressError(message) {
 
 function showProgress(entries, suffix) {
   renderPracticeFocus();
+  renderRecentPerformance();
   // Normalized once here, not per render: the filters below only select from
   // these rows, so a dropdown change has nothing to re-sanitize.
   progressNormalized = normalizeProgressEntries(entries);
@@ -1200,6 +1211,30 @@ function showProgress(entries, suffix) {
     (value) => `${value} min`,
   );
   renderProgress();
+}
+
+function hideRecentPerformance() {
+  nodes.recentPerformance.hidden = true;
+  nodes.recentPerformanceSummary.textContent = "";
+  nodes.recentWeakTopics.textContent = "";
+}
+
+function renderRecentPerformance() {
+  const snapshot = recentPerformance(cards, reports);
+  if (!snapshot) {
+    hideRecentPerformance();
+    return;
+  }
+  const result = `${snapshot.passes} passed, ${snapshot.misses} missed`;
+  const streak =
+    snapshot.streak > 1
+      ? ` Current ${snapshot.latestDecision === "HIRE" ? "pass" : "miss"} streak: ${snapshot.streak}.`
+      : "";
+  nodes.recentPerformanceSummary.textContent = `Last ${snapshot.attempts} assessed interview${snapshot.attempts === 1 ? "" : "s"}: ${result} (${snapshot.passRate}%).${streak}`;
+  nodes.recentWeakTopics.textContent = snapshot.weakTopics.length
+    ? `Topics to revisit: ${snapshot.weakTopics.slice(0, 5).join(", ")}.`
+    : "No recurring weak topic in these interviews.";
+  nodes.recentPerformance.hidden = false;
 }
 
 /// `attempts` is what `progressModelFrom` already filtered, oldest first.
