@@ -2100,6 +2100,74 @@ fn binary_web_refuses_a_public_listener_without_a_session_secret() {
     );
 }
 
+/// A Gemini key with an invalid optional entry is a misconfigured single host,
+/// not the web half of a split deployment: serving without the local
+/// interviewer would leave every interview waiting for one that never comes.
+#[test]
+fn binary_web_refuses_an_invalid_agent_config_rather_than_serving_web_only() {
+    let dir = temp_path("web-invalid-agent-config");
+    std::fs::create_dir_all(&dir).unwrap();
+    let config = dir.join("invalid.env");
+    std::fs::write(
+        &config,
+        "LIVEKIT_URL=wss://example\nLIVEKIT_API_KEY=key\nLIVEKIT_API_SECRET=secret\nGOOGLE_API_KEY=google\nGEMINI_CONTEXT_TRIGGER_TOKENS=8000\nGEMINI_CONTEXT_TARGET_TOKENS=20000\n",
+    )
+    .unwrap();
+    let (code, _, stderr) = run_cli_until_exit(
+        &[
+            "web",
+            "--web-addr",
+            "127.0.0.1:0",
+            "--config",
+            config.to_str().unwrap(),
+        ],
+        &[],
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+
+    assert_eq!(code, 1, "{stderr}");
+    assert!(
+        stderr.contains("GEMINI_CONTEXT_TARGET_TOKENS must be less than"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("serving the web side only"), "{stderr}");
+}
+
+/// And the other direction: a config with no Gemini key at all is the web half
+/// of a split deployment, which serves and leaves the interviews to agents
+/// elsewhere. Refusing every incomplete config would break that deployment.
+#[test]
+fn binary_web_without_a_gemini_key_serves_the_web_side() {
+    let dir = temp_path("web-only-without-gemini");
+    std::fs::create_dir_all(&dir).unwrap();
+    let config = dir.join("web-only.env");
+    std::fs::write(
+        &config,
+        format!(
+            "LIVEKIT_URL=wss://example\nLIVEKIT_API_KEY=key\nLIVEKIT_API_SECRET=secret\nCODETRIAL_DB_PATH={}/accounts.db\n",
+            dir.display()
+        ),
+    )
+    .unwrap();
+
+    let (addr, _server) = spawn_server(|addr| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_codetrial"));
+        command
+            .args(["web", "--web-addr", addr, "--config"])
+            .arg(config.to_str().unwrap())
+            .env_remove("GOOGLE_API_KEY")
+            .env_remove("GOOGLE_API_KEYS");
+        command
+    });
+    let response = http_request(
+        &addr,
+        "GET /api/session HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+
+    assert!(response.starts_with("HTTP/1.1 200 OK"), "{response}");
+}
+
 /// The built-in `SESSION_SECRET` is not a weak key, it is a published one, so a
 /// production start on it has to refuse rather than mint forgeable cookies.
 ///

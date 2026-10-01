@@ -379,7 +379,15 @@ fn run_web(options: CliOptions) -> Result<(), String> {
     // purpose. The dispatcher never looks a provider up: it is handed the one
     // the token was minted from, so a second scan could only introduce a pool
     // that disagrees with the web side's.
-    let agent_config = codetrial::config::load_from_pairs(values).ok();
+    //
+    // Only keys that are absent make it the web half. An entry that is present
+    // but invalid is a mistake in this host's config, and serving on without
+    // the local interviewer would leave every interview waiting forever.
+    let agent_config = match codetrial::config::load_from_pairs(values) {
+        Ok(config) => Some(config),
+        Err(error) if error.invalid_entries.is_empty() => None,
+        Err(error) => return Err(error.to_string()),
+    };
     if agent_config.is_none() {
         eprintln!(
             "no GOOGLE_API_KEY or GOOGLE_API_KEYS: serving the web side only. Interviews will wait forever unless \
