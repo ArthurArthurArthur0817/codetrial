@@ -1208,7 +1208,7 @@ fn delivering_a_cold_thinking_brief_updates_the_editor_baseline() {
         code: "return 42".into(),
         code_shown: "return 0".into(),
         thinking_unheard_reply: true,
-        owed_reply_on_resume: Some("a reply".into()),
+        owed_reply_on_resume: Some(Some("a reply".into())),
         ..RuntimeState::default()
     };
     state.clear_thinking_debt();
@@ -1223,7 +1223,7 @@ fn a_spoken_hold_cuts_generation_so_the_next_reply_is_tracked_as_its_own() {
     let mut activity = RuntimeActivity::new(Instant::now());
     let (mut output_audio, _frames) = test_output_audio();
     activity.mark_speaking();
-    activity.note_output();
+    activity.note_output(Instant::now());
     assert!(activity.generating);
     cut_off_for_hold(&mut activity, &mut output_audio);
     assert!(!activity.generating);
@@ -1231,11 +1231,11 @@ fn a_spoken_hold_cuts_generation_so_the_next_reply_is_tracked_as_its_own() {
     assert_eq!(activity.floor, Floor::Listening);
     activity.mark_prompted(Instant::now(), Some("Continue"), false);
     assert!(!activity.prompt_behind_turn);
-    activity.note_output();
+    activity.note_output(Instant::now());
     assert!(!activity.owes_prompt());
     activity.generating = true;
     cut_off_for_hold(&mut activity, &mut output_audio);
-    activity.note_candidate_finished(Instant::now());
+    activity.note_candidate_finished(Instant::now(), false);
     assert!(activity.awaiting_reply_since.is_some());
     assert!(activity.owes_reply());
 }
@@ -1340,4 +1340,59 @@ fn a_hold_refuses_hints_and_endings_and_the_refusal_is_counted() {
     // Reading the editor is not speaking, so the hold does not refuse it.
     let read = execute_tool_call(&mut state, &call(TOOL_READ_EDITOR, serde_json::json!({})));
     assert!(read.get("error").is_none());
+}
+
+/// A hold that cuts Jim off mid-turn applies the pause's rule: a generation
+/// still producing is discarded, one that stalled is not, though its late
+/// ending is kept from settling what the hold's release asks for. A discard
+/// already under way is kept either way.
+#[test]
+fn a_hold_cuts_a_live_turn_and_spares_a_stalled_one() {
+    let start = Instant::now();
+    let (mut output_audio, _frames) = test_output_audio();
+
+    let mut live = RuntimeActivity::new(start);
+    live.note_output(Instant::now());
+    cut_off_for_hold(&mut live, &mut output_audio);
+    assert!(live.discarding_output);
+    assert!(!live.stale_turn_pending);
+
+    let mut stalled = RuntimeActivity::new(start);
+    stalled.note_output(start - super::super::turn::PROMPT_STALL);
+    cut_off_for_hold(&mut stalled, &mut output_audio);
+    assert!(!stalled.discarding_output);
+    assert!(stalled.stale_turn_pending);
+
+    let mut idle = RuntimeActivity::new(start);
+    cut_off_for_hold(&mut idle, &mut output_audio);
+    assert!(!idle.discarding_output);
+    assert!(!idle.stale_turn_pending);
+
+    let mut discarding = RuntimeActivity::new(start);
+    discarding.discarding_output = true;
+    cut_off_for_hold(&mut discarding, &mut output_audio);
+    assert!(discarding.discarding_output, "a discard under way is kept");
+}
+
+/// A turn's end, dispatched or swallowed, confirms a spoken request for
+/// thinking time whose utterance it ends, and a candidate holding the floor
+/// is owed no reply for the speech that asked for it.
+#[test]
+fn a_turn_end_settles_a_requested_hold() {
+    let start = Instant::now();
+    let mut state = RuntimeState::default();
+    let mut activity = RuntimeActivity::new(start);
+    activity.note_candidate_finished(start, false);
+    activity.observe_thinking_fragment(&mut state, "Let me think", start, 100);
+    assert!(state.thinking_hold.is_requested());
+    settle_hold_at_turn_end(&mut state, &mut activity);
+    assert!(state.thinking_hold.is_declared());
+    assert!(!activity.reply_in_flight());
+
+    // With no hold, a turn's end leaves the candidate's debt alone.
+    let mut state = RuntimeState::default();
+    let mut activity = RuntimeActivity::new(start);
+    activity.note_candidate_finished(start, false);
+    settle_hold_at_turn_end(&mut state, &mut activity);
+    assert!(activity.reply_in_flight());
 }

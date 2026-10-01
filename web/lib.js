@@ -605,8 +605,8 @@ const textEncoder = new TextEncoder();
 /// function-local, moving it left the whole suite green with the supported-card
 /// branch no longer rendering, which is the defect a local constant invites.
 export const ACTIVE_CONTRACT = {
-  bundleVersion: 25,
-  livePromptVersion: 17,
+  bundleVersion: 26,
+  livePromptVersion: 18,
   reportPromptVersion: 15,
   reportSchemaVersion: 2,
   rubricVersion: 1,
@@ -807,7 +807,14 @@ function reportRounds(raw, interviewLoop) {
 /// An unrecognized value is a report from an agent that ends sessions some way
 /// this build does not know about, and null says so; guessing is what reading
 /// the browser's own countdown was doing before this field existed.
-const END_REASONS = ["time_up", "candidate_ended", "interview_complete"];
+/// `interviewer_unavailable` is the agent giving up on a Gemini socket that
+/// stopped answering, and reporting on the session instead of leaving silently.
+const END_REASONS = [
+  "time_up",
+  "candidate_ended",
+  "interview_complete",
+  "interviewer_unavailable",
+];
 
 export function endReason(raw) {
   return END_REASONS.includes(raw) ? raw : null;
@@ -1456,13 +1463,18 @@ function windowSpan(start, end) {
 /// that are about what the server actually publishes rather than about what the
 /// state names suggest.
 ///
-/// `src/livekit.rs` declares two agent states, `listening` and `speaking`, and
-/// every `set_agent_state` call writes one of them; nothing writes `thinking`.
-/// So a real interview records `listening, speaking, listening, speaking, ...`,
-/// and a window that closed only on `thinking` never closed at all: one row per
-/// interview reading "duration not recorded", however many questions were asked.
-/// `thinking` still closes a window, for a deployment that publishes it, but it
-/// is not what closes one today.
+/// `src/livekit.rs` writes `thinking` only when a reply it owes has gone four
+/// seconds without starting, timed from the candidate's latest transcript
+/// fragment, or when a reply that started has produced nothing for four seconds
+/// after its audio ran out. A real interview therefore records mostly
+/// `listening, speaking, listening, speaking, ...`, and a window that closed
+/// only on `thinking` would miss nearly every question: one row per interview
+/// reading "duration not recorded", however many were asked. `thinking` closes
+/// a window too, which cuts a slow reply's wait off the end of that one window.
+/// Only the first case can: the second follows a `speaking` row, when no window
+/// is open. So on a slow provider a candidate who pauses four seconds
+/// mid-answer closes the window there, short of the answer's end; the page says
+/// so beside the number.
 ///
 /// Closing on `speaking` puts CodeTrial's own model round trip inside the
 /// number, because the interviewer starts speaking after it rather than after
@@ -1474,7 +1486,10 @@ function windowSpan(start, end) {
 /// non-questions from opening a window. The first `avatar` row of almost every
 /// interview is a `listening` written on first sight of the agent participant,
 /// before a question exists. A `listening` that follows a `thinking` is the
-/// interviewer having thought and said nothing. And a `listening` with no
+/// interviewer having thought and said nothing, or the candidate speaking again
+/// before a late reply started, which `on_input_transcript` in
+/// `src/livekit/session.rs` publishes. Neither is a question. And a
+/// `listening` with no
 /// earlier row at all is a replay that starts mid-interview. A latch would admit
 /// the second of those, because "has spoken at some point" stays true.
 ///

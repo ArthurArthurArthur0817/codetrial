@@ -211,6 +211,7 @@ The common ones:
 | `GEMINI_LIVE_MODEL` | `gemini-3.1-flash-live-preview` | Realtime interviewer model |
 | `GEMINI_REPORT_MODEL` | `gemini-3.1-flash-lite` | Report model |
 | `CODETRIAL_MAX_INTERIM_REVIEWS` | `6` | Quiet-pause report-model reviews per interview; `0` disables them and `72` is the maximum |
+| `CODETRIAL_GEMINI_REPLY_TIMEOUT_S` | `45` | Seconds an owed interviewer reply may go without output before the Live socket is replaced (20–120); see [degradation controls](docs/provider-cost-and-degradation.md) |
 | `CODETRIAL_GEMINI_CANDIDATE_VIDEO_ENABLED` | `false` | Forward candidate video to Gemini, one low-resolution frame in five seconds |
 | `CODETRIAL_COMPILER_EXPLORER_ENABLED` | `true` | Enable remote C, C++, and Java runs |
 | `CODETRIAL_MAX_CONCURRENT_INTERVIEWS` | `16` | Interviews one `web` process hosts agents for |

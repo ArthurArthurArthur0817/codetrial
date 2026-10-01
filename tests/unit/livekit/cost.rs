@@ -154,7 +154,7 @@ async fn benchmark_response(
                         // still owed would refuse every later checkpoint.
                         if let Some(activity) = activity.as_deref_mut() {
                             activity.tool_response_outstanding = false;
-                            activity.note_turn_boundary();
+                            activity.note_turn_boundary(std::time::Instant::now());
                             activity.mark_listening();
                         }
                         return Ok((usage, 0, text.clone()));
@@ -188,7 +188,7 @@ async fn benchmark_response(
                 GeminiEvent::InputTranscript(fragment) => candidate_text.push_str(&fragment),
                 GeminiEvent::Audio { bytes, .. } if !bytes.is_empty() => {
                     if let Some(activity) = activity.as_deref_mut() {
-                        activity.note_output();
+                        activity.note_output(std::time::Instant::now());
                         activity.awaiting_reply_since = None;
                     }
                     first_audio.get_or_insert(started.elapsed().as_millis());
@@ -196,7 +196,7 @@ async fn benchmark_response(
                 }
                 GeminiEvent::OutputTranscript(fragment) | GeminiEvent::Text(fragment) => {
                     if let Some(activity) = activity.as_deref_mut() {
-                        activity.note_output();
+                        activity.note_output(std::time::Instant::now());
                     }
                     text.push_str(&fragment);
                     tool_pending = false;
@@ -223,7 +223,7 @@ async fn benchmark_response(
                     if let Some(activity) = activity.as_deref_mut() {
                         activity.observe_turn_complete(state.context_compression);
                         activity.tool_response_outstanding = false;
-                        activity.note_turn_boundary();
+                        activity.note_turn_boundary(std::time::Instant::now());
                         activity.mark_listening();
                     }
                     if !candidate_text.is_empty() {

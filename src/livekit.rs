@@ -144,6 +144,12 @@ const COLD_OPEN_BACKOFF: Duration = Duration::from_secs(2);
 const LIVEKIT_AGENT_STATE: &str = "lk.agent.state";
 const AGENT_STATE_LISTENING: &str = "listening";
 const AGENT_STATE_SPEAKING: &str = "speaking";
+
+/// A reply is owed and has gone `REPLY_WAIT_SHOWN` without starting, or has
+/// stopped producing after its audio ran out. The
+/// browser already labels this state; nothing published it before issue 95,
+/// so a stalled interviewer and one listening on purpose looked the same.
+const AGENT_STATE_THINKING: &str = "thinking";
 const DUPLICATE_AGENT_ISOLATION_ATTEMPTS: usize = 20;
 const WRAP_UP_WAIT: Duration = Duration::from_secs(8);
 
@@ -336,6 +342,29 @@ impl DeferredRestart {
     }
 }
 
+/// The age a replaced socket is judged by for the restart budget. One that
+/// left a reply unanswered is not healthy just because it stayed connected:
+/// the watchdog found it silent, or it still owed a reply or was partway
+/// through one when a `GoAway` or the server closed it. A provider that closes
+/// silent sockets a minute in would otherwise reset the run on every one and
+/// never let the budget end the interview.
+fn replaced_socket_age(age: Duration, reply_timeout: bool, activity: &RuntimeActivity) -> Duration {
+    if reply_timeout || activity.reply_unfinished() {
+        Duration::ZERO
+    } else {
+        age
+    }
+}
+
+/// The room loop's activity, with the limits the operator configured fixed for
+/// the whole interview.
+fn runtime_activity(config: &AgentConfig, started_at: Instant, session_id: u64) -> RuntimeActivity {
+    RuntimeActivity::for_interview(started_at, config.max_interim_reviews, session_id)
+        .with_reply_timeout(Duration::from_secs(u64::from(
+            config.gemini_reply_timeout_s,
+        )))
+}
+
 /// Opens a session that remembers nothing, retrying while the budget allows.
 ///
 /// `Err` means credentials are unavailable or retries stopped, ending the
@@ -428,9 +457,11 @@ impl LiveOutcome {
 /// be.
 ///
 /// `Break` means the interview is over. Nothing restarts it: the dispatcher
-/// spawns one task per room and drops the slot when it returns, so this leaves
-/// the candidate in a live room with no interviewer, which is what the browser
-/// says when it sees the agent go.
+/// spawns one task per room and drops the slot when it returns. It ends through
+/// `end_through_control` all the same, so the report is written from the
+/// session this process holds. A budget spent on replacements that never
+/// answered is a provider outage, and the candidate who sat through it still
+/// did the work; leaving with no report handed them a live room and nothing.
 ///
 /// That is why a missing or rejected resumption handle is not the end. Resuming
 /// keeps what was said; a cold session keeps only what the system instruction
@@ -444,7 +475,8 @@ async fn replace_gemini_session(
     room: &Room,
     context: &mut GeminiEventContext<'_>,
     interview: InterviewContext<'_>,
-    restarts: &mut usize,
+    loops: &mut RoomLoop,
+    reply_timeout: bool,
 ) -> Result<ControlFlow<()>, Box<dyn std::error::Error + Send + Sync>> {
     // Neither a resume nor a cold open on the same key can get past a project
     // that cannot pay, so the budget is not spent learning that twice more.
@@ -458,14 +490,14 @@ async fn replace_gemini_session(
         return Ok(ControlFlow::Break(()));
     }
     let handle = context.gemini.recovery_handle(interview.keys);
-    if !take_restart_attempt(restarts, context.gemini.age()) {
+    let age = replaced_socket_age(context.gemini.age(), reply_timeout, context.activity);
+    if !take_restart_attempt(&mut loops.restarts, age) {
         context.activity.live_exit = LiveOutcome::GeminiUnreachable;
         eprintln!(
-            "Gemini closed {restarts} sockets in a row without one of them lasting; ending interview room={}",
-            interview.boot.room_name
+            "Gemini closed {} sockets in a row without one of them lasting; ending interview with a report room={}",
+            loops.restarts, interview.boot.room_name
         );
-        leave_room(room).await;
-        return Ok(ControlFlow::Break(()));
+        return end_without_interviewer(room, context, interview, loops).await;
     }
 
     // Said before the attempt, not after it: the whole point is to cover the
@@ -511,19 +543,29 @@ async fn replace_gemini_session(
     let resumed = resumed_session.is_some();
     let session = match resumed_session {
         Some(session) => Ok(session),
-        None => open_cold_session(interview, restarts).await,
+        None => open_cold_session(interview, &mut loops.restarts).await,
     };
     let session = match session {
         Ok(session) => session,
         Err(error) => {
-            context.activity.live_exit =
-                LiveOutcome::from_error(error.as_ref(), LiveOutcome::GeminiUnreachable);
+            let outcome = LiveOutcome::from_error(error.as_ref(), LiveOutcome::GeminiUnreachable);
+            context.activity.live_exit = outcome;
+
+            // A project that cannot pay would be billed for the report too, so
+            // it leaves the way the billing check above does.
+            if outcome == LiveOutcome::Billing {
+                eprintln!(
+                    "Gemini could not be reached: the project cannot pay; ending interview room={}",
+                    interview.boot.room_name
+                );
+                leave_room(room).await;
+                return Ok(ControlFlow::Break(()));
+            }
             eprintln!(
-                "Gemini could not be reached; ending interview room={}",
+                "Gemini could not be reached; ending interview with a report room={}",
                 interview.boot.room_name
             );
-            leave_room(room).await;
-            return Ok(ControlFlow::Break(()));
+            return end_without_interviewer(room, context, interview, loops).await;
         }
     };
     context
@@ -557,7 +599,7 @@ async fn replace_gemini_session(
         if resumed {
             Replacement::Resumed { owed }
         } else {
-            Replacement::Cold
+            Replacement::Cold { owed }
         },
         owed_prompt.as_deref(),
     )
@@ -574,6 +616,36 @@ async fn replace_gemini_session(
         );
     }
     Ok(ControlFlow::Continue(()))
+}
+
+/// The Live socket cannot be kept, so the interview ends the way the deadline
+/// ends it, with no goodbye to ask for. Already-ended sessions are not ended
+/// twice; the room is left all the same.
+async fn end_without_interviewer(
+    room: &Room,
+    context: &mut GeminiEventContext<'_>,
+    interview: InterviewContext<'_>,
+    loops: &mut RoomLoop,
+) -> Result<ControlFlow<()>, Box<dyn std::error::Error + Send + Sync>> {
+    // A replacement that gave up after announcing itself would leave the
+    // reconnecting notice up over the report. Not `?`: the report matters more
+    // than the notice.
+    if let Err(error) = publish_interviewer_state(room, false).await {
+        eprintln!("clearing the reconnecting notice failed ({error}); writing the report anyway");
+    }
+    if context.state.ended {
+        leave_room(room).await;
+    } else {
+        end_through_control(
+            room,
+            context,
+            interview,
+            INTERVIEWER_UNAVAILABLE,
+            &mut loops.interim_review,
+        )
+        .await?;
+    }
+    Ok(ControlFlow::Break(()))
 }
 
 /// Ends what the dead socket left in flight, and reports whether the new one
@@ -606,11 +678,12 @@ fn hand_over(
         "none".to_string()
     };
     let debt = format!(
-        "candidate={} prompt={prompt} tool={}",
+        "candidate={} prompt={prompt} tool={} generating={}",
         activity.reply_in_flight(),
         activity.tool_response_outstanding,
+        activity.generating,
     );
-    let owed = activity.owes_reply();
+    let owed = activity.reply_unfinished();
     cut_off_turn(activity, output_audio);
     clear_abandoned_socket_work(state, activity);
     activity.evidence_shown = None;
@@ -621,10 +694,21 @@ fn hand_over(
 #[derive(Clone, Copy)]
 enum Replacement {
     /// A session that remembers nothing, which always has to be briefed.
-    Cold,
+    /// `owed` as below: the briefing alone grounds the new socket, and without
+    /// the owed-reply request it resumes the round rather than answering the
+    /// candidate who is still waiting.
+    Cold { owed: bool },
     /// Continued from a resumption handle. `owed` when the old socket owed a
     /// reply it never produced.
     Resumed { owed: bool },
+}
+
+impl Replacement {
+    fn owed(self) -> bool {
+        match self {
+            Self::Cold { owed } | Self::Resumed { owed } => owed,
+        }
+    }
 }
 
 /// Tells a replacement socket what it cannot know on its own, and reports
@@ -688,20 +772,11 @@ fn keep_recovery_debt(
     replacement: Replacement,
     owed_prompt: Option<&str>,
 ) {
-    match replacement {
-        Replacement::Cold => {
-            state.needs_cold_brief = true;
-
-            // The cold briefing asks for the reply the old socket owed, so one
-            // that never went out owes it too.
-            if let Some(prompt) = owed_prompt {
-                activity.owe_prompt(Instant::now(), Some(prompt.to_string()));
-            }
-        }
-        Replacement::Resumed { owed: true } => {
-            activity.owe_prompt(Instant::now(), owed_prompt.map(str::to_string));
-        }
-        Replacement::Resumed { owed: false } => {}
+    if matches!(replacement, Replacement::Cold { .. }) {
+        state.needs_cold_brief = true;
+    }
+    if replacement.owed() {
+        activity.owe_prompt(Instant::now(), owed_prompt.map(str::to_string));
     }
 }
 
@@ -719,16 +794,16 @@ async fn send_recovery_brief(
     replacement: Replacement,
     owed_prompt: Option<&str>,
 ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
-    if let Replacement::Resumed { owed } = replacement
-        && !state.needs_cold_brief
-    {
-        // A reply owed during a pause cannot be asked for yet, since it would
-        // be discarded; unpausing asks for it instead of the plain resume line.
-        let held = state.floor_held();
+    // A reply owed during a pause or a hold cannot be asked for yet, since it
+    // would be dropped; ending it asks for it instead, on either kind of
+    // socket.
+    let owed = replacement.owed();
+    let held = state.floor_held();
+    if owed && held {
+        hold_owed_reply(state, owed_prompt);
+    }
+    if matches!(replacement, Replacement::Resumed { .. }) && !state.needs_cold_brief {
         let reply = owed && !held;
-        if owed && held {
-            state.owed_reply_on_resume = Some(crate::agent::owed_reply(owed_prompt));
-        }
         let mut context = crate::agent::resumed_context(state, reply, owed_prompt);
 
         // A resumed session keeps what a hold dropped in its history. The reply
@@ -753,13 +828,10 @@ async fn send_recovery_brief(
         }
         return Ok(reply);
     }
-    if state.floor_held() {
-        // `hand_over` has already taken the prompt off the activity, so this is
-        // the only place left that knows the old socket owed it. It is asked
-        // for when the pause or hold ends.
-        if let Some(prompt) = owed_prompt {
-            state.owed_reply_on_resume = Some(crate::agent::owed_reply(Some(prompt)));
-        }
+    if held {
+        // The reply the old socket owed was held above, since `hand_over` has
+        // already taken the prompt off the activity; it is asked for when the
+        // pause or hold ends.
         if state.paused {
             // Nothing reaches the new socket until the pause ends, so its
             // briefing can wait for the resume.
@@ -777,10 +849,10 @@ async fn send_recovery_brief(
         state.needs_cold_brief = false;
         return Ok(false);
     }
-    let mut briefing = crate::agent::cold_restart(state);
-    if let Some(prompt) = owed_prompt {
-        briefing.push_str(&format!(" {}", crate::agent::owed_reply(Some(prompt))));
-    }
+    let briefing = crate::agent::with_owed_reply(
+        crate::agent::cold_restart(state),
+        owed.then_some(owed_prompt),
+    );
     let briefing = crate::agent::with_timer(state, briefing);
     state.code_shown = state.code.clone();
     send_model_text(
@@ -793,6 +865,17 @@ async fn send_recovery_brief(
     .await?;
     state.clear_thinking_debt();
     Ok(true)
+}
+
+/// Keeps a reply owed during a pause for the unpause to ask for, whether the
+/// pause found it owed or a replacement during the pause did. A known event is
+/// never replaced by an unknown one: a candidate transcript landing in the
+/// pause leaves `hand_over` no prompt text, but the event it was paused on is
+/// still the one the reply belongs to.
+fn hold_owed_reply(state: &mut RuntimeState, owed_prompt: Option<&str>) {
+    if owed_prompt.is_some() || state.owed_reply_on_resume.is_none() {
+        state.owed_reply_on_resume = Some(owed_prompt.map(str::to_string));
+    }
 }
 
 /// Drops work that could only have been completed by the replaced socket.
@@ -812,6 +895,8 @@ fn clear_abandoned_socket_work(state: &mut RuntimeState, activity: &mut RuntimeA
     activity.reply_after_thinking_discard = false;
     activity.thinking_reply_fallback = None;
     activity.thinking_ignore_input_until = None;
+    activity.interrupted_turn_pending = false;
+    activity.stale_turn_pending = false;
     activity.tool_response_outstanding = false;
     state.end_requested = false;
 }
@@ -1061,11 +1146,7 @@ async fn open_session<'a>(
     let mut turn = TurnState {
         state: initial_runtime_state(&boot, started_at),
         agent_state: std::mem::take(&mut agent_state),
-        activity: RuntimeActivity::for_interview(
-            started_at,
-            config.max_interim_reviews,
-            session_id,
-        ),
+        activity: runtime_activity(config, started_at, session_id),
         turns: SpeakerTurns::default(),
     };
     turn.state
@@ -1248,12 +1329,67 @@ async fn on_watch_tick(
             interview.boot.room_name
         );
     }
+
+    // A close waits on its tool acknowledgement, and the check after each
+    // Gemini event is what normally sees it through. A socket that never sends
+    // the acknowledgement sends no event either; the stall above releases the
+    // hold, and this is the only place left to act on it. Ahead of the reply
+    // watch, which stays out of a requested close, and of the nudges it holds
+    // back, which were what used to provoke the event.
+    if ready_to_close(context.state, context.activity) {
+        eprintln!(
+            "interviewer ended the interview: trigger=stalled_acknowledgement room={}",
+            interview.boot.room_name
+        );
+        end_through_control(
+            room,
+            context,
+            interview,
+            "interview_complete",
+            &mut loops.interim_review,
+        )
+        .await?;
+        return Ok(ControlFlow::Break(()));
+    }
+    if reply_watch(
+        context.state,
+        context.activity,
+        tick_at,
+        context.output_audio.is_playing(),
+    ) == ReplyWatch::Recover
+    {
+        loops.deferred_restart.cancel();
+        eprintln!(
+            "Gemini reply timed out after {}s; reconnecting at={} room={}",
+            context.activity.reply_timeout.as_secs(),
+            log_clock(context.state),
+            interview.boot.room_name
+        );
+        return replace_gemini_session(room, context, interview, loops, true).await;
+    }
     if stalls.spend_restart
         && spend_deferred_restart(room, context, loops, interview, "stall")
             .await?
             .is_break()
     {
         return Ok(ControlFlow::Break(()));
+    }
+
+    // Read again rather than reused from above: the held `GoAway` just spent
+    // may have replaced the socket, and a cold replacement always owes the
+    // reply to its briefing.
+    let reply = reply_watch(
+        context.state,
+        context.activity,
+        tick_at,
+        context.output_audio.is_playing(),
+    );
+
+    // Every path that settles the wait already publishes the next state: audio
+    // publishes `speaking`, a completed or cut turn, a replacement and a pause
+    // publish `listening`, and so does the candidate speaking again.
+    if reply == (ReplyWatch::Owed { shown: true }) {
+        set_agent_state(room, context.agent_state, AGENT_STATE_THINKING).await?;
     }
 
     // Not `?`, for the reason the nudge below gives. A ping that times out has
@@ -1361,6 +1497,12 @@ async fn on_watch_tick(
         return Ok(ControlFlow::Continue(()));
     }
     maybe_refresh_context(room, context).await;
+
+    // A nudge cannot repair an unanswered turn and would replace the prompt
+    // debt (and its timer) before the watchdog could recover it.
+    if reply != ReplyWatch::Settled {
+        return Ok(ControlFlow::Continue(()));
+    }
     if let Some(prompt) = context.activity.watch_prompt(context.state, tick_at) {
         // Not `?`. Every write below is one the reader may be about to explain:
         // a socket Gemini has closed fails the next send long before
@@ -1404,6 +1546,127 @@ async fn on_watch_tick(
     Ok(ControlFlow::Continue(()))
 }
 
+fn completed_live_reply(
+    state: &RuntimeState,
+    activity: &RuntimeActivity,
+    event: &GeminiEvent,
+) -> bool {
+    matches!(event, GeminiEvent::TurnComplete)
+        && activity.generating
+        && !activity.discarding_output
+        && !state.paused
+}
+
+/// What a watch tick does about the reply the interviewer owes, decided in one
+/// place so the order the tick acts in is the order a test can drive.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ReplyWatch {
+    /// Nothing is owed or under way, so the silence nudges may run.
+    Settled,
+    /// A reply is owed or under way, and not yet overdue. `shown` once it has
+    /// waited long
+    /// enough that the room should say the interviewer is working on it. No
+    /// nudge either way: one would replace the debt and its timer.
+    Owed { shown: bool },
+    /// Owed past the reply timeout: replace the socket.
+    Recover,
+}
+
+/// While the floor is held, by a pause or by the candidate keeping it to
+/// think, nothing is waited on and nothing is shown: the interviewer's silence
+/// is the one the candidate asked for, and replies generated meanwhile are
+/// dropped on purpose. Once a close is requested the silence is the one the
+/// tool response asked for, so neither recovery nor the wait applies, but the
+/// nudges still stay out of it.
+fn reply_watch(
+    state: &RuntimeState,
+    activity: &RuntimeActivity,
+    now: Instant,
+    audio_playing: bool,
+) -> ReplyWatch {
+    // Checked first: a reply that can time out is always unfinished.
+    if !activity.reply_unfinished() {
+        return ReplyWatch::Settled;
+    }
+    let watched = !state.floor_held() && !state.end_requested;
+    if watched && activity.reply_timed_out(now, audio_playing) {
+        return ReplyWatch::Recover;
+    }
+    ReplyWatch::Owed {
+        shown: watched && activity.reply_visibly_late(now, audio_playing),
+    }
+}
+
+/// Pausing cancels the old turn even if no output has taken the floor yet.
+/// Resuming rebases debt that provider events created during the pause.
+fn update_pause_activity(
+    state: &mut RuntimeState,
+    activity: &mut RuntimeActivity,
+    output_audio: &mut OutputAudio,
+    now: Instant,
+) {
+    if !state.paused {
+        activity.resume_reply_wait(now);
+        return;
+    }
+    if activity.reply_unfinished() {
+        let owed_prompt = activity
+            .prompt_text
+            .as_deref()
+            .filter(|_| activity.owes_prompt());
+        hold_owed_reply(state, owed_prompt);
+    }
+    activity.discarding_output = pause_leaves_output_in_flight(activity, now);
+    activity.stale_turn_pending = activity.generating && !activity.discarding_output;
+    cut_off_turn(activity, output_audio);
+}
+
+/// The event a resume owes a reply for, read before the resume prompt is
+/// composed around it. The cold briefing the resume may also carry stays in
+/// the state until a send pays it, so it needs no copy here.
+struct ResumeDebt {
+    owed_prompt: Option<String>,
+}
+
+impl ResumeDebt {
+    fn capture(state: &RuntimeState) -> Option<Self> {
+        state.paused.then(|| Self {
+            owed_prompt: state.owed_reply_on_resume.clone().flatten(),
+        })
+    }
+}
+
+/// A failed resume must restore the raw debt, never the composed briefing.
+fn record_event_prompt<E>(
+    state: &mut RuntimeState,
+    activity: &mut RuntimeActivity,
+    prompt: &str,
+    resume_debt: Option<&ResumeDebt>,
+    sent: Result<(), E>,
+    now: Instant,
+) -> Result<(), E> {
+    match sent {
+        Ok(()) => {
+            let owed_prompt = match resume_debt {
+                Some(debt) => debt.owed_prompt.as_deref(),
+                None => Some(prompt),
+            };
+            activity.mark_prompted(now, owed_prompt, false);
+            Ok(())
+        }
+        Err(error) => {
+            // The unpause leaves its debt in the state until a send pays it.
+            // The owed event moves onto the activity, where the next socket's
+            // briefing names it once; left in both, it was named twice.
+            if let Some(debt) = resume_debt {
+                state.owed_reply_on_resume = None;
+                activity.owe_prompt(now, debt.owed_prompt.clone());
+            }
+            Err(error)
+        }
+    }
+}
+
 /// Failed writes leave the behavioral invitation available after reconnect.
 /// Cooldowns still bound retries while the old socket reports its close.
 async fn send_watched_prompt<E>(
@@ -1445,7 +1708,7 @@ async fn on_gemini_event(
             );
         }
         loops.deferred_restart.cancel();
-        if replace_gemini_session(room, context, interview, &mut loops.restarts)
+        if replace_gemini_session(room, context, interview, loops, false)
             .await?
             .is_break()
         {
@@ -1453,6 +1716,13 @@ async fn on_gemini_event(
         }
         return Ok(ControlFlow::Continue(()));
     };
+
+    // Completed output proves recovery worked; merely staying connected does
+    // not clear consecutive watchdog failures.
+    if completed_live_reply(context.state, context.activity, &event) {
+        loops.restarts = 0;
+    }
+
     if let GeminiEvent::GoAway { time_left } = &event {
         eprintln!(
             "Gemini requested a transport restart in {time_left}; room={}",
@@ -1480,7 +1750,7 @@ async fn on_gemini_event(
             );
             return Ok(ControlFlow::Continue(()));
         }
-        if replace_gemini_session(room, context, interview, &mut loops.restarts)
+        if replace_gemini_session(room, context, interview, loops, false)
             .await?
             .is_break()
         {
@@ -1516,7 +1786,7 @@ async fn on_gemini_event(
     // the deadline still ends it.
     if ready_to_close(context.state, context.activity) {
         eprintln!(
-            "interviewer ended the interview: room={}",
+            "interviewer ended the interview: trigger=acknowledged room={}",
             interview.boot.room_name
         );
         end_through_control(
@@ -1565,7 +1835,7 @@ async fn spend_deferred_restart(
         log_clock(context.state),
         interview.boot.room_name
     );
-    replace_gemini_session(room, context, interview, &mut loops.restarts).await
+    replace_gemini_session(room, context, interview, loops, false).await
 }
 
 /// Wake for a queued playout deadline even when it has already elapsed.
@@ -2381,6 +2651,7 @@ async fn handle_data_packet(
     payload: &serde_json::Value,
     received: bool,
 ) -> Result<ControlFlow<()>, Box<dyn std::error::Error + Send + Sync>> {
+    let resume_debt = ResumeDebt::capture(context.state);
     // One reading per packet, shared by every entry the packet produces.
     let receipt_timestamp_ms = crate::current_epoch_millis();
     let packet_at = Instant::now();
@@ -2448,10 +2719,13 @@ async fn handle_data_packet(
                 &serde_json::json!({ "type": "pause_state", "paused": paused }),
             )?)
             .await?;
-        if paused && context.activity.floor != Floor::Listening {
-            context.activity.discarding_output =
-                pause_leaves_output_in_flight(context.activity.floor);
-            cut_off_turn(context.activity, context.output_audio);
+        update_pause_activity(
+            context.state,
+            context.activity,
+            context.output_audio,
+            Instant::now(),
+        );
+        if paused {
             close_turns(room, context).await?;
             set_agent_state(room, context.agent_state, AGENT_STATE_LISTENING).await?;
         }
@@ -2487,23 +2761,28 @@ async fn handle_data_packet(
     if let Some(prompt) = reply {
         // Not `?`: a failed write here ended the interview with no report, and
         // the socket it failed on is replaced when the close is reported.
-        match send_model_text(
+        let sent = send_model_text(
             context.gemini,
             context.state,
             ModelInputKind::Turn,
             TurnCause::Turn,
             &prompt,
         )
-        .await
-        {
+        .await;
+        match record_event_prompt(
+            context.state,
+            context.activity,
+            &prompt,
+            resume_debt
+                .as_ref()
+                .filter(|_| result.pause_changed == Some(false)),
+            sent,
+            Instant::now(),
+        ) {
             Ok(()) => {
                 if result.carries_thinking_debt {
                     context.state.clear_thinking_debt();
                 }
-
-                context
-                    .activity
-                    .mark_prompted(Instant::now(), Some(&prompt), false);
 
                 // Which data event made Jim speak, against the progress it was
                 // sent with, so a transcript that repeats a step can be matched
@@ -2520,7 +2799,9 @@ async fn handle_data_packet(
                 );
             }
             Err(error) => {
-                if result.carries_thinking_debt {
+                // A failed resume is owed by `record_event_prompt`; the debt it
+                // carried is still in the state, unpaid, for the next socket.
+                if result.carries_thinking_debt && result.pause_changed != Some(false) {
                     context
                         .activity
                         .mark_prompted(Instant::now(), Some(&prompt), false);

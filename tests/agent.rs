@@ -295,6 +295,16 @@ fn prompt_samples() -> Value {
         "silenceWorking": silence_nudge(&RuntimeState::default(), &working, Some(&excerpt)),
         "coldRestart": cold_restart(&cold_state),
         "coldRestartEmpty": cold_restart(&RuntimeState::default()),
+
+        // The forms a recovery actually sends when a reply was owed: a cold
+        // briefing naming the lost event, and a resume line owing the
+        // candidate's own turn. Joined at the call sites rather than built by
+        // one builder, so without these the digest could not see them.
+        "coldRestartOwed": with_owed_reply(
+            cold_restart(&cold_state),
+            Some(Some("[SYSTEM EVENT] The candidate just ran the built-in test cases and every one passed.")),
+        ),
+        "resumeOwed": with_owed_reply(resume(false), Some(None)),
         "review": proactive_review(&RuntimeState::default(), &working_changed, Some(&excerpt)),
         "reviewWithoutExcerpt": proactive_review(&RuntimeState::default(), &working, None),
         "time": time_warning(&RuntimeState::default()),

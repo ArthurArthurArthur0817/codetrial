@@ -14,12 +14,36 @@ use crate::agent::ThinkingHold;
 /// where the candidate is waiting to be answered.
 #[test]
 fn only_a_turn_still_being_produced_leaves_output_to_discard() {
-    assert!(pause_leaves_output_in_flight(Floor::Speaking));
-    assert!(
-        !pause_leaves_output_in_flight(Floor::AwaitingPlayout),
-        "the turn is complete and draining, so no event is coming to disarm this"
-    );
-    assert!(!pause_leaves_output_in_flight(Floor::Listening));
+    let now = Instant::now();
+    let mut activity = RuntimeActivity::new(now);
+    activity.floor = Floor::Speaking;
+    assert!(pause_leaves_output_in_flight(&activity, now));
+    activity.floor = Floor::AwaitingPlayout;
+    assert!(!pause_leaves_output_in_flight(&activity, now));
+    activity.floor = Floor::Listening;
+    assert!(!pause_leaves_output_in_flight(&activity, now));
+    activity.note_output(now);
+    assert!(pause_leaves_output_in_flight(&activity, now));
+
+    // A generation silent for a stall is dead, and nothing will end its turn,
+    // including the floor its audio took.
+    let stalled = now + PROMPT_STALL;
+    let just_short = stalled - Duration::from_millis(1);
+    activity.note_reply_audible();
+    assert_eq!(activity.floor, Floor::Speaking);
+    assert!(pause_leaves_output_in_flight(&activity, just_short));
+    assert!(!pause_leaves_output_in_flight(&activity, stalled));
+
+    // A tool continuation stalls the same way.
+    let mut continuation = RuntimeActivity::new(now);
+    continuation.note_tool_response(now);
+    assert!(pause_leaves_output_in_flight(&continuation, just_short));
+    assert!(!pause_leaves_output_in_flight(&continuation, stalled));
+
+    // A prompt nothing has answered yet still has its reply on the way.
+    let mut prompted = RuntimeActivity::new(now);
+    prompted.mark_prompted(now, None, false);
+    assert!(pause_leaves_output_in_flight(&prompted, stalled));
 }
 
 #[test]
@@ -30,6 +54,61 @@ fn candidate_exit_skips_wrap_up_before_report() {
     // Jim is told not to say goodbye before calling the tool, so the wrap-up is
     // the only thing that speaks the closing on its route out.
     assert!(should_send_wrap_up("interview_complete"));
+
+    // An interviewer that stopped answering cannot say goodbye either, and
+    // waiting on one would only delay the report.
+    assert!(!should_send_wrap_up(INTERVIEWER_UNAVAILABLE));
+}
+
+/// The wait is shown only for a reply nothing has started on, once it has
+/// gone `REPLY_WAIT_SHOWN`, and not over audio still playing or a review
+/// that silence may answer.
+#[test]
+fn a_late_reply_is_shown_only_while_nothing_answers_it() {
+    let start = Instant::now();
+    let shown = start + REPLY_WAIT_SHOWN;
+    let mut activity = RuntimeActivity::new(start);
+    assert!(!activity.reply_visibly_late(shown, false), "nothing owed");
+
+    activity.mark_prompted(start, Some("editor review"), true);
+    assert!(
+        !activity.reply_visibly_late(shown, false),
+        "silence answers it"
+    );
+
+    activity.mark_prompted(start, Some("test reaction"), false);
+    assert!(!activity.reply_visibly_late(shown - Duration::from_millis(1), false));
+    assert!(activity.reply_visibly_late(shown, false));
+    assert!(
+        !activity.reply_visibly_late(shown, true),
+        "audio still playing"
+    );
+
+    activity.note_output(Instant::now());
+    assert!(
+        !activity.reply_visibly_late(shown, false),
+        "the reply started"
+    );
+}
+
+/// Input transcription trails the audio, so the tail of speech a completed
+/// turn answered can arrive after it. Arming a deadline on that tail asks for
+/// a second answer once the candidate goes quiet; speech after the grace, or
+/// after an interruption, is a new turn and is owed a reply.
+#[test]
+fn a_transcript_tail_after_a_completed_turn_owes_no_second_reply() {
+    let start = Instant::now();
+    let mut activity = RuntimeActivity::new(start);
+    activity.turn_completed_at = Some(start);
+    activity.note_candidate_finished(
+        start + LATE_TRANSCRIPT_GRACE - Duration::from_millis(1),
+        false,
+    );
+    assert!(!activity.reply_in_flight(), "the tail of the answered turn");
+    assert!(!activity.reply_timed_out(start + REPLY_TIMEOUT * 2, false));
+
+    activity.note_candidate_finished(start + LATE_TRANSCRIPT_GRACE, false);
+    assert!(activity.reply_in_flight(), "a new turn after the grace");
 }
 
 /// An idle-window review runs in a pause and only in a pause.
@@ -272,7 +351,7 @@ fn a_tool_continuation_stays_owed_after_prompt_output() {
     let start = Instant::now();
     let mut activity = RuntimeActivity::new(start);
     activity.mark_prompted(start, None, false);
-    activity.note_output();
+    activity.note_output(Instant::now());
     activity.tool_response_outstanding = true;
 
     assert!(activity.prompted_at.is_none());
@@ -322,7 +401,7 @@ fn a_prompt_with_no_output_returns_the_floor_but_stays_owed() {
     );
 
     activity.mark_prompted(start, None, false);
-    activity.note_output();
+    activity.note_output(Instant::now());
     assert!(!activity.owes_reply());
     assert_eq!(
         activity.settle_stalls(start + PROMPT_STALL, false),
@@ -338,7 +417,7 @@ fn a_prompt_with_no_output_returns_the_floor_but_stays_owed() {
 fn an_unanswered_candidate_turn_lets_a_held_restart_go() {
     let start = Instant::now();
     let mut activity = RuntimeActivity::new(start);
-    activity.note_candidate_finished(start);
+    activity.note_candidate_finished(start, false);
     assert!(
         !activity
             .settle_stalls(start + PROMPT_STALL - Duration::from_millis(1), false)
@@ -362,7 +441,7 @@ fn speaking_again_retires_an_unanswered_prompt() {
     let mut activity = RuntimeActivity::new(start);
     activity.mark_prompted(start, None, false);
     activity.settle_stalls(start + PROMPT_STALL, false);
-    activity.note_candidate_finished(start + PROMPT_STALL * 2);
+    activity.note_candidate_finished(start + PROMPT_STALL * 2, false);
     assert!(activity.prompted_at.is_none());
     assert!(activity.reply_in_flight());
 
@@ -370,7 +449,7 @@ fn speaking_again_retires_an_unanswered_prompt() {
     // candidate speaking over it is their turn to answer.
     let mut waiting = RuntimeActivity::new(start);
     waiting.mark_prompted(start, None, false);
-    waiting.note_candidate_finished(start + Duration::from_secs(1));
+    waiting.note_candidate_finished(start + Duration::from_secs(1), false);
     assert!(waiting.prompted_at.is_none());
     assert!(waiting.reply_in_flight());
 
@@ -378,9 +457,9 @@ fn speaking_again_retires_an_unanswered_prompt() {
     // the prompt went out behind that turn, and its answer may still be on its
     // way.
     let mut speaking = RuntimeActivity::new(start);
-    speaking.note_output();
+    speaking.note_output(Instant::now());
     speaking.mark_prompted(start, None, false);
-    speaking.note_candidate_finished(start + Duration::from_secs(1));
+    speaking.note_candidate_finished(start + Duration::from_secs(1), false);
     assert!(speaking.prompted_at.is_some());
     assert!(!speaking.reply_in_flight());
 }
@@ -391,19 +470,19 @@ fn speaking_again_retires_an_unanswered_prompt() {
 fn output_behind_a_prompt_belongs_to_the_earlier_turn() {
     let start = Instant::now();
     let mut activity = RuntimeActivity::new(start);
-    activity.note_output();
+    activity.note_output(Instant::now());
     activity.mark_prompted(start, None, false);
-    activity.note_output();
+    activity.note_output(Instant::now());
     assert!(
         activity.owes_reply(),
         "the old sentence's tail answers nothing"
     );
-    activity.note_turn_boundary();
+    activity.note_turn_boundary(Instant::now());
     assert!(
         activity.owes_reply(),
         "the old turn ending is not the answer"
     );
-    activity.note_output();
+    activity.note_output(Instant::now());
     assert!(!activity.owes_reply());
 }
 
@@ -414,7 +493,7 @@ fn a_prompt_answered_with_silence_is_not_owed() {
     let start = Instant::now();
     let mut activity = RuntimeActivity::new(start);
     activity.mark_prompted(start, None, false);
-    activity.note_turn_boundary();
+    activity.note_turn_boundary(Instant::now());
     assert!(!activity.owes_reply());
 }
 
@@ -1033,7 +1112,7 @@ fn a_resume_restarts_the_check_in_clock_through_the_reducer() {
 fn the_check_in_carries_what_the_hold_left_owed() {
     let state = RuntimeState {
         thinking_unheard_reply: true,
-        owed_reply_on_resume: Some("Answer the outstanding candidate question.".into()),
+        owed_reply_on_resume: Some(Some("Answer the outstanding candidate question.".into())),
         ..RuntimeState::default()
     };
     let prompt = crate::agent::thinking_check_in(&state);
@@ -1051,10 +1130,17 @@ fn continuing_while_a_held_reply_is_discarded_owes_one_reply_after_its_boundary(
     activity.defer_thinking_reply("The five-minute warning is due. The candidate is ready.");
     assert!(activity.owes_reply());
     assert!(!activity.claim_thinking_reply(&state));
-    let debt = activity.prompt_debt();
-    activity.note_turn_boundary();
-    activity.restore_prompt_debt(debt);
-    activity.discarding_output = false;
+
+    // The dropped turn's ending, the way the room loop takes it: it ends the
+    // discard and settles nothing sent since.
+    assert!(!super::super::session::accept_gemini_event(
+        &crate::gemini::GeminiEvent::TurnComplete,
+        &mut activity,
+        false,
+        Instant::now()
+    ));
+    assert!(!activity.discarding_output);
+    assert!(activity.owes_reply());
     assert!(activity.claim_thinking_reply(&state));
     assert!(!activity.claim_thinking_reply(&state));
     assert!(
@@ -1092,8 +1178,8 @@ fn a_tentative_hold_does_not_repeat_an_already_answered_system_prompt() {
     let mut state = RuntimeState::default();
     let mut activity = RuntimeActivity::new(Instant::now());
     activity.mark_prompted(Instant::now(), Some("old five-minute warning"), false);
-    activity.note_output();
-    activity.note_turn_boundary();
+    activity.note_output(Instant::now());
+    activity.note_turn_boundary(Instant::now());
     activity.discarding_output = true;
     activity.observe_thinking_fragment(&mut state, "Wait", Instant::now(), 100);
     let payload = serde_json::json!({"type":"yield_turn"});
@@ -1174,12 +1260,12 @@ fn output_or_more_speech_answers_a_release_before_its_fallback() {
     let state = RuntimeState::default();
     let mut activity = RuntimeActivity::new(released);
     activity.arm_thinking_reply_fallback(released, "ready");
-    activity.note_output();
-    activity.note_turn_boundary();
+    activity.note_output(Instant::now());
+    activity.note_turn_boundary(Instant::now());
     assert_eq!(activity.claim_thinking_reply_fallback(&state, due), None);
 
     activity.arm_thinking_reply_fallback(released, "ready");
-    activity.note_candidate_finished(released);
+    activity.note_candidate_finished(released, false);
     assert_eq!(activity.claim_thinking_reply_fallback(&state, due), None);
 }
 
@@ -1282,4 +1368,49 @@ fn a_hold_asked_for_aloud_is_owed_its_reply_inside_the_cooldown() {
             .is_some(),
         "the button cooldown does not reach a hold asked for aloud"
     );
+}
+
+/// An operator's `CODETRIAL_GEMINI_REPLY_TIMEOUT_S` is the deadline the
+/// watchdog holds, for an unstarted reply and for a generation that stalls.
+#[test]
+fn the_configured_reply_timeout_is_the_one_the_watchdog_holds() {
+    let start = Instant::now();
+    let timeout = REPLY_TIMEOUT + Duration::from_secs(15);
+    let mut activity = RuntimeActivity::new(start).with_reply_timeout(timeout);
+    activity.note_candidate_finished(start, false);
+    assert!(!activity.reply_timed_out(start + REPLY_TIMEOUT, false));
+    assert!(activity.reply_timed_out(start + timeout, false));
+
+    activity.note_output(Instant::now());
+    let progress = activity.last_output_at.unwrap();
+    assert!(!activity.reply_timed_out(progress + REPLY_TIMEOUT, false));
+    assert!(activity.reply_timed_out(progress + timeout, false));
+}
+
+/// A completed turn hands the floor to the candidate at once when nothing is
+/// left to play, and waits on the queue while audio still plays; either way
+/// the tool continuation it carried has arrived.
+#[test]
+fn a_completed_turn_waits_on_the_queue_only_while_audio_plays() {
+    let now = Instant::now();
+    for (playing, floor) in [(false, Floor::Listening), (true, Floor::AwaitingPlayout)] {
+        let mut activity = RuntimeActivity::new(now);
+        activity.note_tool_response(now);
+        activity.floor = Floor::Speaking;
+        activity.settle_completed_turn(playing);
+        assert_eq!(activity.floor, floor, "playing={playing}");
+        assert!(!activity.tool_response_outstanding);
+    }
+}
+
+/// Only the tail of a turn still playing out is spared a reply deadline. With
+/// the floor already the candidate's, audio still draining from an earlier
+/// cut is no reason to leave their new answer unowed.
+#[test]
+fn audio_still_draining_spares_no_deadline_once_the_floor_is_the_candidates() {
+    let now = Instant::now();
+    let mut activity = RuntimeActivity::new(now);
+    assert_eq!(activity.floor, Floor::Listening);
+    activity.note_candidate_finished(now, true);
+    assert!(activity.reply_in_flight());
 }

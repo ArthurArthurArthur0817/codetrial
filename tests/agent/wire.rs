@@ -1011,7 +1011,7 @@ fn thinking_preserves_recovery_debt_across_pause_and_resume() {
             since: std::time::Instant::now(),
         },
         needs_cold_brief: true,
-        owed_reply_on_resume: Some("Answer the outstanding candidate question".into()),
+        owed_reply_on_resume: Some(Some("Answer the outstanding candidate question".into())),
         code: "return 42".into(),
         ..RuntimeState::default()
     };
@@ -1109,7 +1109,7 @@ fn a_cold_briefing_on_resume_also_asks_for_the_reply_owed() {
     let mut state = RuntimeState {
         paused: true,
         needs_cold_brief: true,
-        owed_reply_on_resume: Some("Answer the outstanding candidate question.".into()),
+        owed_reply_on_resume: Some(Some("Answer the outstanding candidate question.".into())),
         code: "return 42".into(),
         ..RuntimeState::default()
     };

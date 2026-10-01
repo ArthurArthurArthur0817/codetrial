@@ -2069,15 +2069,15 @@ fn parse_server_message_extracts_audio_transcripts_and_tool_calls() {
     assert_eq!(
         events,
         vec![
-            GeminiEvent::InputTranscript("candidate".to_string()),
             GeminiEvent::Audio {
                 bytes: vec![0, 1],
                 mime_type: "audio/pcm;rate=24000".to_string(),
             },
             GeminiEvent::Text("text output".to_string()),
             GeminiEvent::OutputTranscript("interviewer".to_string()),
-            GeminiEvent::TurnComplete,
             GeminiEvent::Interrupted,
+            GeminiEvent::TurnComplete,
+            GeminiEvent::InputTranscript("candidate".to_string()),
             GeminiEvent::ToolCall(vec![GeminiFunctionCall {
                 id: "1".to_string(),
                 name: TOOL_READ_EDITOR.to_string(),
@@ -3061,4 +3061,46 @@ fn a_thinking_request_precedes_the_reply_in_the_same_frame() {
             },
         ]
     );
+}
+
+/// Candidate speech in a frame with no interruption is queued as it arrives,
+/// ahead of the interviewer's transcript beside it; only an interrupted frame
+/// holds it back until the old turn is torn down.
+#[test]
+fn uninterrupted_candidate_speech_is_queued_as_it_arrives() {
+    let events = parse_server_message(
+        &json!({"serverContent": {
+            "inputTranscription": {"text": "go on"},
+            "outputTranscription": {"text": "Sure."}
+        }})
+        .to_string(),
+    )
+    .events;
+    assert_eq!(
+        events,
+        vec![
+            GeminiEvent::InputTranscript("go on".into()),
+            GeminiEvent::OutputTranscript("Sure.".into()),
+        ]
+    );
+}
+
+#[test]
+fn an_interruption_precedes_candidate_speech_in_the_same_frame() {
+    for completion in [false, true] {
+        let events = parse_server_message(
+            &json!({"serverContent": {
+                "interrupted": true, "turnComplete": completion,
+                "inputTranscription": {"text": "wait, actually"}
+            }})
+            .to_string(),
+        )
+        .events;
+        let mut expected = vec![GeminiEvent::Interrupted];
+        if completion {
+            expected.push(GeminiEvent::TurnComplete);
+        }
+        expected.push(GeminiEvent::InputTranscript("wait, actually".into()));
+        assert_eq!(events, expected);
+    }
 }

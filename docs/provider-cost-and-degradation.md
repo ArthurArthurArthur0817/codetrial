@@ -17,13 +17,52 @@ server issued a handle; if the handle is unavailable or refused, the restart is
 logged as degraded and is grounded from the bounded local transcript tail,
 editor, round and evidence state instead.
 
+A candidate turn, required prompt (including the opening greeting), or tool
+continuation that produces no output for 45 seconds replaces the socket even
+without a `GoAway`. `CODETRIAL_GEMINI_REPLY_TIMEOUT_S` sets that interval
+within 20 to 120 seconds. The `timing:` lines log how long each reply took to
+start; a reply the watchdog replaces is paid for twice, so an endpoint whose
+slow replies do arrive warrants a longer one. A candidate turn is timed from
+the last transcript fragment of it, and a fragment arriving within two seconds
+of a turn that said something is taken as the lagging tail of speech that turn
+already answered, so it owes nothing. The replacement, resumed or cold, carries
+the unanswered reply across and publishes the same reconnecting state. A reply
+cut off mid-generation is owed too, and the replacement is told not to repeat
+what was already said. Optional editor reviews accept silence; queued audio and
+a paused interview do not trigger this watchdog. A generation that stops
+producing output for the same interval also recovers. Periodic nudges wait
+while a reply is owed rather than replacing its debt.
+
+A close the interviewer asked for is not recovered either: it waits on the
+tool acknowledgement, and if that never comes, or starts and then stops, the
+interview closes once the acknowledgement has been silent for 20 seconds. A
+close is held across a pause and acted on after the resume. A generation or
+tool continuation silent for 20 seconds when the candidate pauses is not
+waited on after the resume, so the reply to the resume is heard rather than
+discarded, and if that generation does end later its ending is not taken as
+the answer to the resume.
+
+A turn Gemini completes with no output settles what it owed. The socket has
+answered, and the model may choose silence; the idle nudges, not the watchdog,
+respond to a silence that goes on. It is logged as a deliberate silence, so a
+report of the interviewer going quiet can be told apart from a stalled socket.
+
 `GEMINI_RESTART_LIMIT` bounds a failing endpoint rather than a long interview.
-It allows 8 opens in a row, and any socket that lived past a minute clears the
-run. A project that cannot pay is not an endpoint that may recover: a 402, or a
-close reason saying the prepaid credit is depleted or billing is not enabled,
-takes that key off both the Live and the report surface and is retried only on
-another configured key. With none left the interview ends at once instead of
-spending the remaining opens, and its summary line says `outcome=billing`.
+It allows 8 opens in a row. A completed turn with output clears the run, and so
+does replacing a socket that lived past a minute and owed nothing. A socket
+replaced while it owed a reply never counts as healthy, however long it stayed
+connected and whether the watchdog, a `GoAway` or the server closed it, so
+repeated unanswered recovery briefings exhaust the budget. Exhausting it, or
+failing to open a replacement socket for any reason but billing, ends the
+interview with reason `interviewer_unavailable`: no goodbye is asked for, the
+reconnecting notice is withdrawn, and the report is still written from the
+session held so far. A first socket that cannot be opened at all still ends the
+session before it starts, with no report. A project that cannot pay is not an
+endpoint that may recover: a 402, or a close reason saying the prepaid credit is
+depleted or billing is not enabled, takes that key off both the Live and the
+report surface and is retried only on another configured key. With none left the
+interview ends at once instead of spending the remaining opens, and its summary
+line says `outcome=billing`.
 
 Every Live turn is billed on the whole context it runs in, retained audio and
 images included, so what stays in the context costs again on every later turn.
@@ -80,12 +119,14 @@ cross-session response cache.
 
 The browser exposes distinct accessible states for connecting, live,
 reconnecting, offline practice, report generation, incomplete report, and
-retry-ready. Reconnecting preserves the live session and resends current code.
-Offline practice keeps the editor and local tests usable while explicitly
-promising no personalized evaluation. An invalid or exhausted report says that
-no scores or verdict were created. Browser fallback may summarize local test
-progress only for a session that never reached an interviewer, and never
-presents canned feedback as an agent evaluation.
+retry-ready. A reply owed for four seconds with nothing started on it, or one
+that stops producing after its audio runs out, shows the interviewer as thinking
+rather than listening. Reconnecting preserves the live session and resends
+current code. Offline practice keeps the editor and local tests usable while
+explicitly promising no personalized evaluation. An invalid or exhausted report
+says that no scores or verdict were created. Browser fallback may summarize
+local test progress only for a session that never reached an interviewer, and
+never presents canned feedback as an agent evaluation.
 
 ## Operating it
 

@@ -64,7 +64,7 @@ pub use prompts::{
     report_system_instruction, resume, resumed_context, rolling_assessment, round_skipped,
     round_started, silence_nudge, spoken_language, test_results_reaction,
     test_runner_unavailable_reaction, test_setup_error_reaction, time_warning,
-    unrecorded_earlier_phases, wrap_up,
+    unrecorded_earlier_phases, with_owed_reply, wrap_up,
 };
 pub(crate) use prompts::{editor_tool_continuity, end_interview_refusal};
 pub(crate) use report::sanitize_report_candidate;
@@ -165,8 +165,8 @@ pub const THINKING_CHECK_IN_S: u64 = 120;
 pub(crate) const THINKING_RELEASE_COOLDOWN: std::time::Duration =
     std::time::Duration::from_secs(10);
 
-pub const INTERVIEW_CONTRACT_BUNDLE_VERSION: u32 = 25;
-pub const LIVE_PROMPT_VERSION: u32 = 17;
+pub const INTERVIEW_CONTRACT_BUNDLE_VERSION: u32 = 26;
+pub const LIVE_PROMPT_VERSION: u32 = 18;
 pub const REPORT_PROMPT_VERSION: u32 = 15;
 pub const RUBRIC_VERSION: u32 = 1;
 pub const REPORT_SCHEMA_VERSION: u32 = 2;
@@ -852,9 +852,10 @@ pub struct RuntimeState {
     pub needs_cold_brief: bool,
     /// A resumed socket replaced a session that owed a reply while the
     /// interview was paused. The reply cannot be asked for then, since it
-    /// would be discarded, so this request for it, owed event included, is
-    /// spoken after the resume line on unpause.
-    pub owed_reply_on_resume: Option<String>,
+    /// would be discarded. Hold the raw event, not its formatted request, so
+    /// recovery cannot nest briefings. Some(None) owes a reply without a known
+    /// event; None owes no reply.
+    pub owed_reply_on_resume: Option<Option<String>>,
     /// Observations a reviewer recorded in the pauses, while the interview was
     /// still running. Held apart from `framework_evidence`, which is the
     /// interviewer's own bookkeeping about which phase happened: these are the
