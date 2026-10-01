@@ -2970,3 +2970,22 @@ fn the_compression_window_reaches_the_interview_state() {
     assert_eq!(state.context_compression, config.gemini_context_compression);
     assert!(state.context_compression.is_some());
 }
+
+#[tokio::test]
+async fn yielding_sends_the_native_audio_stream_finalization_signal() {
+    let (mut gemini, server) = fake_resumed_socket().await;
+    gemini.end_audio_turn().await.unwrap();
+    assert_eq!(
+        server.await.unwrap(),
+        crate::gemini::realtime_audio_end_message()
+    );
+}
+
+#[tokio::test]
+async fn a_yield_sends_buffered_speech_before_it_ends_the_stream() {
+    let (mut gemini, server) = fake_resumed_socket().await;
+    let mut audio = vec![0; 640];
+    yield_candidate_turn(&mut gemini, &mut audio).await.unwrap();
+    assert!(audio.is_empty());
+    assert!(server.await.unwrap()["realtimeInput"]["audio"].is_object());
+}
