@@ -363,6 +363,37 @@ lobbyTest(
 );
 
 lobbyTest(
+  "topic and difficulty filters narrow the problem cards together",
+  async (page) => {
+    await lobby(page);
+    await page.click("details.problem-picker summary");
+
+    await page.selectOption("#problem-topic", "Array");
+    const filtered = await page
+      .locator("[data-problem]:visible")
+      .evaluateAll((cards) =>
+        cards.map((card) => ({
+          difficulty: card.dataset.difficulty,
+          topics: card.dataset.topics.split("|"),
+        })),
+      );
+    assert.ok(filtered.length > 0, "the topic filter hid every problem");
+    assert.ok(
+      filtered.every(
+        (card) => card.difficulty === "Medium" && card.topics.includes("Array"),
+      ),
+      "a visible card did not match both filters",
+    );
+
+    await page.click("#problem-filters-reset");
+    assert.ok(
+      (await page.locator("[data-problem]:visible").count()) > filtered.length,
+      "reset did not restore the other Medium problems",
+    );
+  },
+);
+
+lobbyTest(
   "a candidate who touches nothing gets the server's own default length",
   async (page) => {
     const state = await lobby(page);

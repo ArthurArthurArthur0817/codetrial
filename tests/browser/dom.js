@@ -366,7 +366,20 @@ export function installDocument(markup) {
   // `#start` and `button#start` render into two different places, which is a
   // page a browser cannot produce.
   const node = (element) => {
-    if (!nodes.has(element)) nodes.set(element, new Element(element.tag));
+    if (!nodes.has(element)) {
+      const created = new Element(element.tag);
+      for (const [name, value] of Object.entries(element.attributes)) {
+        if (name.startsWith("data-")) {
+          const key = name
+            .slice(5)
+            .replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
+          created.dataset[key] = value;
+        }
+      }
+      if ("value" in element.attributes)
+        created.value = element.attributes.value;
+      nodes.set(element, created);
+    }
     return nodes.get(element);
   };
   globalThis.document = {

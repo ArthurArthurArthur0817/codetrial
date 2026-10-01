@@ -46,6 +46,7 @@ const SIGNED_OUT = {
   start: "Start interview",
   "progress-summary": "Could not load progress saved on this device.",
 };
+const PROBLEM_FILTERS = new Set(["problem-topic", "problem-filter-summary"]);
 
 test("the lobby page loads outside a browser and says what it was given", () => {
   for (const [id, expected] of Object.entries(SIGNED_OUT)) {
@@ -62,7 +63,13 @@ test("no other panel of the lobby speaks before anything has loaded", () => {
   const spoke = [];
   for (const [, id] of markup.matchAll(/id="([^"]+)"/g)) {
     const node = dom.node(id);
-    if (node && node.spoken().length && !(id in SIGNED_OUT)) spoke.push(id);
+    if (
+      node &&
+      node.spoken().length &&
+      !(id in SIGNED_OUT) &&
+      !PROBLEM_FILTERS.has(id)
+    )
+      spoke.push(id);
   }
   assert.deepEqual(
     spoke,

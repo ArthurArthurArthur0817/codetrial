@@ -19,6 +19,7 @@ import {
 import { reportMarkdown, reportMarkup } from "./render.js";
 import { downloadMarkdown, reportFilename } from "./download.js";
 import { loadPageMap } from "./problem-data.js";
+import { availableTopics, filterProblems } from "./practice-insights.js";
 import {
   parseGroundingFile,
   retainedSelection,
@@ -111,6 +112,9 @@ const nodes = {
   groundingClear: document.querySelector("#grounding-clear"),
   groundingError: document.querySelector("#grounding-error"),
   durationNote: document.querySelector("#duration-note"),
+  problemTopic: document.querySelector("#problem-topic"),
+  problemFiltersReset: document.querySelector("#problem-filters-reset"),
+  problemFilterSummary: document.querySelector("#problem-filter-summary"),
 };
 
 // Every card carries the pressed state from the start, not only the one that
@@ -120,6 +124,9 @@ const cards = [...document.querySelectorAll("[data-problem]")].map(
   (button) => ({
     id: button.dataset.problem,
     difficulty: button.dataset.difficulty,
+    topics: String(button.dataset.topics || "")
+      .split("|")
+      .filter(Boolean),
     button,
   }),
 );
@@ -166,6 +173,20 @@ showSources.addEventListener("change", () => {
 });
 void applySources();
 const levels = [...document.querySelectorAll('[name="difficulty"]')];
+const TOPIC_KEY = "codetrial.problemTopic";
+const topics = availableTopics(cards);
+for (const topic of topics) {
+  const option = document.createElement("option");
+  option.value = topic;
+  option.textContent = topic;
+  nodes.problemTopic.append(option);
+}
+try {
+  const storedTopic = localStorage.getItem(TOPIC_KEY) ?? "";
+  if (topics.includes(storedTopic)) nodes.problemTopic.value = storedTopic;
+} catch {
+  /* the filter still works for this visit */
+}
 
 // A picked card is a choice about this one interview, not about the filter the
 // checkboxes carry, so it leaves them alone. It suggests a length to go with
@@ -229,6 +250,25 @@ for (const input of levels) {
     }
   });
 }
+
+nodes.problemTopic.addEventListener("change", () => {
+  try {
+    localStorage.setItem(TOPIC_KEY, nodes.problemTopic.value);
+  } catch {
+    /* the filter still works for this visit */
+  }
+  filterSelectionChanged();
+});
+
+nodes.problemFiltersReset.addEventListener("click", () => {
+  nodes.problemTopic.value = "";
+  try {
+    localStorage.removeItem(TOPIC_KEY);
+  } catch {
+    /* the filter still resets for this visit */
+  }
+  filterSelectionChanged();
+});
 
 let grounding = { requirements: [], skills: [], anchors: [] };
 const groundingReads = { jd: 0, resume: 0 };
@@ -911,9 +951,38 @@ function applyDifficulties() {
   const difficulties = selectedDifficulties();
   // The picker is a shortcut to one problem, not a second copy of the wall the
   // checkboxes just hid, so it shows what the checkboxes selected.
-  for (const card of cards)
-    card.button.hidden = !difficulties.has(card.difficulty);
+  applyProblemFilters(difficulties);
   setDuration(suggestedDuration(difficulties));
+}
+
+function topicEligibleCards() {
+  return filterProblems(cards, { topic: nodes.problemTopic.value });
+}
+
+function applyProblemFilters(difficulties = selectedDifficulties()) {
+  const visible = new Set(
+    filterProblems(cards, {
+      difficulties,
+      topic: nodes.problemTopic.value,
+    }),
+  );
+  for (const card of cards) card.button.hidden = !visible.has(card);
+  const topic = nodes.problemTopic.value;
+  nodes.problemFilterSummary.textContent = `${visible.size} problem${visible.size === 1 ? "" : "s"}${topic ? ` tagged ${topic}` : ""} shown.`;
+}
+
+function filterSelectionChanged() {
+  const eligible = new Set(topicEligibleCards());
+  applyProblemFilters();
+  if (manualProblem && eligible.has(problem)) return;
+  manualProblem = false;
+  roll = Math.random();
+  avoidedProblem = undefined;
+  if (historyReady) recommend();
+  else {
+    setProblem(null);
+    nodes.recommendation.textContent = "";
+  }
 }
 
 /// `note` is the sentence explaining a level the reports chose, empty when the
@@ -925,7 +994,7 @@ function recommend(note = "") {
   // drops it.
   if (manualProblem || keptDraw !== null) return;
   const choice = pickProblem(
-    cards,
+    topicEligibleCards(),
     selectedDifficulties(),
     reports,
     () => roll,

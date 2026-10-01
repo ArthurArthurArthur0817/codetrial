@@ -37,22 +37,24 @@ def parse_args() -> argparse.Namespace:
 
 
 def read_json(path: Path) -> object:
-    return json.loads(path.read_text())
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def card(problem: dict[str, object], page: str, title: str) -> str:
     """One lobby card, named the way the interview will name the exercise.
 
-    Keyed by page name, with the scenario title and no topic tags: the
+    Keyed by page name, with the scenario title and topic metadata: the
     recommendation line reads the title off this card, and "Recommended: Coin
     Change", a `coin-change` key or a "Dynamic Programming" tag tells the
-    candidate what they are about to be asked. The published title is not in
-    the page at all; the source slot is filled from the page map only when the
-    candidate turns that on to drill one problem by name.
+    candidate what they are about to be asked. Topics stay in data attributes
+    for local filtering and are not rendered on the card. The published title
+    is not in the page at all; the source slot is filled from the page map only
+    when the candidate turns that on to drill one problem by name.
     """
+    topics = "|".join(str(topic) for topic in problem.get("topics", []))
     return "\n".join(
         [
-            f'  <button class="problem-card" type="button" data-problem="{html.escape(page)}" data-difficulty="{html.escape(problem["difficulty"])}">',
+            f'  <button class="problem-card" type="button" data-problem="{html.escape(page)}" data-difficulty="{html.escape(problem["difficulty"])}" data-topics="{html.escape(topics)}">',
             f'    <span class="problem-title">{html.escape(title)}</span>',
             '    <span class="problem-source" hidden></span>',
             f'    <span class="problem-meta">{html.escape(problem["difficulty"])}</span>',
@@ -79,7 +81,7 @@ def generated(problems: list) -> str:
 
 def main() -> int:
     args = parse_args()
-    html_text = INDEX.read_text()
+    html_text = INDEX.read_text(encoding="utf-8")
     opening = re.search(
         rf"^([ \t]*){re.escape(START)}[ \t]*$", html_text, flags=re.MULTILINE
     )
@@ -113,7 +115,7 @@ def main() -> int:
         return 0
 
     if updated != html_text:
-        INDEX.write_text(updated)
+        INDEX.write_text(updated, encoding="utf-8")
         print(f"updated {len(problems)} problem cards in web/index.html")
     return 0
 
