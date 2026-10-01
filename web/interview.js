@@ -53,6 +53,11 @@ import {
   testPayload,
   timeWarningPayload,
   topics,
+  thinkingPayload,
+  yieldTurnPayload,
+  isYieldShortcut,
+  turnCountdown,
+  turnWindowMs,
 } from "./lib.js";
 import {
   attachAvatarAnalyser,
@@ -258,6 +263,12 @@ const interviewProfile = {
 const interviewGrounding = consumeGroundingPacket(tabStorage);
 const state = {
   paused: false,
+  candidateThinking: false,
+  // Published by the agent; see `turnWindowMs`. Null draws no ring.
+  turnWindowMs: null,
+  // Whether an interviewer is in the room to hear the turn controls.
+  interviewerPresent: false,
+  agentSpeaking: false,
   codeByLanguage: { ...problem.starterCode },
   language: "python",
   // Thresholds already announced. A latch is released when the room pauses only
@@ -339,6 +350,10 @@ const nodes = {
 
   mic: document.querySelector("#mic"),
   pause: document.querySelector("#pause"),
+  thinking: document.querySelector("#thinking"),
+  yieldTurn: document.querySelector("#yield-turn"),
+  turnStatus: document.querySelector("#turn-status"),
+  turnRing: document.querySelector("#turn-ring"),
   end: document.querySelector("#end"),
   withdrawConsent: document.querySelector("#withdraw-consent"),
   recordingState: document.querySelector("#recording-state"),
@@ -530,6 +545,10 @@ function bindEvents() {
   // report rather than passing as thinking time.
   nodes.pause.hidden = false;
   nodes.pause.addEventListener("click", togglePause);
+  nodes.thinking.addEventListener("click", toggleThinking);
+  nodes.yieldTurn.addEventListener("click", yieldTurn);
+  nodes.turnRing.addEventListener("click", yieldTurn);
+  document.addEventListener("keydown", onTurnKey);
   nodes.end.addEventListener("click", () => endInterview("candidate_ended"));
   nodes.withdrawConsent.addEventListener("click", withdrawRecordingConsent);
   nodes.forceReport.addEventListener("click", showReport);
@@ -1304,6 +1323,7 @@ async function publishPreflightTracks(room, preflight) {
       source: source.Microphone,
     });
   }
+  startTurnRing(preflight.userStream);
   // A camera handed to Meet is already out of the stream, so this loop is
   // empty and LiveKit never holds the device open for the interview.
   for (const track of preflight.userStream?.getVideoTracks?.() || []) {
@@ -1312,6 +1332,10 @@ async function publishPreflightTracks(room, preflight) {
 }
 
 function stopPreflight(preflight) {
+  // `stop()` fires no `ended`, so the ring's meter is retired here rather
+  // than by its track: a join that fails after publishing would otherwise
+  // leave it reading a dead microphone for the rest of the page.
+  stopTurnRing();
   preflight?.userStream?.getTracks?.().forEach((track) => track.stop());
 }
 
@@ -1522,11 +1546,14 @@ async function toggleMicrophone() {
       });
     }
   } else if (state.room) {
-    await state.room.localParticipant
+    const publication = await state.room.localParticipant
       .setMicrophoneEnabled(state.micEnabled)
       .catch(() => {
         state.micEnabled = !state.micEnabled;
       });
+    // LiveKit builds a fresh track here, which the ring's meter has never seen.
+    const track = publication?.track?.mediaStreamTrack;
+    if (state.micEnabled && track) startTurnRing(new MediaStream([track]));
   }
   nodes.mic.textContent = state.micEnabled ? "Mic on" : "Muted";
 }
@@ -1778,7 +1805,15 @@ function showFrameworkHint() {
 function receiveControl(bytes) {
   try {
     const message = JSON.parse(new TextDecoder().decode(bytes));
-    if (message.type === "pause_state" && typeof message.paused === "boolean") {
+    if (
+      message.type === "thinking_state" &&
+      typeof message.thinking === "boolean"
+    ) {
+      applyThinking(message.thinking);
+    } else if (
+      message.type === "pause_state" &&
+      typeof message.paused === "boolean"
+    ) {
       applyPause(message.paused);
     } else if (
       message.type === "interviewer_state" &&
@@ -1831,6 +1866,117 @@ function receiveControl(bytes) {
 /// cannot disagree about when coding is finished.
 function codingClosed() {
   return frameworkRound === "behavioral" || state.phase !== "live";
+}
+
+/// Neither control means anything without a live interviewer to hear it, and
+/// a paused interview is already holding the floor.
+function canTakeTurnAction() {
+  return (
+    state.connected &&
+    state.interviewerPresent &&
+    !state.paused &&
+    state.phase === "live"
+  );
+}
+
+/// The state flips when the agent answers with `thinking_state`, not here, so
+/// a double click asks twice for one change rather than toggling it back.
+function toggleThinking() {
+  if (!canTakeTurnAction()) return;
+  void publish(topics.control, thinkingPayload(!state.candidateThinking)).catch(
+    () => {},
+  );
+}
+
+function yieldTurn() {
+  if (!canTakeTurnAction()) return;
+  void publish(topics.control, yieldTurnPayload()).catch(() => {});
+}
+
+/// Only claims the key when it does something, so Alt+Enter is left alone
+/// outside a live interview.
+function onTurnKey(event) {
+  if (!isYieldShortcut(event, nodes.editor) || !canTakeTurnAction()) return;
+  event.preventDefault();
+  yieldTurn();
+}
+
+/// One microphone frame. Runs on every animation frame while the interview
+/// is live, so it writes the node only when what it shows changes.
+let turnSpokeAt = null;
+let turnRingProgress = null;
+function paintTurnRing(peak) {
+  const next = turnCountdown(turnSpokeAt, {
+    peak,
+    at: performance.now(),
+    silenceMs: state.turnWindowMs,
+    blocked:
+      !canTakeTurnAction() ||
+      state.candidateThinking ||
+      state.agentSpeaking ||
+      !state.micEnabled,
+  });
+  turnSpokeAt = next.spokeAt;
+  const hidden = next.progress === null;
+  if (nodes.turnRing.hidden !== hidden) nodes.turnRing.hidden = hidden;
+  const progress = hidden ? null : next.progress.toFixed(3);
+  if (progress !== null && progress !== turnRingProgress)
+    nodes.turnRing.style.setProperty("--turn-progress", progress);
+  turnRingProgress = progress;
+}
+
+function hideTurnRing() {
+  turnSpokeAt = null;
+  turnRingProgress = null;
+  nodes.turnRing.hidden = true;
+}
+
+/// Over the microphone track the room is sending, for as long as the
+/// interview is live. `createMicMeter` keeps it to one meter at a time, and a
+/// track that ends is forgotten, so the ring never counts silence on a
+/// microphone nobody is hearing. The same track again, as an unmute hands
+/// back, keeps the meter it has. A meter that fails leaves the controls
+/// working without the ring.
+let turnMeter = null;
+let turnMeterTrack = null;
+function stopTurnRing() {
+  turnMeter?.forget();
+  turnMeter = null;
+  turnMeterTrack = null;
+  hideTurnRing();
+}
+
+function startTurnRing(stream) {
+  const track = stream?.getAudioTracks?.()[0];
+  if (track && track === turnMeterTrack) return;
+  stopTurnRing();
+  if (!track || track.readyState === "ended") return;
+  const meter = createMicMeter({
+    pool: { stream, setError() {} },
+    isFinished: () => state.phase !== "live",
+    onLevel: paintTurnRing,
+    onFailure: hideTurnRing,
+    startMeter: startMediaMeter,
+  });
+  track.addEventListener?.("ended", () => {
+    if (turnMeter === meter) stopTurnRing();
+  });
+  turnMeter = meter;
+  turnMeterTrack = track;
+  meter.start();
+}
+
+function applyThinking(thinking) {
+  if (thinking === state.candidateThinking) return;
+  state.candidateThinking = thinking;
+  nodes.thinking.textContent = thinking ? "Continue" : "Thinking";
+  nodes.thinking.setAttribute("aria-pressed", String(thinking));
+  nodes.turnStatus.textContent = thinking
+    ? "Jim will wait. Speak again or choose Continue when ready. The timer keeps running."
+    : "Take your time. Choose Your turn is done (Alt+Enter) to let Jim reply early.";
+  recordReplay("lifecycle", {
+    state: thinking ? "thinking_started" : "thinking_ended",
+  });
 }
 
 function applyPause(paused) {
@@ -2510,6 +2656,7 @@ function roomParticipants() {
 function updateAgentState() {
   const participants = roomParticipants();
   const agent = roomInterviewer(participants, state.agentIdentity);
+  state.interviewerPresent = Boolean(agent);
   if (!agent) {
     setAgentStateLabel("Waiting", false);
     // "Waiting" is honest but useless on its own: it looks identical whether
@@ -2586,6 +2733,8 @@ function updateAgentState() {
   // the mouth must not, because a missing attribute is not a claim of silence.
   const published = agent?.attributes?.["lk.agent.state"];
   const value = published || "listening";
+  state.agentSpeaking = value === "speaking";
+  state.turnWindowMs = turnWindowMs(agent?.attributes);
   const labels = {
     listening: "Listening",
     thinking: "Thinking...",

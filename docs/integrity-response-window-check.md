@@ -86,8 +86,8 @@ All six must hold. Any failure is a fail row, and the row names which one broke.
 - An ordinary answered question does not say it holds no transcript. This is the
   delivery race `DONE.md` records a fix for, and a real interview is the only
   thing that has ever exercised it.
-- The window covering the pause from step 4 says "interview paused during this
-  window", and no other window does.
+- The window covering the pause from step 4 says "interview paused or thinking
+  time requested during this window", and no other window does.
 
 ## The judgement
 
@@ -153,3 +153,10 @@ answer.
 | 2. Closing turn rendered or dropped? | | |
 | 3. Consecutive empty windows worth marking (a number) | | |
 | 4. Pause mark enough, or its own entry? | | |
+
+Explicit thinking time is a declared conversation hold. Its `thinking_started`
+and `thinking_ended` lifecycle rows mark an overlapping response window the
+same way a declared pause does; the panel names both possibilities. Neither
+requests a candidate judgment or changes the deadline. A subsequent interviewer
+speaking row bounds a missing end row, since the runtime suppresses speech
+while the hold is active.

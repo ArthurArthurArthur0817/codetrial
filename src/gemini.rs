@@ -209,6 +209,10 @@ impl GeminiLiveSession {
         self.send_json(realtime_audio_message(bytes)).await
     }
 
+    pub async fn end_audio_turn(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.send_json(realtime_audio_end_message()).await
+    }
+
     pub async fn send_video_frame(
         &mut self,
         bytes: &[u8],
@@ -1637,6 +1641,12 @@ fn realtime_text_message(text: &str) -> Value {
     json!({ "realtimeInput": { "text": text } })
 }
 
+/// The candidate's audio stream has ended: Gemini closes the turn now rather
+/// than waiting out its silence window. The next audio chunk reopens it.
+pub(crate) fn realtime_audio_end_message() -> Value {
+    json!({ "realtimeInput": { "audioStreamEnd": true } })
+}
+
 fn realtime_audio_message(bytes: &[u8]) -> Value {
     json!({
         "realtimeInput": {
@@ -1813,6 +1823,14 @@ fn parse_server_message(text: &str) -> ServerMessage {
         .filter(|handle| !handle.is_empty())
         .map(str::to_string);
 
+    // A request to keep the floor in this frame must reach the room before any
+    // generated reply sharing it.
+    if let Some(text) = message
+        .pointer("/serverContent/inputTranscription/text")
+        .and_then(Value::as_str)
+    {
+        events.push(GeminiEvent::InputTranscript(text.to_string()));
+    }
     if let Some(parts) = message
         .pointer("/serverContent/modelTurn/parts")
         .and_then(Value::as_array)
@@ -1836,12 +1854,6 @@ fn parse_server_message(text: &str) -> ServerMessage {
                 events.push(GeminiEvent::Text(text.to_string()));
             }
         }
-    }
-    if let Some(text) = message
-        .pointer("/serverContent/inputTranscription/text")
-        .and_then(Value::as_str)
-    {
-        events.push(GeminiEvent::InputTranscript(text.to_string()));
     }
     if let Some(text) = message
         .pointer("/serverContent/outputTranscription/text")

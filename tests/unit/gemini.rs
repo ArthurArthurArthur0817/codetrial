@@ -1996,6 +1996,10 @@ fn realtime_messages_match_live_websocket_shapes() {
         realtime_video_message(&[3, 4], "image/jpeg")["realtimeInput"]["video"],
         json!({"data":"AwQ=","mimeType":"image/jpeg"})
     );
+    assert_eq!(
+        realtime_audio_end_message(),
+        json!({"realtimeInput":{"audioStreamEnd":true}})
+    );
 }
 
 #[test]
@@ -2065,12 +2069,12 @@ fn parse_server_message_extracts_audio_transcripts_and_tool_calls() {
     assert_eq!(
         events,
         vec![
+            GeminiEvent::InputTranscript("candidate".to_string()),
             GeminiEvent::Audio {
                 bytes: vec![0, 1],
                 mime_type: "audio/pcm;rate=24000".to_string(),
             },
             GeminiEvent::Text("text output".to_string()),
-            GeminiEvent::InputTranscript("candidate".to_string()),
             GeminiEvent::OutputTranscript("interviewer".to_string()),
             GeminiEvent::TurnComplete,
             GeminiEvent::Interrupted,
@@ -3033,5 +3037,28 @@ fn http_usage_labels_separate_rooms_calls_and_retries() {
     assert_eq!(
         http_usage_label("interim", "room-b", 1, 0),
         "interim room=room-b call=1 retry=0"
+    );
+}
+
+#[test]
+fn a_thinking_request_precedes_the_reply_in_the_same_frame() {
+    let parsed = parse_server_message(
+        &json!({
+            "serverContent": {
+                "inputTranscription": {"text": "Let me think for a moment", "finished": true},
+                "modelTurn": {"parts": [{"inlineData": {"data": "AAE=", "mimeType": "audio/pcm"}}]},
+            }
+        })
+        .to_string(),
+    );
+    assert_eq!(
+        parsed.events,
+        vec![
+            GeminiEvent::InputTranscript("Let me think for a moment".into()),
+            GeminiEvent::Audio {
+                bytes: vec![0, 1],
+                mime_type: "audio/pcm".into()
+            },
+        ]
     );
 }

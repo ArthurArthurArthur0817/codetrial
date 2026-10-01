@@ -13,7 +13,7 @@ only thing in the repo that crosses that boundary.
 | File | Producer | Consumer |
 |---|---|---|
 | `code-update.json` | `codeUpdatePayload` | `apply_code_update` |
-| `control.json` | `timeWarningPayload`, `endInterviewPayload` | `apply_control` |
+| `control.json` | `thinkingPayload`, `yieldTurnPayload`, `timeWarningPayload`, `endInterviewPayload` | `apply_control` |
 | `test-results.json` | `testPayload` | `apply_test_results` |
 | `integrity-chain.json` | `integrityEventPayload` | `apply_integrity` |
 

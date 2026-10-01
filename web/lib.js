@@ -605,8 +605,8 @@ const textEncoder = new TextEncoder();
 /// function-local, moving it left the whole suite green with the supported-card
 /// branch no longer rendering, which is the defect a local constant invites.
 export const ACTIVE_CONTRACT = {
-  bundleVersion: 24,
-  livePromptVersion: 16,
+  bundleVersion: 25,
+  livePromptVersion: 17,
   reportPromptVersion: 15,
   reportSchemaVersion: 2,
   rubricVersion: 1,
@@ -1524,20 +1524,23 @@ export function responseWindows(events) {
   /// row is the end of a question or something else. `null` until the first one,
   /// so a replay that opens on a `listening` starts no window.
   let previous = null;
-  /// Whether the interview is paused right now, from the `lifecycle` rows.
-  /// Carried across the whole scan rather than read per window, because the
-  /// `paused` row and the `listening` row a pause causes are written by two
-  /// different sides and either can land first.
+  /// Whether the interview is paused, or held for thinking time, right now,
+  /// from the `lifecycle` rows. Carried across the whole scan rather than read
+  /// per window, because the `paused` row and the `listening` row a pause
+  /// causes are written by two different sides and either can land first.
   let paused = false;
+  let thinking = false;
   for (const [index, event] of replayRows(events).entries()) {
     if (event?.kind === "lifecycle") {
       const state = event.payload?.state;
       if (state === "paused" || state === "resumed")
         paused = state === "paused";
+      if (state === "thinking_started" || state === "thinking_ended")
+        thinking = state === "thinking_started";
       // A window already open when the break started keeps the mark, which is
       // the ordinary case: the candidate pauses during their own turn and no
       // `avatar` row is written at all.
-      if (paused && open) open.paused = true;
+      if ((paused || thinking) && open) open.paused = true;
       // The interview is over. `send_wrap_up_and_wait` in `src/livekit.rs` ends
       // by setting `listening` again, and the browser keeps recording past
       // `ended` to write `rounds_final`, so without this every timed-out
@@ -1574,14 +1577,18 @@ export function responseWindows(events) {
     const before = previous;
     previous = state;
 
-    // The interviewer speaking is proof the interview is not paused, which is
-    // what bounds a lost `resumed` row to the windows before it. `watch_prompt`
-    // in `src/livekit/turn.rs` returns nothing while `state.paused`, and
-    // `handle_gemini_event` in `src/livekit.rs` drops every audio event then, so
-    // there is no path from a paused interview to a `speaking` row. Without this
-    // one dropped batch painted every remaining window as paused, and that mark
-    // is the panel's only affirmative claim.
-    if (state === "speaking") paused = false;
+    // Speech proves the interview is neither paused nor holding for thinking
+    // time, bounding a lost `resumed` or `thinking_ended` row to the windows
+    // before it. `watch_prompt` in `src/livekit/turn.rs` returns nothing while
+    // the floor is held, and `handle_gemini_event` in `src/livekit/session.rs`
+    // drops every audio event then, so there is no path from a paused or held
+    // interview to a `speaking` row. Without this one dropped batch painted
+    // every remaining window as paused, and that mark is the panel's only
+    // affirmative claim.
+    if (state === "speaking") {
+      paused = false;
+      thinking = false;
+    }
 
     // Closed first. A `speaking` row both ends the window before it and, on the
     // next `listening`, opens the one after; taking them in the other order
@@ -1609,7 +1616,7 @@ export function responseWindows(events) {
         at: event.at,
         duration: null,
         turn: null,
-        paused,
+        paused: paused || thinking,
         matched,
       };
       windows.push(open);
@@ -1685,4 +1692,78 @@ export function replayTimeline(events) {
     if (opening !== undefined) timeline.push({ window: opening });
   }
   return { moments, windows, timeline };
+}
+
+export function thinkingPayload(thinking) {
+  return { type: "thinking", thinking: Boolean(thinking) };
+}
+
+export function yieldTurnPayload() {
+  return { type: "yield_turn" };
+}
+
+/// The agent attribute carrying Gemini's silence window, in milliseconds;
+/// `TURN_WINDOW_ATTRIBUTE` in `src/livekit/session.rs` publishes it.
+export const TURN_WINDOW_ATTRIBUTE = "codetrial.silence_ms";
+
+/// A microphone peak at or above this is the candidate speaking. Well above
+/// `MIC_SILENT_PEAK`, which only proves a live device, so room noise does not
+/// hold the ring at empty.
+export const TURN_SPEECH_PEAK = 0.06;
+
+/// How long a full ring stays up waiting for Jim before it is taken down. Jim
+/// usually starts within a second of the window; after this the ring is only
+/// claiming a turn change nobody is making.
+export const TURN_RING_LINGER_MS = 2000;
+
+/// The window the agent published, or null when it published none. No
+/// fallback: a ring drawn against a guessed window would count down to a
+/// moment that is not coming.
+export function turnWindowMs(attributes) {
+  const value = Number(attributes?.[TURN_WINDOW_ATTRIBUTE]);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+/// Where the candidate is in the silence Gemini waits through before taking
+/// the turn. `progress` runs from 0, still talking, to 1, Jim is due; null is
+/// nothing to count down. `spokeAt` is the state to pass back next frame.
+///
+/// Measured from this page's microphone, not from Gemini's own detector, so it
+/// is an estimate of the moment rather than the moment itself. Speech resets it
+/// and anything that means Jim is not waiting on the candidate clears it.
+export function turnCountdown(spokeAt, { peak, at, silenceMs, blocked }) {
+  if (blocked || !silenceMs) return { spokeAt: null, progress: null };
+  if (peak >= TURN_SPEECH_PEAK) return { spokeAt: at, progress: 0 };
+  if (spokeAt === null) return { spokeAt: null, progress: null };
+  const elapsed = at - spokeAt;
+  if (elapsed > silenceMs + TURN_RING_LINGER_MS)
+    return { spokeAt: null, progress: null };
+  return { spokeAt, progress: Math.min(1, elapsed / silenceMs) };
+}
+
+/// Alt+Enter hands the turn over from anywhere on the page except a text
+/// field that is not the code editor, where the key belongs to the field. The
+/// editor is included on purpose: it is where the candidate is while they talk
+/// through their code, and it binds nothing to Alt+Enter.
+export function isYieldShortcut(event, editor) {
+  if (
+    !event.altKey ||
+    event.key !== "Enter" ||
+    event.repeat ||
+    event.isComposing ||
+    event.defaultPrevented ||
+    event.ctrlKey ||
+    event.metaKey ||
+    event.shiftKey
+  )
+    return false;
+  const target = event.target;
+  if (target === editor) return true;
+  const tag = target?.tagName;
+  return !(
+    tag === "INPUT" ||
+    tag === "TEXTAREA" ||
+    tag === "SELECT" ||
+    target?.isContentEditable
+  );
 }

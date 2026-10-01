@@ -141,6 +141,13 @@ const REPLAYS = {
     life(BASE + 300_000, "resumed"),
     avatar(BASE + 301_000, "speaking"),
   ],
+  "a window the candidate held to think during": [
+    avatar(BASE, "speaking"),
+    avatar(BASE + 1000, "listening", 0),
+    life(BASE + 2000, "thinking_started"),
+    life(BASE + 120_000, "thinking_ended"),
+    avatar(BASE + 121_000, "speaking"),
+  ],
   "a long window": question(BASE + 1000, BASE + 3_600_000),
   "a window before the first snapshot": [
     ...question(BASE + 1000, BASE + 2000),
@@ -193,7 +200,7 @@ const ALLOWED = [
   "duration not recorded",
   "no candidate transcript recorded",
   "transcript not matched to a window",
-  "interview paused during this window",
+  "interview paused or thinking time requested during this window",
   "s",
   // The moment list and the panels beside it.
   "editor",
@@ -324,7 +331,11 @@ test("the replay page renders a window for every question and none for anything 
   );
   assert.match(
     windows(REPLAYS["a window the interview was paused during"])[0],
-    /interview paused during this window/,
+    /interview paused or thinking time requested during this window/,
+  );
+  assert.match(
+    windows(REPLAYS["a window the candidate held to think during"])[0],
+    /interview paused or thinking time requested during this window/,
   );
   assert.match(windows(REPLAYS["a long window"])[0], /3599\.0 s/);
 });
@@ -623,7 +634,7 @@ test("the report card this page renders names no finding either", () => {
       "100",
       "2",
       "2.",
-      "24",
+      "25",
       "2;",
       "3",
       "37",

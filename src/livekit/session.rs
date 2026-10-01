@@ -30,11 +30,11 @@ use crate::runtime::{
     TOPIC_CONTROL, TOPIC_TRANSCRIPTION,
 };
 
-use super::media::OutputAudio;
+use super::media::{CandidateMedia, OutputAudio};
 use super::turn::{Floor, Interruptible, RuntimeActivity, SpeakerTurns, TurnState, closing_order};
 use super::{
     AGENT_STATE_LISTENING, AGENT_STATE_SPEAKING, LIVEKIT_AGENT_STATE, NOTABLE_PLAYOUT_BACKLOG,
-    WRAP_UP_WAIT, browser_packet, output_settled,
+    WRAP_UP_WAIT, browser_packet, output_settled, pause_leaves_output_in_flight,
 };
 
 /// The door every realtime-input text goes through, so that what the session
@@ -110,6 +110,13 @@ pub(super) struct GeminiEventContext<'a> {
     pub(super) activity: &'a mut RuntimeActivity,
     pub(super) turns: &'a mut SpeakerTurns,
     candidate_identity: Option<&'a str>,
+    pub(super) candidate_audio: &'a mut Vec<u8>,
+}
+
+impl GeminiEventContext<'_> {
+    pub(super) fn turns_candidate_open(&self) -> bool {
+        self.turns.candidate.is_open()
+    }
 }
 
 /// What to do with an inbound Gemini event before its own arm sees it.
@@ -241,10 +248,10 @@ pub(super) fn answers_prompt(event: &GeminiEvent) -> bool {
 /// or an await. It is also the rule a restart has to get right: the discard
 /// belongs to the socket that armed it, and a replacement that inherits one
 /// drops its own first turn, which is the cold-restart briefing.
-fn output_disposition(event: &GeminiEvent, discarding: bool, paused: bool) -> OutputDisposition {
+fn output_disposition(event: &GeminiEvent, discarding: bool, held: bool) -> OutputDisposition {
     let is_output = matches!(
         event,
-        GeminiEvent::Audio { .. } | GeminiEvent::OutputTranscript(_)
+        GeminiEvent::Audio { .. } | GeminiEvent::OutputTranscript(_) | GeminiEvent::Text(_)
     );
     let ends_turn = ends_turn(event);
 
@@ -257,10 +264,10 @@ fn output_disposition(event: &GeminiEvent, discarding: bool, paused: bool) -> Ou
         }
     }
 
-    // Checked after the discard, not before it: a turn ending while paused
-    // still has to serve the discard's sentence, and `TurnComplete` is not
-    // output so it was never the thing a pause silences.
-    if paused && is_output {
+    // Checked after the discard, not before it: a turn ending while held still
+    // has to serve the discard's sentence, and `TurnComplete` is not output so
+    // it was never the thing a pause or a hold silences.
+    if held && is_output {
         return OutputDisposition::Drop;
     }
     OutputDisposition::Deliver
@@ -313,11 +320,16 @@ pub(super) async fn handle_gemini_event(
     match output_disposition(
         &event,
         context.activity.discarding_output,
-        context.state.paused,
+        context.state.floor_held(),
     ) {
-        OutputDisposition::Drop => return Ok(()),
+        OutputDisposition::Drop => {
+            drop_output(context.state, context.activity);
+            return Ok(());
+        }
         OutputDisposition::EndsTheDiscard => {
-            context.activity.discarding_output = false;
+            context
+                .activity
+                .end_discard(matches!(event, GeminiEvent::Interrupted));
             held_debt = Some(context.activity.prompt_debt());
         }
         OutputDisposition::Deliver => {
@@ -367,6 +379,26 @@ pub(super) async fn handle_gemini_event(
     };
     if let Some(debt) = held_debt {
         context.activity.restore_prompt_debt(debt);
+    }
+    if handled.is_ok() && context.activity.claim_thinking_reply(context.state) {
+        let prompt =
+            crate::agent::with_timer(context.state, context.activity.thinking_reply_prompt());
+        context
+            .activity
+            .mark_prompted(Instant::now(), Some(&prompt), false);
+        if let Err(error) = send_model_text(
+            context.gemini,
+            context.state,
+            ModelInputKind::Turn,
+            TurnCause::Turn,
+            &prompt,
+        )
+        .await
+        {
+            eprintln!(
+                "Gemini thinking reply failed ({error}); waiting for the close to be reported"
+            );
+        }
     }
     handled
 }
@@ -467,14 +499,55 @@ async fn on_input_transcript(
         // lands behind the rest of the old turn.
         drop_stale_playout(room, context, interruptible).await?;
         context.activity.note_candidate_finished(Instant::now());
-        let turn = &mut context.turns.candidate;
-        let whole = turn
+        let whole = context
+            .turns
+            .candidate
             .record(&mut context.state.transcript, CANDIDATE_SPEAKER, text)
             .to_string();
+        let was_thinking = context.state.thinking_hold.is_active();
+        let was_requested = context.state.thinking_hold.is_requested();
+        if interruptible == Interruptible::Yes {
+            context.activity.observe_thinking_fragment(
+                context.state,
+                &whole,
+                Instant::now(),
+                crate::current_epoch_millis(),
+            );
+        }
+        if !was_thinking && context.state.thinking_hold.is_active() {
+            context.state.thinking_unheard_reply |= context.activity.floor != Floor::Listening;
+            cut_off_for_hold(context.activity, context.output_audio);
+            set_agent_state(room, context.agent_state, AGENT_STATE_LISTENING).await?;
+        } else if was_thinking
+            && !context.state.thinking_hold.is_active()
+            && crate::agent::thinking_owes_context(context.state)
+        {
+            let briefing = speech_release_briefing(context.state, was_requested);
+            let briefing = crate::agent::with_timer(context.state, briefing);
+            match send_model_context(
+                context.gemini,
+                context.state,
+                ModelInputKind::Turn,
+                &briefing,
+                None,
+            )
+            .await
+            {
+                Ok(()) => context.state.clear_thinking_debt(),
+                Err(error) => {
+                    context
+                        .activity
+                        .mark_prompted(Instant::now(), Some(&briefing), false);
+                    eprintln!(
+                        "Gemini thinking context failed ({error}); waiting for the close to be reported"
+                    );
+                }
+            }
+        }
         publish_transcript(
             room,
             &whole,
-            turn.segment_id("candidate"),
+            context.turns.candidate.segment_id("candidate"),
             false,
             Some(identity),
         )
@@ -534,11 +607,72 @@ async fn on_generated_audio(
     Ok(())
 }
 
+/// What speech that ends a hold tells the model, as context: whatever the hold
+/// left owed, and for a declared hold that the candidate is ready. A withdrawn
+/// request was reasoning that began like one, so it says nothing about being
+/// ready; only the debt its brief hold ran up.
+fn speech_release_briefing(state: &RuntimeState, withdrawn: bool) -> String {
+    if withdrawn {
+        crate::agent::owed_context(state)
+    } else {
+        crate::agent::thinking_resume(state)
+    }
+}
+
+/// Once a held reply has been dropped, releasing the hold must not play its
+/// tail; its own boundary disarms the discard. The model still holds what it
+/// said, so the release has to disown it. A pause drops output too, but a
+/// resumed interview gets its own line and owes nothing for it here.
+fn drop_output(state: &mut RuntimeState, activity: &mut RuntimeActivity) {
+    if state.thinking_hold.is_active() {
+        activity.discarding_output = true;
+        state.thinking_unheard_reply = true;
+    }
+}
+
+/// Agent to browser, so no generated fixture covers it; `receiveControl` in
+/// `web/interview.js` is the consumer, and both sides test this exact shape.
+pub(super) fn thinking_state_message(thinking: bool) -> serde_json::Value {
+    serde_json::json!({"type": "thinking_state", "thinking": thinking})
+}
+
+/// Tells the page what `take_thinking_notice` holds, if anything. Not `?`: a
+/// page left showing the wrong button is corrected by the next click, and is no
+/// reason to end the interview.
+pub(super) async fn flush_thinking_notice(room: &Room, state: &mut RuntimeState) {
+    if let Some(thinking) = state.take_thinking_notice()
+        && let Err(error) = publish_thinking_state(room, thinking).await
+    {
+        eprintln!("publishing thinking state failed ({error}); continuing the interview");
+    }
+}
+
+async fn publish_thinking_state(
+    room: &Room,
+    thinking: bool,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    room.local_participant()
+        .publish_data(browser_packet(
+            TOPIC_CONTROL,
+            &thinking_state_message(thinking),
+        )?)
+        .await?;
+    Ok(())
+}
+
 /// Gemini finished the turn. The room has not: the queue is still draining.
 async fn on_turn_complete(
     room: &Room,
     context: &mut GeminiEventContext<'_>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    context.activity.confirm_thinking_request(
+        context.state,
+        Instant::now(),
+        crate::current_epoch_millis(),
+    );
+    if context.state.thinking_hold.is_active() {
+        context.activity.awaiting_reply_since = None;
+    }
     // Whatever the tool response was owed has now arrived.
     context.activity.tool_response_outstanding = false;
 
@@ -656,6 +790,38 @@ pub(super) async fn set_agent_state(
     Ok(())
 }
 
+/// How long Gemini waits through the candidate's silence before taking the
+/// turn, so the page can draw the countdown to it. An attribute rather than a
+/// message: it is fixed for the interview, and a page that joins or reloads
+/// after the agent reads it without asking. `TURN_WINDOW_ATTRIBUTE` in
+/// `web/lib.js` names the same key.
+pub(super) const TURN_WINDOW_ATTRIBUTE: &str = "codetrial.silence_ms";
+
+/// The agent's first attributes, listening and the turn window, in the one
+/// round trip the room pays before it waits for the candidate.
+pub(super) async fn publish_opening_attributes(
+    room: &Room,
+    current: &mut String,
+    silence_ms: u32,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let participant = room.local_participant();
+    let attributes = agent_state_attributes(participant.attributes(), AGENT_STATE_LISTENING);
+    participant
+        .set_attributes(turn_window_attributes(attributes, silence_ms))
+        .await?;
+    current.clear();
+    current.push_str(AGENT_STATE_LISTENING);
+    Ok(())
+}
+
+fn turn_window_attributes(
+    mut attributes: HashMap<String, String>,
+    silence_ms: u32,
+) -> HashMap<String, String> {
+    attributes.insert(TURN_WINDOW_ATTRIBUTE.to_string(), silence_ms.to_string());
+    attributes
+}
+
 fn agent_state_attributes(
     mut attributes: HashMap<String, String>,
     state: &str,
@@ -706,7 +872,18 @@ pub fn execute_tool_call(state: &mut RuntimeState, call: &GeminiFunctionCall) ->
     response
 }
 
+/// What the model is told when it tries to hint or end the interview while the
+/// candidate holds the floor to think. Both would speak into a silence the
+/// candidate asked for.
+const REFUSED_DURING_HOLD: &str =
+    "The candidate requested thinking time. Stay silent until they speak again or yield the turn.";
+
 fn tool_response(state: &mut RuntimeState, call: &GeminiFunctionCall) -> serde_json::Value {
+    if state.thinking_hold.is_active()
+        && matches!(call.name.as_str(), TOOL_END_INTERVIEW | TOOL_LOG_HINT)
+    {
+        return serde_json::json!({ "error": REFUSED_DURING_HOLD });
+    }
     match call.name.as_str() {
         TOOL_READ_EDITOR => {
             state.code_shown = state.code.clone();
@@ -987,6 +1164,14 @@ async fn drop_stale_playout(
     Ok(())
 }
 
+/// A hold took the floor while Jim was still talking: stop him, and drop the
+/// rest of the turn he was in if Gemini is still producing it. A discard
+/// already under way is kept, since its turn has not ended either.
+pub(super) fn cut_off_for_hold(activity: &mut RuntimeActivity, output_audio: &mut OutputAudio) {
+    activity.discarding_output |= pause_leaves_output_in_flight(activity.floor);
+    cut_off_turn(activity, output_audio);
+}
+
 /// The decision and its effect, with no room in sight so a test can reach it.
 /// Returns how much queued speech was thrown away, which both decides whether
 /// the agent state attribute needs republishing and is the number worth
@@ -1150,7 +1335,7 @@ impl TurnState {
         &'a mut self,
         output_audio: &'a mut OutputAudio,
         gemini: &'a mut GeminiLiveSession,
-        candidate_identity: Option<&'a str>,
+        media: &'a mut CandidateMedia,
     ) -> GeminiEventContext<'a> {
         GeminiEventContext {
             output_audio,
@@ -1159,7 +1344,8 @@ impl TurnState {
             agent_state: &mut self.agent_state,
             activity: &mut self.activity,
             turns: &mut self.turns,
-            candidate_identity,
+            candidate_identity: media.identity.as_deref(),
+            candidate_audio: &mut media.audio_bytes,
         }
     }
 }
