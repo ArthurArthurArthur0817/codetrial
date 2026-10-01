@@ -35,6 +35,10 @@ pub struct RuntimeBootstrap<'a> {
     pub report_model: &'a str,
     pub voice: &'a str,
     pub silence_ms: u32,
+    pub context_compression: Option<crate::config::GeminiContextCompression>,
+    /// Whether candidate video frames go to Gemini, which is what makes the
+    /// setup's media resolution worth sending.
+    pub candidate_video: bool,
     pub start_sensitivity: &'a str,
     pub end_sensitivity: Option<&'a str>,
     pub instructions: String,
@@ -105,9 +109,11 @@ pub fn bootstrap_with_rounds<'a>(
         report_model: &config.gemini_report_model,
         voice: &config.gemini_voice,
         silence_ms: config.gemini_silence_ms,
+        context_compression: config.gemini_context_compression,
+        candidate_video: config.gemini_candidate_video_enabled,
         start_sensitivity: &config.gemini_start_sensitivity,
         end_sensitivity: config.gemini_end_sensitivity.as_deref(),
-        greeting: greeting(problem),
+        greeting: greeting(),
     }
 }
 

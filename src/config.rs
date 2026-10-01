@@ -489,6 +489,44 @@ pub fn apply_config_file(values: &mut BTreeMap<String, String>, file: Vec<(Strin
     values.extend(file);
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GeminiContextCompression {
+    pub trigger_tokens: u32,
+    pub target_tokens: u32,
+}
+
+fn gemini_context_compression(
+    values: &BTreeMap<String, String>,
+) -> Result<Option<GeminiContextCompression>, String> {
+    let trigger = present(values, "GEMINI_CONTEXT_TRIGGER_TOKENS");
+    let target = present(values, "GEMINI_CONTEXT_TARGET_TOKENS");
+    let (Some(trigger), Some(target)) = (trigger, target) else {
+        return if trigger.is_none() && target.is_none() {
+            Ok(None)
+        } else {
+            Err("GEMINI_CONTEXT_TRIGGER_TOKENS and GEMINI_CONTEXT_TARGET_TOKENS must be set together".into())
+        };
+    };
+    let parse = |value: &str, name: &str| {
+        value
+            .parse::<u32>()
+            .ok()
+            .filter(|value| *value > 0)
+            .ok_or_else(|| format!("{name} must be a positive integer"))
+    };
+    let trigger_tokens = parse(trigger, "GEMINI_CONTEXT_TRIGGER_TOKENS")?;
+    let target_tokens = parse(target, "GEMINI_CONTEXT_TARGET_TOKENS")?;
+    if target_tokens >= trigger_tokens {
+        return Err(
+            "GEMINI_CONTEXT_TARGET_TOKENS must be less than GEMINI_CONTEXT_TRIGGER_TOKENS".into(),
+        );
+    }
+    Ok(Some(GeminiContextCompression {
+        trigger_tokens,
+        target_tokens,
+    }))
+}
+
 /// No `Debug`, deliberately: two of these fields are credentials, and nothing
 /// needs to print the struct. See the `Debug` impl on [`Provider`] for why that
 /// type is handled the other way.
@@ -502,6 +540,7 @@ pub struct AgentConfig {
     pub gemini_report_model: String,
     pub gemini_voice: String,
     pub gemini_silence_ms: u32,
+    pub gemini_context_compression: Option<GeminiContextCompression>,
     pub gemini_start_sensitivity: String,
     /// `None` leaves the end-of-speech sensitivity at the API's own value; see
     /// `end_sensitivity`.
@@ -641,6 +680,12 @@ pub fn load_from_pairs(
         invalid_entries.push(message);
     }
 
+    let gemini_context_compression =
+        gemini_context_compression(&values).unwrap_or_else(|message| {
+            invalid_entries.push(message);
+            None
+        });
+
     if !missing_keys.is_empty() || !invalid_entries.is_empty() {
         return Err(ConfigError {
             missing_keys,
@@ -678,6 +723,7 @@ pub fn load_from_pairs(
         gemini_voice: optional(&values, "GEMINI_VOICE", DEFAULT_GEMINI_VOICE),
         gemini_silence_ms: optional_u32(&values, "GEMINI_SILENCE_MS", DEFAULT_GEMINI_SILENCE_MS)
             .min(MAX_GEMINI_SILENCE_MS),
+        gemini_context_compression,
         gemini_start_sensitivity: start_sensitivity_or_default(&values),
         gemini_end_sensitivity: end_sensitivity(&values),
         room_prefix: optional(&values, "CODETRIAL_ROOM_PREFIX", DEFAULT_ROOM_PREFIX),

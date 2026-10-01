@@ -1655,6 +1655,58 @@ async fn a_first_open_gives_up_at_its_time_limit() {
     assert!(started.elapsed() < COLD_OPEN_BACKOFF);
 }
 
+/// Every key's project out of credit: the rotation tries each once and then
+/// runs dry, and the error it hands back is still the billing failure, which
+/// is what the room's summary names, not the empty rotation it left behind.
+#[tokio::test]
+// The handshake callback's error type is a full HTTP response.
+#[allow(clippy::result_large_err)]
+async fn a_rotation_emptied_by_billing_failures_reports_billing() {
+    use tokio_tungstenite::tungstenite::handshake::server;
+
+    let config = load_from_pairs([
+        ("LIVEKIT_URL", "wss://example.livekit.cloud"),
+        ("LIVEKIT_API_KEY", "devkey"),
+        ("LIVEKIT_API_SECRET", "devsecret"),
+        ("GOOGLE_API_KEYS", "unpaid-a,unpaid-b"),
+        ("GEMINI_LIVE_MODEL", "gemini-live"),
+    ])
+    .unwrap();
+    let keys = GeminiKeys::from_config(&config);
+    let boot = crate::runtime::bootstrap(&config, "interview-fixed", Some("two-sum"), 45);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("ws://{}/", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        loop {
+            let (socket, _) = listener.accept().await.unwrap();
+            let _ = tokio_tungstenite::accept_hdr_async(
+                socket,
+                |_: &server::Request, _: server::Response| {
+                    let mut refusal = server::ErrorResponse::new(None);
+                    *refusal.status_mut() = axum::http::StatusCode::PAYMENT_REQUIRED;
+                    Err(refusal)
+                },
+            )
+            .await;
+        }
+    });
+    let mut attempts = 0;
+    let error = retry_cold_open(&keys, &mut 0, || {
+        attempts += 1;
+        crate::gemini::live_session_with_keys_at(&url, &keys, &boot, None)
+    })
+    .await
+    .err()
+    .unwrap();
+    server.abort();
+    assert_eq!(attempts, 3);
+    assert!(crate::gemini::is_billing_failure(error.as_ref()), "{error}");
+    assert_eq!(
+        LiveOutcome::from_error(error.as_ref(), LiveOutcome::GeminiUnreachable),
+        LiveOutcome::Billing
+    );
+}
+
 /// Two keys that both hit a 429 inside a minute must not end an interview one
 /// key would have ridden out: the exhausted rotation waits, under the budget,
 /// for its first key back. Keys that were all refused have nothing to wait for,
@@ -2841,4 +2893,80 @@ fn a_refused_ending_after_test_does_not_invite_another_run() {
     );
     assert!(!refusal.contains("Test and Optimizations"));
     assert!(!refusal.contains("click Run"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn overdue_playout_wakes_even_when_the_loop_missed_its_deadline() {
+    let deadline = Instant::now() - Duration::from_millis(1);
+    tokio::time::timeout(
+        Duration::from_millis(100),
+        wait_for_playout(Floor::AwaitingPlayout, deadline),
+    )
+    .await
+    .expect("a drained queue must release the waiting floor");
+    for floor in [Floor::Listening, Floor::Speaking] {
+        assert!(
+            tokio::time::timeout(Duration::from_millis(5), wait_for_playout(floor, deadline))
+                .await
+                .is_err(),
+            "a floor not waiting for playout must not wake"
+        );
+    }
+    let deadline = (tokio::time::Instant::now() + Duration::from_millis(30)).into_std();
+    assert!(
+        tokio::time::timeout(
+            Duration::from_millis(5),
+            wait_for_playout(Floor::AwaitingPlayout, deadline)
+        )
+        .await
+        .is_err(),
+        "queued audio must finish before releasing the floor"
+    );
+    tokio::time::timeout(
+        Duration::from_millis(100),
+        wait_for_playout(Floor::AwaitingPlayout, deadline),
+    )
+    .await
+    .unwrap();
+    assert!(tokio::time::Instant::now() >= deadline.into());
+}
+
+/// The summary is a contract with the log analyzer, which groups by `session`
+/// and reads `outcome`; both shapes carry them in the same place.
+#[test]
+fn both_usage_summaries_share_one_spelling() {
+    let usage = crate::gemini::TokenUsage::default();
+    let finished = live_usage_line("room-a", 7, "live", 60, LiveOutcome::Ok, Some(2), &usage);
+    assert!(
+        finished.starts_with(
+            "codetrial live_usage room=room-a session=7 model=live elapsed_s=60 outcome=ok sockets=2 prompt_tokens=0"
+        ),
+        "{finished}"
+    );
+    let startup = live_usage_line("room-a", 7, "live", 0, LiveOutcome::Billing, None, &usage);
+    assert!(
+        startup.starts_with(
+            "codetrial live_usage room=room-a session=7 model=live elapsed_s=0 outcome=billing phase=startup prompt_tokens=0"
+        ),
+        "{startup}"
+    );
+}
+
+/// The window reaches the interview's state, which is the one place the
+/// checkpoint and the tool answers read it from.
+#[test]
+fn the_compression_window_reaches_the_interview_state() {
+    let config = load_from_pairs([
+        ("LIVEKIT_URL", "wss://example.livekit.cloud"),
+        ("LIVEKIT_API_KEY", "devkey"),
+        ("LIVEKIT_API_SECRET", "devsecret"),
+        ("GOOGLE_API_KEY", "google"),
+        ("GEMINI_CONTEXT_TRIGGER_TOKENS", "20000"),
+        ("GEMINI_CONTEXT_TARGET_TOKENS", "8000"),
+    ])
+    .unwrap();
+    let boot = crate::runtime::bootstrap(&config, "interview-fixed", Some("two-sum"), 45);
+    let state = initial_runtime_state(&boot, Instant::now());
+    assert_eq!(state.context_compression, config.gemini_context_compression);
+    assert!(state.context_compression.is_some());
 }

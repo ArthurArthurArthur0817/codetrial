@@ -1,7 +1,7 @@
 # Functions the mutation gate cannot judge, because `cargo test` cannot reach
 # them. Matched against the mutant names that `cargo mutants --list` prints.
 #
-# EXCLUSIONS: 54
+# EXCLUSIONS: 57
 #
 # That number is checked by `scripts/test.sh`, so adding an entry means editing
 # this line too. The point is not the count, it is that the list only ever grows
@@ -247,6 +247,17 @@
 # what may trigger it on a tick is `RuntimeActivity::settle_stalls`; both are
 # tested.
 #
+# `maybe_refresh_context`, `record_live_usage` and `drain_live_usage` are the
+# room's half of the Live usage accounting and the compression checkpoint. The
+# first sends the checkpoint on the Gemini socket and logs it for the room;
+# the other two read the socket's usage ledger and log each observation for
+# the room. All three take the live `GeminiEventContext`, so `()` looks the
+# same from outside as the work, for the reason `send_model_text` does. What
+# they decide is tested where it is decided: `RuntimeActivity::checkpoint_due`
+# and `can_refresh_context` for when a checkpoint may go out,
+# `account_live_usage` for what an observation adds and how its line reads,
+# and the ledger's ordering against a local socket in tests/unit/gemini.rs.
+#
 # Keep this list short and each entry justified. An entry that is really "we
 # never got around to testing this" belongs in a test, not here.
 exclude_re = [
@@ -297,6 +308,9 @@ exclude_re = [
     "generate_interim_review",
     "end_through_control",
     "spend_deferred_restart",
+    "maybe_refresh_context",
+    "record_live_usage",
+    "drain_live_usage",
     "handle_media_event",
     "attach_audio",
     "next_audio_frame",

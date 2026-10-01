@@ -54,7 +54,13 @@ pub(super) async fn generate_report_bounded(
 ) -> GeneratedReport {
     tokio::time::timeout(
         REPORT_TIMEOUT,
-        generate_report_with_keys(api_key, boot.report_model, prompt, boot.problem),
+        generate_report_with_keys(
+            api_key,
+            boot.report_model,
+            prompt,
+            boot.problem,
+            boot.room_name,
+        ),
     )
     .await
 }

@@ -103,9 +103,9 @@ mod turn;
 // room and hands one borrow of it over for the length of one Gemini event.
 pub use session::execute_tool_call;
 use session::{
-    GeminiEventContext, TestRunLine, close_turns, cut_off_turn, handle_gemini_event, log_clock,
-    prompt_fields, prompt_line, send_model_context, send_model_text, send_wrap_up_and_wait,
-    set_agent_state,
+    GeminiEventContext, TestRunLine, TurnCause, close_turns, cut_off_turn, handle_gemini_event,
+    log_clock, prompt_fields, prompt_line, send_model_context, send_model_text,
+    send_wrap_up_and_wait, set_agent_state,
 };
 
 use report::{freeze_report_prompt, generate_report_bounded, publish_report};
@@ -393,6 +393,37 @@ where
     }
 }
 
+/// How an interview's Live session ended, as its summary line spells it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LiveOutcome {
+    Ok,
+    Error,
+    GeminiUnreachable,
+    Billing,
+}
+
+impl LiveOutcome {
+    /// A project out of credit is named wherever the failure surfaced, since
+    /// it is the one an operator fixes by paying rather than by waiting, and
+    /// the one that looks like any other silence from the candidate's side.
+    fn from_error(error: &(dyn std::error::Error + 'static), otherwise: Self) -> Self {
+        if crate::gemini::is_billing_failure(error) {
+            Self::Billing
+        } else {
+            otherwise
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Ok => "ok",
+            Self::Error => "error",
+            Self::GeminiUnreachable => "gemini_unreachable",
+            Self::Billing => "billing",
+        }
+    }
+}
+
 /// Puts the interview back on a new Gemini socket, or reports that it cannot
 /// be.
 ///
@@ -415,8 +446,20 @@ async fn replace_gemini_session(
     interview: InterviewContext<'_>,
     restarts: &mut usize,
 ) -> Result<ControlFlow<()>, Box<dyn std::error::Error + Send + Sync>> {
+    // Neither a resume nor a cold open on the same key can get past a project
+    // that cannot pay, so the budget is not spent learning that twice more.
+    if context.gemini.closed_for_billing(interview.keys) {
+        context.activity.live_exit = LiveOutcome::Billing;
+        eprintln!(
+            "Gemini closed the session because the project cannot pay; ending interview room={}",
+            interview.boot.room_name
+        );
+        leave_room(room).await;
+        return Ok(ControlFlow::Break(()));
+    }
     let handle = context.gemini.recovery_handle(interview.keys);
     if !take_restart_attempt(restarts, context.gemini.age()) {
+        context.activity.live_exit = LiveOutcome::GeminiUnreachable;
         eprintln!(
             "Gemini closed {restarts} sockets in a row without one of them lasting; ending interview room={}",
             interview.boot.room_name
@@ -443,6 +486,7 @@ async fn replace_gemini_session(
         (None, None) => "none".to_string(),
     };
     let _ = context.gemini.shutdown().await;
+    session::drain_live_usage(room, context);
 
     // A handle is worth one try and no more: one the server refuses fails
     // identically every time, so retrying it under the budget would spend the
@@ -466,16 +510,21 @@ async fn replace_gemini_session(
 
     let resumed = resumed_session.is_some();
     let session = match resumed_session {
-        Some(session) => Some(session),
-        None => open_cold_session(interview, restarts).await.ok(),
+        Some(session) => Ok(session),
+        None => open_cold_session(interview, restarts).await,
     };
-    let Some(session) = session else {
-        eprintln!(
-            "Gemini could not be reached; ending interview room={}",
-            interview.boot.room_name
-        );
-        leave_room(room).await;
-        return Ok(ControlFlow::Break(()));
+    let session = match session {
+        Ok(session) => session,
+        Err(error) => {
+            context.activity.live_exit =
+                LiveOutcome::from_error(error.as_ref(), LiveOutcome::GeminiUnreachable);
+            eprintln!(
+                "Gemini could not be reached; ending interview room={}",
+                interview.boot.room_name
+            );
+            leave_room(room).await;
+            return Ok(ControlFlow::Break(()));
+        }
     };
     context
         .state
@@ -483,6 +532,8 @@ async fn replace_gemini_session(
         .record_model_input(ModelInputKind::LiveSetup, &interview.boot.instructions);
 
     *context.gemini = session;
+    context.activity.live_socket += 1;
+    context.activity.reset_context_observations(resumed);
 
     let (owed, debt, owed_prompt) =
         hand_over(context.state, context.activity, context.output_audio);
@@ -675,7 +726,14 @@ async fn send_recovery_brief(
         );
         // The briefing carries the whole editor, so the model has now seen it.
         state.code_shown = state.code.clone();
-        send_model_context(gemini, state, ModelInputKind::Turn, &context, reply).await?;
+        send_model_context(
+            gemini,
+            state,
+            ModelInputKind::Turn,
+            &context,
+            reply.then_some(TurnCause::Recovery),
+        )
+        .await?;
         return Ok(reply);
     }
     if state.paused {
@@ -684,7 +742,14 @@ async fn send_recovery_brief(
     }
     let briefing = crate::agent::with_timer(state, crate::agent::cold_restart(state));
     state.code_shown = state.code.clone();
-    send_model_text(gemini, state, ModelInputKind::Turn, &briefing).await?;
+    send_model_text(
+        gemini,
+        state,
+        ModelInputKind::Turn,
+        TurnCause::Recovery,
+        &briefing,
+    )
+    .await?;
     state.needs_cold_brief = false;
     Ok(true)
 }
@@ -717,8 +782,9 @@ fn spawn_interim_review(
     let prompt = take_interim_review_window(state, interview.boot);
     let keys = Arc::clone(interview.keys);
     let model = interview.boot.report_model.to_string();
+    let room_name = interview.boot.room_name.to_string();
     tokio::spawn(async move {
-        match generate_interim_review_with_keys(&keys, &model, &prompt).await {
+        match generate_interim_review_with_keys(&keys, &model, &prompt, &room_name).await {
             Ok(text) => text,
 
             // Logged and answered with nothing. This is an optimization on a
@@ -727,7 +793,7 @@ fn spawn_interim_review(
             // one. An empty note records nothing.
             Err(error) => {
                 eprintln!(
-                    "interim review skipped: {}",
+                    "interim review skipped room={room_name}: {}",
                     keys.redact(&error.to_string())
                 );
                 String::new()
@@ -880,6 +946,7 @@ async fn open_session<'a>(
     keys: &Arc<GeminiKeys>,
     room_name: &'a str,
     now_seconds: u64,
+    session_id: u64,
 ) -> Result<Option<OpenSession<'a>>, Box<dyn std::error::Error + Send + Sync>> {
     let agent_identity = agent_identity(room_name);
     let (room, mut events) = join_room(config, room_name, &agent_identity, now_seconds).await?;
@@ -946,7 +1013,11 @@ async fn open_session<'a>(
     let mut turn = TurnState {
         state: initial_runtime_state(&boot, started_at),
         agent_state: std::mem::take(&mut agent_state),
-        activity: RuntimeActivity::with_interim_review_cap(started_at, config.max_interim_reviews),
+        activity: RuntimeActivity::for_interview(
+            started_at,
+            config.max_interim_reviews,
+            session_id,
+        ),
         turns: SpeakerTurns::default(),
     };
     turn.state
@@ -974,6 +1045,7 @@ async fn open_session<'a>(
         &mut gemini,
         &mut turn.state,
         ModelInputKind::Turn,
+        TurnCause::Turn,
         &greeting,
     )
     .await?;
@@ -1037,6 +1109,50 @@ async fn on_hard_deadline(
     .await?;
     // `end_through_control` has already published the report and left the room.
     Ok(ControlFlow::Break(()))
+}
+
+/// Reconcile compressed context as soon as usage and output boundaries permit.
+/// The watch tick retries when candidate speech or queued output holds it.
+async fn maybe_refresh_context(room: &Room, context: &mut GeminiEventContext<'_>) {
+    // Runs after every Gemini event, most of them audio. Nothing pending is the
+    // common case, and the gates below read the candidate's open turn to say
+    // no, so it is answered first.
+    if !context.activity.context_refresh_pending {
+        return;
+    }
+    if context.activity.checkpoint_due(
+        context.state,
+        context.output_audio.is_playing(),
+        context.turns.candidate.is_open(),
+        Instant::now(),
+    ) {
+        let checkpoint = with_timer(
+            context.state,
+            crate::agent::compressed_context(context.state),
+        );
+        match send_model_context(
+            context.gemini,
+            context.state,
+            ModelInputKind::Turn,
+            &checkpoint,
+            None,
+        )
+        .await
+        {
+            Ok(()) => {
+                context.activity.context_refresh_pending = false;
+                eprintln!(
+                    "codetrial context_refresh room={} session={} bytes={}",
+                    room.name(),
+                    context.activity.live_session_id,
+                    checkpoint.len()
+                );
+            }
+            Err(error) => eprintln!(
+                "Gemini context refresh failed ({error}); waiting for the close to be reported"
+            ),
+        }
+    }
 }
 
 /// One watch tick: the candidate's absence, the interim review, and the nudge.
@@ -1129,6 +1245,7 @@ async fn on_watch_tick(
             .interim_review
             .start(spawn_interim_review(context.state, interview));
     }
+    maybe_refresh_context(room, context).await;
     if let Some(prompt) = context.activity.watch_prompt(context.state, tick_at) {
         // Not `?`. Every write below is one the reader may be about to explain:
         // a socket Gemini has closed fails the next send long before
@@ -1143,6 +1260,7 @@ async fn on_watch_tick(
                 context.gemini,
                 context.state,
                 ModelInputKind::Watch,
+                TurnCause::Watch,
                 &prompt.text,
             ),
         )
@@ -1256,6 +1374,7 @@ async fn on_gemini_event(
         return Ok(ControlFlow::Continue(()));
     }
     handle_gemini_event(room, context, event, Interruptible::Yes).await?;
+    maybe_refresh_context(room, context).await;
 
     // Jim called `end_interview`. Fed through the same packet the browser and
     // the server-side deadline both send, for the reason the deadline arm
@@ -1334,7 +1453,17 @@ async fn spend_deferred_restart(
     replace_gemini_session(room, context, interview, &mut loops.restarts).await
 }
 
-/// The queued audio finished playing, so the floor is the candidate's again.
+/// Wake for a queued playout deadline even when it has already elapsed.
+async fn wait_for_playout(floor: Floor, deadline: Instant) {
+    if floor == Floor::AwaitingPlayout {
+        // A busy loop can first poll this after the queue's deadline. Gating on
+        // audio still playing would then strand the floor indefinitely.
+        tokio::time::sleep_until(deadline.into()).await;
+    } else {
+        std::future::pending::<()>().await;
+    }
+}
+
 async fn on_playout_settled(
     room: &Room,
     context: &mut GeminiEventContext<'_>,
@@ -1353,6 +1482,7 @@ async fn on_playout_settled(
         return Ok(ControlFlow::Break(()));
     }
 
+    maybe_refresh_context(room, context).await;
     Ok(ControlFlow::Continue(()))
 }
 
@@ -1361,6 +1491,14 @@ pub async fn run_room(
     room_name: &str,
     now_seconds: u64,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // Names this run on every usage line. Milliseconds rather than the
+    // dispatch's seconds, so a room retried within the same second is not
+    // summed with the run before it.
+    let session_id = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| {
+            u64::try_from(since.as_millis()).unwrap_or(u64::MAX)
+        });
     let keys = Arc::new(GeminiKeys::from_config(config));
     let Some(OpenSession {
         room,
@@ -1374,7 +1512,27 @@ pub async fn run_room(
         mut turn,
         started_at,
         restarts,
-    }) = open_session(config, &keys, room_name, now_seconds).await?
+    }) = open_session(config, &keys, room_name, now_seconds, session_id)
+        .await
+        .inspect_err(|error| {
+            // The interview never started, and the summary is where an operator
+            // counts those, a first open a depleted project refused above all.
+            // A socket may have opened before the failure, so no count is
+            // claimed; no generation was asked for, so there is no usage.
+            let outcome = LiveOutcome::from_error(error.as_ref(), LiveOutcome::Error);
+            eprintln!(
+                "{}",
+                live_usage_line(
+                    room_name,
+                    session_id,
+                    &config.gemini_live_model,
+                    0,
+                    outcome,
+                    None,
+                    &crate::gemini::TokenUsage::default(),
+                )
+            );
+        })?
     else {
         return Ok(());
     };
@@ -1414,107 +1572,164 @@ pub async fn run_room(
     );
     tokio::pin!(hard_deadline);
 
-    loop {
-        let step = tokio::select! {
-            () = &mut hard_deadline, if !turn.state.ended => {
-                let mut context =
-                    turn.context(&mut output_audio, &mut gemini, media.identity.as_deref());
-                on_hard_deadline(&room, &mut context, &mut loops, interview).await?
-            }
-            _ = watch.tick(), if !turn.state.ended => {
-                let mut context =
-                    turn.context(&mut output_audio, &mut gemini, media.identity.as_deref());
-                on_watch_tick(&room, &mut context, &mut loops, interview).await?
-            }
-            event = events.recv() => {
-                let Some(event) = event else {
-                    eprintln!(
-                        "LiveKit event stream ended for room={room_name}; ending with no report, \
-                         because the room closed before the interview did"
-                    );
-                    gemini.close().await?;
-                    return Ok(());
-                };
-
-                // Media first, because most events are, and because attaching a
-                // track needs the stream and the socket apart -- which is the
-                // one thing a context, which borrows both together, cannot
-                // give.
-                match handle_media_event(
-                    &mut media,
-                    &mut gemini,
-                    &candidate_identity,
-                    config.gemini_candidate_video_enabled,
-                    &event,
-                )
-                .await
-                {
-                    Ok(true) => ControlFlow::Continue(()),
-                    Ok(false) => {
-                        let mut context = turn.context(
-                            &mut output_audio,
-                            &mut gemini,
-                            media.identity.as_deref(),
+    let result: Result<(), Box<dyn std::error::Error + Send + Sync>> = async {
+        loop {
+            let step = tokio::select! {
+                () = &mut hard_deadline, if !turn.state.ended => {
+                    let mut context =
+                        turn.context(&mut output_audio, &mut gemini, media.identity.as_deref());
+                    on_hard_deadline(&room, &mut context, &mut loops, interview).await?
+                }
+                _ = watch.tick(), if !turn.state.ended => {
+                    let mut context =
+                        turn.context(&mut output_audio, &mut gemini, media.identity.as_deref());
+                    on_watch_tick(&room, &mut context, &mut loops, interview).await?
+                }
+                event = events.recv() => {
+                    let Some(event) = event else {
+                        eprintln!(
+                            "LiveKit event stream ended for room={room_name}; ending with no report, \
+                             because the room closed before the interview did"
                         );
-                        handle_room_event(
-                            &room,
-                            &mut context,
-                            &mut loops.presence,
-                            interview,
-                            &ids,
-                            event,
-                        )
-                        .await?
-                    }
-                    Err(error) => {
-                        eprintln!("Gemini media attach failed ({error}); waiting for the close to be reported");
-                        ControlFlow::Continue(())
-                    }
-                }
-            }
-            event = gemini.next_event() => {
-                let mut context =
-                    turn.context(&mut output_audio, &mut gemini, media.identity.as_deref());
-                on_gemini_event(&room, &mut context, event, &mut loops, interview).await?
-            }
-            _ = tokio::time::sleep_until(output_audio.playout_deadline.into()), if turn.activity.floor == Floor::AwaitingPlayout && output_audio.is_playing() => {
-                let mut context =
-                    turn.context(&mut output_audio, &mut gemini, media.identity.as_deref());
-                on_playout_settled(&room, &mut context, &mut loops, interview).await?
-            }
-            frame = next_audio_frame(&mut media.audio), if media.audio.is_some() => {
-                // The fastest writer in the loop, and so the one that reaches a
-                // closed socket first: a flush leaves every hundred
-                // milliseconds of speech. Dropping the frame costs a tenth of a
-                // second of audio the resumed session did not need; propagating
-                // cost the interview.
-                let ended = frame.is_none();
-                if turn.state.paused {
-                    discard_paused_audio(&mut media);
-                } else if let Err(error) = pump_audio(&mut media, &mut gemini, frame).await {
-                    eprintln!("Gemini audio write failed ({error}); waiting for the close to be reported");
-                }
+                        gemini.shutdown().await?;
+                        return Ok(());
+                    };
 
-                // One release for the arm, past every branch above it. Sitting
-                // inside a branch is what let a failed final flush keep an
-                // ended stream, and there is no path through here that wants to
-                // hold on to one.
-                release_if_ended(&mut media.audio, ended);
-                ControlFlow::Continue(())
-            }
-            frame = next_video_frame(&mut media.video), if media.video.is_some() => {
-                if turn.state.paused {
-                    release_if_ended(&mut media.video, frame.is_none());
-                } else if let Err(error) = pump_video(&mut media, &mut gemini, frame).await {
-                    eprintln!("Gemini video write failed ({error}); waiting for the close to be reported");
+                    // Media first, because most events are, and because
+                    // attaching a track needs the stream and the socket apart
+                    // -- which is the one thing a context, which borrows both
+                    // together, cannot give.
+                    match handle_media_event(
+                        &mut media,
+                        &mut gemini,
+                        &candidate_identity,
+                        config.gemini_candidate_video_enabled,
+                        &event,
+                    )
+                    .await
+                    {
+                        Ok(true) => ControlFlow::Continue(()),
+                        Ok(false) => {
+                            let mut context = turn.context(
+                                &mut output_audio,
+                                &mut gemini,
+                                media.identity.as_deref(),
+                            );
+                            handle_room_event(
+                                &room,
+                                &mut context,
+                                &mut loops.presence,
+                                interview,
+                                &ids,
+                                event,
+                            )
+                            .await?
+                        }
+                        Err(error) => {
+                            eprintln!("Gemini media attach failed ({error}); waiting for the close to be reported");
+                            ControlFlow::Continue(())
+                        }
+                    }
                 }
-                ControlFlow::Continue(())
+                event = gemini.next_event() => {
+                    let mut context =
+                        turn.context(&mut output_audio, &mut gemini, media.identity.as_deref());
+                    on_gemini_event(&room, &mut context, event, &mut loops, interview).await?
+                }
+                _ = wait_for_playout(turn.activity.floor, output_audio.playout_deadline) => {
+                    let mut context =
+                        turn.context(&mut output_audio, &mut gemini, media.identity.as_deref());
+                    on_playout_settled(&room, &mut context, &mut loops, interview).await?
+                }
+                frame = next_audio_frame(&mut media.audio), if media.audio.is_some() => {
+                    // The fastest writer in the loop, and so the one that
+                    // reaches a closed socket first: a flush leaves every
+                    // hundred milliseconds of speech. Dropping the frame costs
+                    // a tenth of a second of audio the resumed session did not
+                    // need; propagating cost the interview.
+                    let ended = frame.is_none();
+
+                    // Only a checkpoint reads it, and only under a compression
+                    // window; without one the per-frame level is not worth
+                    // computing.
+                    if turn.state.context_compression.is_some()
+                        && frame.as_ref().is_some_and(media::frame_has_voice)
+                    {
+                        turn.activity.candidate_voice_at = Some(Instant::now());
+                    }
+                    if turn.state.paused {
+                        discard_paused_audio(&mut media);
+                    } else if let Err(error) = pump_audio(&mut media, &mut gemini, frame).await {
+                        eprintln!("Gemini audio write failed ({error}); waiting for the close to be reported");
+                    }
+
+                    // One release for the arm, past every branch above it.
+                    // Sitting inside a branch is what let a failed final flush
+                    // keep an ended stream, and there is no path through here
+                    // that wants to hold on to one.
+                    release_if_ended(&mut media.audio, ended);
+                    ControlFlow::Continue(())
+                }
+                frame = next_video_frame(&mut media.video), if media.video.is_some() => {
+                    if turn.state.paused {
+                        release_if_ended(&mut media.video, frame.is_none());
+                    } else if let Err(error) = pump_video(&mut media, &mut gemini, frame).await {
+                        eprintln!("Gemini video write failed ({error}); waiting for the close to be reported");
+                    }
+                    ControlFlow::Continue(())
+                }
+            };
+            if step.is_break() {
+                return Ok(());
             }
-        };
-        if step.is_break() {
-            return Ok(());
         }
     }
+    .await;
+    if let Err(error) = gemini.shutdown().await {
+        eprintln!("Gemini close failed ({error}); recording received usage anyway");
+    }
+    session::drain_live_usage(
+        &room,
+        &mut turn.context(&mut output_audio, &mut gemini, media.identity.as_deref()),
+    );
+    eprintln!("{}", turn.state.evidence_ledger.metrics.cost_line());
+    let outcome = match &result {
+        Err(error) => LiveOutcome::from_error(error.as_ref(), LiveOutcome::Error),
+        Ok(()) => turn.activity.live_exit,
+    };
+    eprintln!(
+        "{}",
+        live_usage_line(
+            room_name,
+            session_id,
+            boot.live_model,
+            started_at.elapsed().as_secs(),
+            outcome,
+            Some(turn.activity.live_socket),
+            &turn.activity.live_usage,
+        )
+    );
+    result
+}
+
+/// A session's usage summary, in the one spelling the log analyzer reads.
+/// `sockets` is `None` for an interview that failed before its first turn,
+/// which may or may not have opened one, and says `phase=startup` instead.
+fn live_usage_line(
+    room: &str,
+    session: u64,
+    model: &str,
+    elapsed_s: u64,
+    outcome: LiveOutcome,
+    sockets: Option<u64>,
+    usage: &crate::gemini::TokenUsage,
+) -> String {
+    let lifetime = sockets.map_or_else(|| "phase=startup".to_string(), |n| format!("sockets={n}"));
+    format!(
+        "codetrial live_usage room={room} session={session} model={model} elapsed_s={elapsed_s} outcome={} {lifetime} {}",
+        outcome.as_str(),
+        usage.log_fields()
+    )
 }
 
 /// One LiveKit room event that was not the candidate's media.
@@ -1818,6 +2033,7 @@ fn initial_runtime_state(boot: &RuntimeBootstrap<'_>, started_at: Instant) -> Ru
         interview_loop: boot.interview_loop,
         coding_minutes: boot.coding_minutes,
         behavioral_minutes: boot.behavioral_minutes,
+        context_compression: boot.context_compression,
         ..RuntimeState::for_problem(boot.problem)
     };
     if boot.interview_loop == crate::agent::InterviewLoop::CodingBehavioral {
@@ -1987,7 +2203,15 @@ async fn handle_data_packet(
     if let Some(prompt) = result.generate_reply {
         // Not `?`: a failed write here ended the interview with no report, and
         // the socket it failed on is replaced when the close is reported.
-        match send_model_text(context.gemini, context.state, ModelInputKind::Turn, &prompt).await {
+        match send_model_text(
+            context.gemini,
+            context.state,
+            ModelInputKind::Turn,
+            TurnCause::Turn,
+            &prompt,
+        )
+        .await
+        {
             Ok(()) => {
                 context
                     .activity
@@ -2071,12 +2295,6 @@ async fn handle_data_packet(
         generated,
     )
     .await?;
-    eprintln!("{}", context.state.evidence_ledger.metrics.cost_line());
-    eprintln!(
-        "codetrial live_usage turns={} {}",
-        context.activity.live_turns,
-        context.activity.live_usage.log_fields()
-    );
 
     // The report is out; a close that fails now changes nothing but whether the
     // agent leaves, and it has to.
@@ -2092,3 +2310,7 @@ async fn handle_data_packet(
 #[cfg(test)]
 #[path = "../tests/unit/livekit.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "../tests/unit/livekit/cost.rs"]
+mod cost_tests;

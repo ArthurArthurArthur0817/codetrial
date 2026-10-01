@@ -1853,3 +1853,45 @@ fn an_unusable_interview_cap_falls_back_and_says_so() {
         "an unset cap is not a warning: {warnings:?}"
     );
 }
+
+#[test]
+fn compression_requires_a_valid_pair_and_preserves_provider_defaults() {
+    let base = [
+        ("LIVEKIT_URL", "wss://example.livekit.cloud"),
+        ("LIVEKIT_API_KEY", "key"),
+        ("LIVEKIT_API_SECRET", "secret"),
+        ("GOOGLE_API_KEY", "google"),
+    ];
+    assert!(
+        load_from_pairs(base)
+            .unwrap()
+            .gemini_context_compression
+            .is_none()
+    );
+    let config = load_from_pairs(base.into_iter().chain([
+        ("GEMINI_CONTEXT_TRIGGER_TOKENS", "25000"),
+        ("GEMINI_CONTEXT_TARGET_TOKENS", "8000"),
+    ]))
+    .unwrap();
+    let compression = config.gemini_context_compression.unwrap();
+    assert_eq!(compression.trigger_tokens, 25000);
+    assert_eq!(compression.target_tokens, 8000);
+    for (trigger, target) in [
+        ("25000", ""),
+        ("", "8000"),
+        ("0", "8000"),
+        ("25000", "0"),
+        ("8000", "8000"),
+        ("7000", "8000"),
+        ("oops", "8000"),
+        ("4294967296", "8000"),
+    ] {
+        let error = load_from_pairs(base.into_iter().chain([
+            ("GEMINI_CONTEXT_TRIGGER_TOKENS", trigger),
+            ("GEMINI_CONTEXT_TARGET_TOKENS", target),
+        ]))
+        .err()
+        .expect("invalid compression must fail configuration");
+        assert!(!error.invalid_entries.is_empty());
+    }
+}

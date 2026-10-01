@@ -282,23 +282,31 @@ fn log_hint_hands_out_one_rung_per_request_and_holds_the_last_for_an_approach() 
 #[test]
 fn greeting_introduces_the_scenario_and_never_the_published_problem() {
     // The template's own rules, once; the loop is for what each problem brings.
-    let opening = greeting(get_problem(Some("two-sum")));
+    let opening = greeting();
     assert!(opening.contains("may ask for a hint if they get stuck"));
     assert!(opening.contains("without naming any published problem, practice site"));
     assert!(opening.contains("do not volunteer a constraint, edge case, or hint"));
 
+    // The scenario reaches the interviewer through THE EXERCISE, which the
+    // greeting points it at; repeated in the greeting it was billed twice on
+    // every turn.
+    assert!(opening.contains("introduce THE EXERCISE"));
     for problem in PROBLEMS {
-        let opening = greeting(problem);
         let variant = problem.variant();
-
+        let exercise = instructions(problem, 45);
         assert!(
-            opening.contains(variant.title),
+            exercise.contains(variant.title),
             "{} lost its title",
             problem.id
         );
         for line in variant.brief {
-            assert!(opening.contains(line), "{} lost its brief", problem.id);
+            assert!(exercise.contains(line), "{} lost its brief", problem.id);
         }
+        assert!(
+            !opening.contains(variant.title),
+            "{} repeats its title",
+            problem.id
+        );
 
         // The summary is the published statement in a sentence, and what the
         // interviewer is handed to open with is what it paraphrases aloud.

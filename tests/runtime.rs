@@ -157,9 +157,13 @@ fn bootstrap_preserves_python_gemini_defaults_and_prompts() {
     assert!(
         bootstrap
             .instructions
-            .contains("90-minute technical coding interview")
+            .contains("90-minute coding interview over video")
     );
-    assert!(bootstrap.instructions.contains("`read_editor` tool"));
+    assert!(
+        bootstrap
+            .instructions
+            .contains("`read_editor`: only for code")
+    );
     assert!(
         bootstrap
             .greeting
