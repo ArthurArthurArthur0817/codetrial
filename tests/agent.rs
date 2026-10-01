@@ -239,6 +239,15 @@ fn prompt_samples() -> Value {
         "resumeBehavioral": resume(true),
         "roundStarted": round_started(),
         "roundSkipped": round_skipped(),
+        "compressedContextBehavioral": compressed_context(&behavioral_state),
+        "compressedContextEmpty": compressed_context(&RuntimeState::default()),
+        "compressedContextCoding": compressed_context(&cold_state),
+        "compressedContextBehavioralTruncated": compressed_context(&RuntimeState {
+            behavioral_round_started: true,
+            behavioral_round_transcript_start: 0,
+            transcript: vec![overflowing_turn()],
+            ..RuntimeState::default()
+        }),
         "coldRestartBehavioral": cold_restart(&behavioral_state),
         "coldRestartBehavioralInFlight": cold_restart(&RuntimeState {
             behavioral_round_started: true,
@@ -277,7 +286,7 @@ fn prompt_samples() -> Value {
             InterviewLoop::CodingBehavioral,
             true,
         ),
-        "greeting": greeting(problem),
+        "greeting": greeting(),
         "languageChoice": language_choice("C++", LanguageChoiceContext::Start),
         "languageSwitch": language_choice("Java", LanguageChoiceContext::SwitchWithCode),
         "silenceBehavioral": behavioral_silence_nudge(),
@@ -477,6 +486,8 @@ fn prompt_samples() -> Value {
                 None,
             ),
         ),
+        ("compressedContext", compressed_context(&tested_state)),
+        ("compressedContextSolved", compressed_context(&solved_state)),
         ("reviewTested", proactive_review(&tested_state, "", None)),
         ("timeTested", time_warning(&tested_state)),
         ("timeSolved", time_warning(&solved_state)),

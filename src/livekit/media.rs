@@ -38,7 +38,9 @@ pub(super) const GEMINI_AUDIO_BUFFER_BYTES: usize = 1_280;
 
 pub(super) const GEMINI_VIDEO_MIME_TYPE: &str = "image/jpeg";
 
-pub(super) const GEMINI_VIDEO_FRAME_INTERVAL: Duration = Duration::from_secs(1);
+/// One frame in five seconds. Each frame stays in the Live context and is
+/// billed again on every later turn, and a presence check needs no more.
+pub(super) const GEMINI_VIDEO_FRAME_INTERVAL: Duration = Duration::from_secs(5);
 
 pub(super) const GEMINI_VIDEO_JPEG_QUALITY: u8 = 75;
 
@@ -453,6 +455,28 @@ pub(super) async fn publish_output_audio(
         queued_frames,
     ));
     Ok(OutputAudio::new(source, sample_rate, frames))
+}
+
+/// Root-mean-square level, in PCM16 units, above which a frame counts as the
+/// candidate speaking: about -40 dBFS, the top of a quiet room and below soft
+/// speech. Only used to hold a checkpoint back, so it errs toward calling
+/// sound speech: a noisy room waits longer, which the watch tick retries,
+/// where a soft speaker taken for silence would be interrupted.
+const VOICE_RMS: f64 = 316.0;
+
+pub(super) fn frame_has_voice(frame: &AudioFrame<'_>) -> bool {
+    pcm16_has_voice(&frame.data)
+}
+
+fn pcm16_has_voice(samples: &[i16]) -> bool {
+    if samples.is_empty() {
+        return false;
+    }
+    let energy = samples
+        .iter()
+        .map(|sample| f64::from(*sample).powi(2))
+        .sum::<f64>();
+    (energy / samples.len() as f64).sqrt() > VOICE_RMS
 }
 
 pub(super) fn append_pcm16_bytes(frame: &AudioFrame<'_>, bytes: &mut Vec<u8>) {

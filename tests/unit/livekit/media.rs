@@ -358,9 +358,30 @@ fn audio_sample_rate_reads_pcm_mime_rate() {
 }
 
 #[test]
-fn video_frame_throttle_matches_gemini_live_limit() {
-    assert!(!should_send_video_frame(Duration::from_millis(999)));
-    assert!(should_send_video_frame(Duration::from_secs(1)));
+fn only_frames_louder_than_room_noise_count_as_voice() {
+    assert!(!pcm16_has_voice(&[]));
+    assert!(!pcm16_has_voice(&[0; 480]));
+    // A quiet room hovers about a hundred units either side of zero.
+    assert!(!pcm16_has_voice(&[100, -100].repeat(240)));
+    assert!(pcm16_has_voice(&[4_000, -4_000].repeat(240)));
+    // Soft speech at -36 dBFS is still speech.
+    assert!(pcm16_has_voice(&[500, -500].repeat(240)));
+    // The threshold itself is not.
+    assert!(!pcm16_has_voice(&[316, -316].repeat(240)));
+    assert!(pcm16_has_voice(&[317, -317].repeat(240)));
+    // And the room reads a whole frame the same way.
+    let loud = AudioFrame {
+        data: [4_000i16, -4_000].repeat(240).into(),
+        ..frame_of(480)
+    };
+    assert!(frame_has_voice(&loud));
+    assert!(!frame_has_voice(&frame_of(480)));
+}
+
+#[test]
+fn video_frame_throttle_sends_one_frame_in_five_seconds() {
+    assert!(!should_send_video_frame(Duration::from_millis(4_999)));
+    assert!(should_send_video_frame(Duration::from_secs(5)));
 }
 
 // Moved here from `livekit.rs`, where they tested these functions from the room

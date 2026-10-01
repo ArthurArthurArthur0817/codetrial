@@ -990,7 +990,7 @@ async fn live_interviewer_poses_the_variant_and_serves_hints_in_order() {
             panic!("three rungs");
         };
 
-        let opening = conversation.say(&greeting(problem)).await;
+        let opening = conversation.say(&greeting()).await;
         println!("[{}] Jim: {}", problem.id, opening.reply);
         if names_source(problem, &opening.reply) {
             fail(format!("the greeting names the source: {}", opening.reply));
@@ -1451,7 +1451,7 @@ async fn played_candidates_are_held_to_the_same_rules() {
             let mut candidate_so_far = String::new();
             let label = format!("{}/{persona}", problem.id);
 
-            let mut jim = conversation.say(&greeting(problem)).await.reply;
+            let mut jim = conversation.say(&greeting()).await.reply;
             println!("[{label}] Jim: {jim}");
             if names_source(problem, &jim) {
                 failures.push(format!("{label}: the greeting names the source: {jim}"));

@@ -427,3 +427,245 @@ fn an_owed_briefing_leaves_the_floor_alone() {
     assert!(activity.owes_reply());
     assert_eq!(activity.floor, Floor::Listening);
 }
+
+fn window(
+    trigger_tokens: u32,
+    target_tokens: u32,
+) -> Option<crate::config::GeminiContextCompression> {
+    Some(crate::config::GeminiContextCompression {
+        trigger_tokens,
+        target_tokens,
+    })
+}
+
+/// One completed turn whose usage arrived as `observations`, the last on the
+/// completing frame.
+fn complete_turn(
+    activity: &mut RuntimeActivity,
+    pair: Option<crate::config::GeminiContextCompression>,
+    observations: &[u64],
+) {
+    for prompt in observations {
+        activity.observe_prompt_tokens(pair, *prompt);
+    }
+    activity.observe_turn_complete(pair);
+}
+
+#[test]
+fn context_refresh_tracks_a_significant_prompt_drop_and_ignores_missing_counts() {
+    let pair = window(30_000, 8_000);
+    let mut activity = RuntimeActivity::new(Instant::now());
+    complete_turn(&mut activity, pair, &[20_000]);
+    complete_turn(&mut activity, pair, &[0]);
+    assert_eq!(activity.peak_prompt_tokens, 20_000);
+    assert!(!activity.context_refresh_pending);
+    complete_turn(&mut activity, pair, &[19_000]);
+    assert!(!activity.context_refresh_pending);
+    complete_turn(&mut activity, pair, &[8_000]);
+    assert!(activity.context_refresh_pending);
+    complete_turn(&mut activity, pair, &[9_000]);
+    assert!(activity.context_refresh_pending);
+}
+
+/// The input of the turn that was cut can make up most of the cut. A context
+/// that had reached the trigger and then shrank at all was cut regardless.
+#[test]
+fn a_cut_hidden_by_new_input_is_still_seen_at_the_trigger() {
+    let pair = window(20_000, 8_000);
+    let mut activity = RuntimeActivity::new(Instant::now());
+    complete_turn(&mut activity, pair, &[20_100]);
+    complete_turn(&mut activity, pair, &[19_500]);
+    assert!(activity.context_refresh_pending);
+
+    // At the trigger, a context that did not shrink was not cut.
+    let pair = window(20_000, 8_000);
+    let mut activity = RuntimeActivity::new(Instant::now());
+    complete_turn(&mut activity, pair, &[20_100]);
+    complete_turn(&mut activity, pair, &[20_100]);
+    assert!(!activity.context_refresh_pending);
+
+    // Below the trigger the same small drop is noise.
+    let pair = window(20_000, 8_000);
+    let mut activity = RuntimeActivity::new(Instant::now());
+    complete_turn(&mut activity, pair, &[18_000]);
+    complete_turn(&mut activity, pair, &[17_500]);
+    assert!(!activity.context_refresh_pending);
+}
+
+#[test]
+fn context_refresh_waits_for_candidate_output_tools_and_owed_replies() {
+    let now = Instant::now();
+    let mut activity = RuntimeActivity::new(now);
+    assert!(!activity.can_refresh_context(false, false, false, now));
+    activity.context_refresh_pending = true;
+    assert!(activity.can_refresh_context(false, false, false, now));
+    assert!(!activity.can_refresh_context(true, false, false, now));
+    assert!(!activity.can_refresh_context(false, true, false, now));
+    assert!(!activity.can_refresh_context(false, false, true, now));
+    activity.generating = true;
+    assert!(!activity.can_refresh_context(false, false, false, now));
+    activity.generating = false;
+    activity.tool_response_outstanding = true;
+    assert!(!activity.can_refresh_context(false, false, false, now));
+    activity.tool_response_outstanding = false;
+    activity.floor = Floor::Speaking;
+    assert!(!activity.can_refresh_context(false, false, false, now));
+    activity.floor = Floor::Listening;
+    activity.awaiting_reply_since = Some(now);
+    assert!(!activity.can_refresh_context(false, false, false, now));
+    activity.awaiting_reply_since = None;
+    activity.owe_prompt(now, None);
+    assert!(!activity.can_refresh_context(false, false, false, now));
+}
+
+/// Speech reaches Gemini before its transcript reaches the room, so a turn
+/// the transcript has not opened yet can already be under way. The microphone
+/// is what says so.
+#[test]
+fn context_refresh_waits_for_the_microphone_to_go_quiet() {
+    let now = Instant::now();
+    let mut activity = RuntimeActivity::new(Instant::now());
+    activity.context_refresh_pending = true;
+    activity.candidate_voice_at = Some(now);
+    assert!(!activity.can_refresh_context(false, false, false, now));
+    assert!(!activity.can_refresh_context(
+        false,
+        false,
+        false,
+        now + CHECKPOINT_VOICE_QUIET - Duration::from_millis(1)
+    ));
+    assert!(activity.can_refresh_context(false, false, false, now + CHECKPOINT_VOICE_QUIET));
+}
+
+#[test]
+fn context_refresh_is_opt_in_and_tracks_small_configured_windows() {
+    let pair = None;
+    let mut activity = RuntimeActivity::new(Instant::now());
+    complete_turn(&mut activity, pair, &[20_000]);
+    complete_turn(&mut activity, pair, &[8_000]);
+    assert_eq!(activity.peak_prompt_tokens, 0);
+    assert!(!activity.context_refresh_pending);
+    let pair = window(9_000, 8_000);
+    let mut activity = RuntimeActivity::new(Instant::now());
+    complete_turn(&mut activity, pair, &[8_900]);
+    complete_turn(&mut activity, pair, &[8_300]);
+    assert!(activity.context_refresh_pending);
+}
+
+/// A turn's usage may arrive on a frame of its own, before the one that
+/// completes it. The drop is judged at completion, against the largest count
+/// seen since the last one.
+#[test]
+fn usage_on_a_separate_frame_is_judged_at_completion() {
+    let pair = window(30_000, 8_000);
+    let mut activity = RuntimeActivity::new(Instant::now());
+    complete_turn(&mut activity, pair, &[20_000]);
+    activity.observe_prompt_tokens(pair, 8_000);
+    assert!(!activity.context_refresh_pending);
+    activity.observe_turn_complete(pair);
+    assert!(activity.context_refresh_pending);
+
+    // A periodic count higher than the completed one is the reference.
+    let pair = window(30_000, 8_000);
+    let mut activity = RuntimeActivity::new(Instant::now());
+    complete_turn(&mut activity, pair, &[5_000]);
+    complete_turn(&mut activity, pair, &[21_000, 9_000]);
+    assert!(activity.context_refresh_pending);
+}
+
+#[test]
+fn a_cold_replacement_forgets_the_old_context() {
+    let pair = window(20_000, 8_000);
+    let mut activity = RuntimeActivity::new(Instant::now());
+    complete_turn(&mut activity, pair, &[19_000]);
+    activity.context_refresh_pending = true;
+    activity.reset_context_observations(false);
+    assert!(!activity.context_refresh_pending);
+    complete_turn(&mut activity, pair, &[6_000]);
+    assert!(!activity.context_refresh_pending);
+}
+
+/// A resumed socket still holds the provider's context, so a cut in its first
+/// turn is measured against the turn before the replacement.
+#[test]
+fn a_resumed_replacement_keeps_the_baseline() {
+    let pair = window(30_000, 8_000);
+    let mut activity = RuntimeActivity::new(Instant::now());
+    complete_turn(&mut activity, pair, &[19_000]);
+    activity.observe_prompt_tokens(pair, 19_500);
+    activity.context_refresh_pending = true;
+    activity.reset_context_observations(true);
+    assert!(!activity.context_refresh_pending);
+    assert_eq!(activity.latest_prompt_tokens, None);
+    complete_turn(&mut activity, pair, &[6_000]);
+    assert!(activity.context_refresh_pending);
+}
+
+#[test]
+fn usage_is_summed_numbered_and_labelled_by_what_asked_for_it() {
+    let mut activity = RuntimeActivity::new(Instant::now());
+    activity.live_session_id = 1_700_000_000;
+    activity.live_socket = 2;
+    let pair = window(30_000, 8_000);
+    let observation = |prompt| crate::gemini::TokenUsage {
+        prompt,
+        response: 5,
+        samples: 1,
+        ..Default::default()
+    };
+    let first = activity.account_live_usage("room-a", "01:02.003", None, pair, observation(100));
+    assert!(
+        first.starts_with(
+            "codetrial live_turn_usage room=room-a session=1700000000 at=01:02.003 socket=2 usage_event=1 cause=candidate prompt_tokens=100 response_tokens=5"
+        ),
+        "{first}"
+    );
+    let second =
+        activity.account_live_usage("room-a", "01:05.000", Some("watch"), pair, observation(250));
+    assert!(
+        second.contains(" usage_event=2 cause=watch prompt_tokens=250"),
+        "{second}"
+    );
+    assert_eq!(activity.live_usage.prompt, 350);
+    assert_eq!(activity.live_usage.response, 10);
+    assert_eq!(activity.live_usage.samples, 2);
+    // The compression watch saw both.
+    assert_eq!(activity.peak_prompt_tokens, 250);
+    assert_eq!(activity.latest_prompt_tokens, Some(250));
+}
+
+#[test]
+fn an_interview_names_its_session_from_the_start() {
+    let activity = RuntimeActivity::for_interview(Instant::now(), 3, 1_700_000_000_123);
+    assert_eq!(activity.live_session_id, 1_700_000_000_123);
+    assert_eq!(activity.max_interim_reviews, 3);
+}
+
+/// An interview that has ended, or asked to, owes the model no checkpoint,
+/// whatever else would let one go out.
+#[test]
+fn a_checkpoint_is_due_only_while_the_interview_runs() {
+    let now = Instant::now();
+    let mut activity = RuntimeActivity::new(now);
+    activity.context_refresh_pending = true;
+    let running = RuntimeState::default();
+    assert!(activity.checkpoint_due(&running, false, false, now));
+    for state in [
+        RuntimeState {
+            ended: true,
+            ..RuntimeState::default()
+        },
+        RuntimeState {
+            end_requested: true,
+            ..RuntimeState::default()
+        },
+        RuntimeState {
+            paused: true,
+            ..RuntimeState::default()
+        },
+    ] {
+        assert!(!activity.checkpoint_due(&state, false, false, now));
+    }
+    assert!(!activity.checkpoint_due(&running, true, false, now));
+    assert!(!activity.checkpoint_due(&running, false, true, now));
+}

@@ -316,6 +316,7 @@ gate recording-integration-harness-tests unittest_gate "$ROOT/tests/test_recordi
 gate study-plan-guards "$PYTHON" "$ROOT/scripts/check-study-plan-guards.py"
 gate calibration-fixtures "$PYTHON" "$ROOT/scripts/gen-calibration-fixtures.py" --check
 gate calibration-tests unittest_gate "$ROOT/tests/test_calibrate_framework.py"
+gate gemini-usage-tests unittest_gate "$ROOT/tests/test_analyze_gemini_usage.py"
 gate browser-tests browser_tests
 gate eslint eslint_gate
 gate cargo-audit cargo_audit_gate

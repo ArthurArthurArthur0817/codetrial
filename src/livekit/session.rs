@@ -48,6 +48,7 @@ pub(super) async fn send_model_text(
     gemini: &mut GeminiLiveSession,
     state: &mut RuntimeState,
     kind: ModelInputKind,
+    cause: TurnCause,
     text: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Counted before the write, and kept counted if the write fails. The
@@ -56,21 +57,49 @@ pub(super) async fn send_model_text(
     // transport's business and the note above `EvidenceMetrics` says these
     // numbers are not about transport.
     state.evidence_ledger.record_model_input(kind, text);
+    gemini.input_cause = Some(cause.label());
     gemini.send_text(text).await
+}
+
+/// What asked the Live model for the generation a usage line bills, named on
+/// that line so tokens can be traced to their source. Passed with each send
+/// that asks for a reply, so no caller has to relabel one afterwards.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum TurnCause {
+    /// Greeting, test reaction, wrap-up and similar stage directions.
+    Turn,
+    Watch,
+    Tool,
+    Recovery,
+}
+
+impl TurnCause {
+    pub(super) fn label(self) -> &'static str {
+        match self {
+            Self::Turn => "turn",
+            Self::Watch => "watch",
+            Self::Tool => "tool",
+            Self::Recovery => "recovery",
+        }
+    }
 }
 
 /// `send_model_text` for ordered context rather than realtime text: counted
 /// the same way, sent as a `clientContent` turn that asks for a reply only
-/// when `turn_complete`.
+/// when `reply` names what asked. Context that asks for none starts no
+/// generation, so it leaves the cause to whatever does.
 pub(super) async fn send_model_context(
     gemini: &mut GeminiLiveSession,
     state: &mut RuntimeState,
     kind: ModelInputKind,
     text: &str,
-    turn_complete: bool,
+    reply: Option<TurnCause>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     state.evidence_ledger.record_model_input(kind, text);
-    gemini.send_context(text, turn_complete).await
+    if let Some(cause) = reply {
+        gemini.input_cause = Some(cause.label());
+    }
+    gemini.send_context(text, reply.is_some()).await
 }
 
 pub(super) struct GeminiEventContext<'a> {
@@ -79,7 +108,7 @@ pub(super) struct GeminiEventContext<'a> {
     pub(super) state: &'a mut RuntimeState,
     pub(super) agent_state: &'a mut String,
     pub(super) activity: &'a mut RuntimeActivity,
-    turns: &'a mut SpeakerTurns,
+    pub(super) turns: &'a mut SpeakerTurns,
     candidate_identity: Option<&'a str>,
 }
 
@@ -191,15 +220,15 @@ pub(super) fn prompt_fields(state: &RuntimeState, activity: &RuntimeActivity) ->
 /// Whether an event is Gemini actually answering what it was prompted with.
 ///
 /// Not every output event is. A `TurnComplete` or `Interrupted` can belong to
-/// the generation before the prompt, empty audio and blank text say nothing,
-/// and usage is billing; letting any of those settle a prompt leaves no reply
+/// the generation before the prompt, and empty audio and blank text say
+/// nothing; letting any of those settle a prompt leaves no reply
 /// owed when the socket is replaced before the real answer.
 pub(super) fn answers_prompt(event: &GeminiEvent) -> bool {
     match event {
         GeminiEvent::Audio { bytes, .. } => !bytes.is_empty(),
         GeminiEvent::ToolCall(_) => true,
         GeminiEvent::Text(text) | GeminiEvent::OutputTranscript(text) => !text.trim().is_empty(),
-        GeminiEvent::Usage(_)
+        GeminiEvent::UsageRecorded
         | GeminiEvent::InputTranscript(_)
         | GeminiEvent::TurnComplete
         | GeminiEvent::Interrupted
@@ -235,6 +264,29 @@ fn output_disposition(event: &GeminiEvent, discarding: bool, paused: bool) -> Ou
         return OutputDisposition::Drop;
     }
     OutputDisposition::Deliver
+}
+
+/// Logs and sums every usage observation the socket recorded and the room
+/// never reached, for a socket being let go.
+pub(super) fn drain_live_usage(room: &Room, context: &mut GeminiEventContext<'_>) {
+    for usage in context.gemini.drain_usage() {
+        record_live_usage(room, context, usage);
+    }
+}
+
+fn record_live_usage(
+    room: &Room,
+    context: &mut GeminiEventContext<'_>,
+    usage: crate::gemini::TokenUsage,
+) {
+    let line = context.activity.account_live_usage(
+        room.name().as_str(),
+        &super::log_clock(context.state),
+        context.gemini.input_cause,
+        context.state.context_compression,
+        usage,
+    );
+    eprintln!("{line}");
 }
 
 /// A turn ending, whichever way it ends.
@@ -276,6 +328,13 @@ pub(super) async fn handle_gemini_event(
             }
         }
     }
+
+    // However a turn ends, what asked for it has had its answer; after a
+    // barge-in the next generation answers the candidate. Cleared at the
+    // boundary rather than on a usage frame, which need not carry it.
+    if ends_turn(&event) {
+        context.gemini.input_cause = None;
+    }
     let handled = match event {
         GeminiEvent::ToolCall(calls) => on_tool_calls(room, context, calls).await,
         GeminiEvent::OutputTranscript(text) => on_output_transcript(room, context, &text).await,
@@ -285,11 +344,17 @@ pub(super) async fn handle_gemini_event(
         GeminiEvent::Audio { bytes, mime_type } => {
             on_generated_audio(room, context, &bytes, &mime_type, interruptible).await
         }
-        GeminiEvent::TurnComplete => on_turn_complete(room, context).await,
-        GeminiEvent::Usage(usage) => {
-            context.activity.live_usage.add(usage);
-            context.activity.live_turns += 1;
+        GeminiEvent::UsageRecorded => {
+            if let Some(usage) = context.gemini.take_usage() {
+                record_live_usage(room, context, usage);
+            }
             Ok(())
+        }
+        GeminiEvent::TurnComplete => {
+            context
+                .activity
+                .observe_turn_complete(context.state.context_compression);
+            on_turn_complete(room, context).await
         }
         GeminiEvent::Interrupted => on_interruption(room, context, interruptible).await,
 
@@ -352,7 +417,10 @@ async fn on_tool_calls(
     match context.gemini.send_tool_responses(&answers).await {
         // Gemini now owes a generation for this, and will deliver it on this
         // socket or not at all.
-        Ok(()) => context.activity.note_tool_response(Instant::now()),
+        Ok(()) => {
+            context.gemini.input_cause = Some(TurnCause::Tool.label());
+            context.activity.note_tool_response(Instant::now());
+        }
         Err(error) => {
             eprintln!(
                 "Gemini tool response failed ({error}); waiting for the close to be reported"
@@ -599,7 +667,26 @@ fn agent_state_attributes(
 /// Public so the behaviour check in `tests/interview_behavior.rs` answers a
 /// text model's tool calls with this dispatch rather than a copy of it.
 pub fn execute_tool_call(state: &mut RuntimeState, call: &GeminiFunctionCall) -> serde_json::Value {
-    let response = tool_response(state, call);
+    let mut response = tool_response(state, call);
+
+    // Only under an explicit compression window, where the dialogue before a
+    // tool call can leave the context while the model waits on the answer.
+    // Without one this is text every later turn is billed for again.
+    if state.context_compression.is_some()
+        && !state.ended
+        && !state.end_requested
+        && [
+            TOOL_READ_EDITOR,
+            TOOL_LOG_HINT,
+            TOOL_RECORD_FRAMEWORK_EVIDENCE,
+        ]
+        .contains(&call.name.as_str())
+    {
+        response["turn_context"] = serde_json::Value::String(crate::agent::with_timer(
+            state,
+            crate::agent::editor_tool_continuity(state),
+        ));
+    }
 
     // Counted here, once, on the way out, rather than in the arms. Every tool
     // answer is text handed back to the model, and counting only `read_editor`
@@ -841,6 +928,7 @@ pub(super) async fn send_wrap_up_and_wait(
         context.gemini,
         context.state,
         ModelInputKind::Turn,
+        TurnCause::Turn,
         &farewell,
     )
     .await?;

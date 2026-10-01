@@ -121,6 +121,12 @@ pub struct GeminiLiveSession {
     /// the last events were drained, when the caller has to decide whether it
     /// can resume.
     resumption: Arc<Mutex<Option<String>>>,
+    /// Usage observations, filled by the reader as each frame is decoded
+    /// rather than queued behind that frame's audio: a room loop that stops
+    /// the reader while it waits on a full event queue would otherwise lose
+    /// the accounting of content it had already received. The frame's
+    /// `UsageRecorded` event says when the room has reached it, in order.
+    usage: Arc<Mutex<std::collections::VecDeque<TokenUsage>>>,
     /// When this socket last received a resumable checkpoint. A resumed
     /// replacement starts from that moment, so its age is how much of the
     /// interview the replacement cannot remember on its own.
@@ -134,9 +140,24 @@ pub struct GeminiLiveSession {
     /// it. A reader that has ended counts the same way, see [`Self::gone`].
     dead: bool,
     last_ping: tokio::time::Instant,
+    /// What asked for a reply since this socket's last completed turn, for the
+    /// room's usage lines. Held on the socket, beside the sends that set it,
+    /// rather than in the interview's state, which the prompts are built from.
+    pub(crate) input_cause: Option<&'static str>,
 }
 
 impl GeminiLiveSession {
+    /// Whether Gemini closed this socket because its project cannot pay, and
+    /// no other key can take over: nothing a replacement tries can work.
+    pub(crate) fn closed_for_billing(&self, keys: &GeminiKeys) -> bool {
+        !keys.has_backups()
+            && *self
+                .failure
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                == Some(CredentialFailure::Billing)
+    }
+
     pub(crate) fn recovery_handle(&self, keys: &GeminiKeys) -> Option<(String, String)> {
         let key = self.credential.as_ref()?;
         if let Some(failure) = *self
@@ -234,6 +255,25 @@ impl GeminiLiveSession {
             .clone()
     }
 
+    /// The observation a `UsageRecorded` event announces. Entries leave in the
+    /// order their events were queued, so the front is always that event's.
+    pub(crate) fn take_usage(&mut self) -> Option<TokenUsage> {
+        self.usage
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .pop_front()
+    }
+
+    /// Every observation not yet taken, for a socket being let go: its events
+    /// will never be read, and its content must not enter the interview.
+    pub(crate) fn drain_usage(&mut self) -> Vec<TokenUsage> {
+        self.usage
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .drain(..)
+            .collect()
+    }
+
     pub async fn close(mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.shutdown().await
     }
@@ -256,7 +296,10 @@ impl GeminiLiveSession {
         } else {
             tokio::time::timeout(CLOSE_TIMEOUT, self.writer.close()).await
         };
-        self.reader.abort();
+        if !self.reader.is_finished() {
+            self.reader.abort();
+            let _ = (&mut self.reader).await;
+        }
         closed.map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "Gemini close timed out"))??;
         Ok(())
     }
@@ -326,17 +369,79 @@ impl GeminiLiveSession {
     }
 }
 
-/// What one model turn or one HTTP call was billed, as the provider reports
-/// it. The Live model answers no `countTokens` call, so this is the only
-/// measure of what a session actually spends: every turn is billed on the
-/// whole context it runs in, which a count of the text this server sends
-/// cannot see.
+/// Modality counts reported by the provider; absent details are not zero usage.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ModalityUsage {
+    pub text: u64,
+    pub audio: u64,
+    pub image: u64,
+    pub video: u64,
+    pub other: u64,
+    pub samples: u64,
+}
+
+impl ModalityUsage {
+    fn from_details(details: Option<&Value>) -> Self {
+        let mut usage = Self::default();
+        if let Some(details) = details.and_then(Value::as_array) {
+            usage.samples = 1;
+            for detail in details {
+                let count = match detail.get("tokenCount") {
+                    None => 0,
+                    Some(count) => match count.as_u64() {
+                        Some(count) => count,
+                        None => return Self::default(),
+                    },
+                };
+                let target = match detail.get("modality").and_then(Value::as_str) {
+                    Some("TEXT") => &mut usage.text,
+                    Some("AUDIO") => &mut usage.audio,
+                    Some("IMAGE") => &mut usage.image,
+                    Some("VIDEO") => &mut usage.video,
+                    _ => &mut usage.other,
+                };
+                *target += count;
+            }
+        }
+        usage
+    }
+
+    fn add(&mut self, other: Self) {
+        self.text += other.text;
+        self.audio += other.audio;
+        self.image += other.image;
+        self.video += other.video;
+        self.other += other.other;
+        self.samples += other.samples;
+    }
+
+    fn log_fields(&self, direction: &str) -> String {
+        format!(
+            "{direction}_detail_samples={} {direction}_text_tokens={} {direction}_audio_tokens={} {direction}_image_tokens={} {direction}_video_tokens={} {direction}_other_tokens={}",
+            self.samples, self.text, self.audio, self.image, self.video, self.other
+        )
+    }
+}
+
+/// Provider usage observations, not an invoice. Keep completion markers and
+/// totals so observed sums can be checked against turn boundaries and billing;
+/// the bytes sent by this server cannot measure retained provider context.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct TokenUsage {
     pub prompt: u64,
     pub response: u64,
     pub cached: u64,
     pub thoughts: u64,
+    pub samples: u64,
+    pub total: u64,
+    pub tool_use_prompt: u64,
+    pub turn_complete_samples: u64,
+    pub prompt_details: ModalityUsage,
+    pub response_details: ModalityUsage,
+    pub tool_use_details: ModalityUsage,
+    /// What `cached` is made of. Cached tokens are priced by modality too, so a
+    /// cached-token total without this cannot be priced.
+    pub cache_details: ModalityUsage,
 }
 
 impl TokenUsage {
@@ -344,9 +449,26 @@ impl TokenUsage {
         let count = |key: &str| metadata.get(key).and_then(Value::as_u64).unwrap_or(0);
         Self {
             prompt: count("promptTokenCount"),
-            response: count("responseTokenCount") + count("candidatesTokenCount"),
+            response: metadata
+                .get("responseTokenCount")
+                .and_then(Value::as_u64)
+                .unwrap_or_else(|| count("candidatesTokenCount")),
             cached: count("cachedContentTokenCount"),
             thoughts: count("thoughtsTokenCount"),
+            samples: 1,
+            total: count("totalTokenCount"),
+            tool_use_prompt: count("toolUsePromptTokenCount"),
+            turn_complete_samples: 0,
+            prompt_details: ModalityUsage::from_details(metadata.get("promptTokensDetails")),
+            tool_use_details: ModalityUsage::from_details(
+                metadata.get("toolUsePromptTokensDetails"),
+            ),
+            response_details: ModalityUsage::from_details(
+                metadata
+                    .get("responseTokensDetails")
+                    .or_else(|| metadata.get("candidatesTokensDetails")),
+            ),
+            cache_details: ModalityUsage::from_details(metadata.get("cacheTokensDetails")),
         }
     }
 
@@ -355,23 +477,43 @@ impl TokenUsage {
         self.response += other.response;
         self.cached += other.cached;
         self.thoughts += other.thoughts;
+        self.samples += other.samples;
+        self.total += other.total;
+        self.tool_use_prompt += other.tool_use_prompt;
+        self.turn_complete_samples += other.turn_complete_samples;
+        self.prompt_details.add(other.prompt_details);
+        self.response_details.add(other.response_details);
+        self.tool_use_details.add(other.tool_use_details);
+        self.cache_details.add(other.cache_details);
     }
 
     /// The fields of a log line, in one spelling for the Live session's total
     /// and each HTTP call.
     pub fn log_fields(&self) -> String {
         format!(
-            "prompt_tokens={} response_tokens={} cached_tokens={} thought_tokens={}",
-            self.prompt, self.response, self.cached, self.thoughts
+            "prompt_tokens={} response_tokens={} cached_tokens={} thought_tokens={} usage_samples={} total_tokens={} tool_use_prompt_tokens={} turn_complete_samples={} {} {} {} {}",
+            self.prompt,
+            self.response,
+            self.cached,
+            self.thoughts,
+            self.samples,
+            self.total,
+            self.tool_use_prompt,
+            self.turn_complete_samples,
+            self.prompt_details.log_fields("prompt"),
+            self.response_details.log_fields("response"),
+            self.tool_use_details.log_fields("tool_use"),
+            self.cache_details.log_fields("cache")
         )
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GeminiEvent {
-    /// One turn's billing, which Live reports once, on the frame that completes
-    /// the turn.
-    Usage(TokenUsage),
+    /// A usage observation reached the ledger with this frame; see
+    /// [`GeminiLiveSession::take_usage`]. Queued before the frame's
+    /// completion, so a turn's count is known when its completion is handled.
+    UsageRecorded,
     Audio {
         bytes: Vec<u8>,
         mime_type: String,
@@ -459,9 +601,10 @@ pub(crate) async fn live_session_with_keys_at(
 /// Whether a failed Live open is worth another attempt under the restart
 /// budget.
 ///
-/// Only a rejected key changes the existing policy of retrying within the
-/// budget: it is worth another attempt only when another key can take its
-/// place, because the same key will be rejected the same way. A sole key's
+/// Only a rejected key, or one whose project is out of credit, changes the
+/// existing policy of retrying within the budget: it is worth another attempt
+/// only when another key can take its place, because the same key will be
+/// rejected the same way. A sole key's
 /// quota failure is retried like any other, since a rate limit clears and
 /// there is nothing to move to. Exhausted credentials are never an
 /// `ApiFailure`, so they stop here; `exhausted_until` says when a rotation out
@@ -471,11 +614,19 @@ pub(crate) fn retry_live_open(
     has_backups: bool,
 ) -> bool {
     error.downcast_ref::<ApiFailure>().is_some_and(|error| {
-        !matches!(
-            error.credential,
-            Some(CredentialFailure::Invalid | CredentialFailure::Refused)
-        ) || has_backups
+        !error
+            .credential
+            .is_some_and(CredentialFailure::needs_other_key)
+            || has_backups
     })
+}
+
+/// Whether `error` says the project cannot pay, which no retry on the same key
+/// changes, or is a rotation that ran dry with a key out for that reason. The
+/// room names it as the reason the interview ended.
+pub(crate) fn is_billing_failure(error: &(dyn std::error::Error + 'static)) -> bool {
+    credential_failure(error) == Some(CredentialFailure::Billing)
+        || credentials::exhausted_by_billing(error)
 }
 
 /// Bounds `open` by `limit`, the way `FIRST_OPEN_LIMIT` bounds a first open.
@@ -541,11 +692,13 @@ pub(crate) async fn generate_report_with_keys(
     model: &str,
     prompt: &str,
     problem: &crate::agent::Problem,
+    scope: &str,
 ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
     let mut calls = ReportCalls {
         keys,
         url: gemini_generate_content_url(model),
         budget: ReportCallBudget::new(),
+        scope,
     };
     let (report, salvaged) = report_attempts(prompt, problem, &mut calls).await?;
     if let Some(line) = salvaged {
@@ -567,6 +720,7 @@ struct ReportCalls<'a> {
     keys: &'a GeminiKeys,
     url: String,
     budget: ReportCallBudget,
+    scope: &'a str,
 }
 
 impl ReportTransport for ReportCalls<'_> {
@@ -580,6 +734,7 @@ impl ReportTransport for ReportCalls<'_> {
             prompt,
             &mut self.budget,
             REPORT_RETRY_BACKOFF,
+            self.scope,
         )
     }
 }
@@ -754,6 +909,7 @@ async fn generate_report_transport(
     prompt: &str,
     budget: &mut ReportCallBudget,
     first_backoff: Duration,
+    scope: &str,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let mut api_key = keys.select_report()?;
 
@@ -762,7 +918,8 @@ async fn generate_report_transport(
     let mut failures = 0;
     loop {
         let call = budget.spend()?;
-        let error = match generate_report_once(&api_key, url, prompt).await {
+        let what = http_usage_label("report", scope, call, failures);
+        let error = match generate_report_once(&api_key, url, prompt, &what).await {
             Ok(report) => return Ok(report),
             Err(error) => error,
         };
@@ -772,8 +929,7 @@ async fn generate_report_transport(
         }
         let retryable = match failure {
             None => is_retryable(error.as_ref()),
-            Some(CredentialFailure::Quota) => true,
-            Some(CredentialFailure::Invalid | CredentialFailure::Refused) => keys.has_backups(),
+            Some(failure) => !failure.needs_other_key() || keys.has_backups(),
         };
 
         // With no key left to try, the note names the last key's own failure
@@ -783,6 +939,11 @@ async fn generate_report_transport(
             .then(|| keys.select_report().ok())
             .flatten();
         let Some(next) = next else {
+            // Counted like a retried failure, so a log shows every call that
+            // failed and not only the ones that were retried.
+            eprintln!(
+                "gemini report transport_failed room={scope} call={call} final=true error={detail}"
+            );
             return Err(io::Error::other(detail).into());
         };
         failures += 1;
@@ -795,7 +956,7 @@ async fn generate_report_transport(
             Duration::ZERO
         };
         eprintln!(
-            "gemini report transport_failed call={call} backoff_s={} error={detail}",
+            "gemini report transport_failed room={scope} call={call} backoff_s={} error={detail}",
             backoff.as_secs()
         );
         tokio::time::sleep(backoff).await;
@@ -885,14 +1046,16 @@ pub(crate) async fn generate_interim_review_with_keys(
     keys: &GeminiKeys,
     model: &str,
     prompt: &str,
+    scope: &str,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    generate_interim_review_at(keys, &gemini_generate_content_url(model), prompt).await
+    generate_interim_review_at(keys, &gemini_generate_content_url(model), prompt, scope).await
 }
 
 async fn generate_interim_review_at(
     keys: &GeminiKeys,
     url: &str,
     prompt: &str,
+    scope: &str,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let api_key = keys.select_report()?;
     let result = generate_content_once(
@@ -904,7 +1067,7 @@ async fn generate_interim_review_at(
             interim_generation_config(),
         ),
         INTERIM_ATTEMPT_TIMEOUT,
-        "interim review",
+        &http_usage_label("interim", scope, 1, 0),
     )
     .await;
     if let Err(error) = &result
@@ -953,6 +1116,10 @@ fn content_request(system: &str, prompt: &str, generation_config: Value) -> Valu
     })
 }
 
+fn http_usage_label(surface: &str, room: &str, call: usize, retry: u32) -> String {
+    format!("{surface} room={room} call={call} retry={retry}")
+}
+
 /// One `generateContent` call, with no opinion about retries.
 ///
 /// Both callers post the same envelope to the same URL with the same header and
@@ -979,12 +1146,11 @@ async fn generate_content_once(
         return Err(ApiFailure::from_response(status.as_u16(), &body).into());
     }
     let response = response.json::<Value>().await?;
-    if let Some(metadata) = response.get("usageMetadata") {
-        eprintln!(
-            "gemini {what} usage {}",
-            TokenUsage::from_metadata(metadata).log_fields()
-        );
-    }
+    let usage = response
+        .get("usageMetadata")
+        .map(TokenUsage::from_metadata)
+        .unwrap_or_default();
+    eprintln!("gemini {what} usage {}", usage.log_fields());
     gemini_text(&response).ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidData,
@@ -998,13 +1164,14 @@ async fn generate_report_once(
     api_key: &str,
     url: &str,
     prompt: &str,
+    what: &str,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     generate_content_once(
         api_key,
         url,
         &generate_report_request(prompt),
         REPORT_ATTEMPT_TIMEOUT,
-        "report",
+        what,
     )
     .await
 }
@@ -1054,6 +1221,8 @@ async fn open_live_session_redacted_at(
     let checkpoints = Arc::clone(&checkpoint_at);
     let failure = Arc::new(Mutex::new(None));
     let closed_with = Arc::clone(&failure);
+    let usage = Arc::new(Mutex::new(std::collections::VecDeque::new()));
+    let ledger = Arc::clone(&usage);
     let reader = tokio::spawn(async move {
         loop {
             let Ok(next) = tokio::time::timeout(READ_IDLE_LIMIT, reader.next()).await else {
@@ -1119,6 +1288,12 @@ async fn open_live_session_redacted_at(
                     .lock()
                     .unwrap_or_else(|error| error.into_inner()) = Some(std::time::Instant::now());
             }
+            if let Some(observation) = message.usage {
+                ledger
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .push_back(observation);
+            }
             for event in message.events {
                 // Bounded on purpose: a stalled main loop must slow the socket
                 // down, not let inbound audio pile up without a ceiling.
@@ -1133,12 +1308,14 @@ async fn open_live_session_redacted_at(
         reader,
         events,
         resumption,
+        usage,
         checkpoint_at,
         credential: None,
         failure,
         opened_at: std::time::Instant::now(),
         dead: false,
         last_ping: tokio::time::Instant::now(),
+        input_cause: None,
     })
 }
 
@@ -1205,7 +1382,7 @@ pub fn live_tool_declarations(interview_loop: crate::agent::InterviewLoop) -> Va
     let mut tools = vec![
         json!({
             "name": TOOL_READ_EDITOR,
-            "description": "The editor's language and numbered code, the latest test run and the minutes left.",
+            "description": "The editor's language and numbered code, the latest test run and the minutes left. Read only code the current question needs that no event or tool answer has shown you; start at a known relevant line rather than refilling the whole editor.",
             "parameters": {
                 "type": "OBJECT",
                 "properties": {
@@ -1248,7 +1425,7 @@ pub fn live_tool_declarations(interview_loop: crate::agent::InterviewLoop) -> Va
     if interview_loop != crate::agent::InterviewLoop::CodingOnly {
         tools.push(json!({
             "name": TOOL_END_INTERVIEW,
-            "description": "Close an interview with nothing left to ask. The platform speaks the closing, so say no goodbye first."
+            "description": "Close the interview, silently, when nothing is left to ask; the platform speaks the closing."
         }));
     }
     Value::Array(tools)
@@ -1361,11 +1538,11 @@ fn live_setup_message(boot: &RuntimeBootstrap<'_>, resume: Option<&str>) -> Valu
                 "responseModalities": ["AUDIO"],
 
                 // Pinned off, as the HTTP calls pin it and in the same field
-                // for the same compatibility. Measured against the Live model,
-                // six replies each way reached first audio in a median 506 ms
-                // unpinned and 500 ms at the lowest level, and neither reported
-                // a thought token: this changes nothing today and holds against
-                // a server default that moves.
+                // for the same compatibility. Measured against the Live model
+                // this was written for, six replies each way reached first
+                // audio in a median 506 ms unpinned and 500 ms at the lowest
+                // level, and neither reported a thought token. Model families
+                // that take a level, or no setting at all, are adjusted below.
                 "thinkingConfig": { "thinkingBudget": 0 },
                 "speechConfig": {
                     "voiceConfig": {
@@ -1419,6 +1596,36 @@ fn live_setup_message(boot: &RuntimeBootstrap<'_>, resume: Option<&str>) -> Valu
             }
         }
     });
+
+    // By family rather than exact id, so a dated or renamed preview of the same
+    // model keeps the setting instead of silently falling back to a budget it
+    // may reject or ignore.
+    let model = gemini_model_id(boot.live_model);
+    if model.starts_with("gemini-3.1-flash-live") {
+        setup["setup"]["generationConfig"]["thinkingConfig"] =
+            json!({ "thinkingLevel": "minimal" });
+    } else if model.starts_with("gemini-3.8-live") {
+        // Standard 3.8 Live has no configurable thinking level or budget.
+        setup["setup"]["generationConfig"]
+            .as_object_mut()
+            .expect("generation config is an object")
+            .remove("thinkingConfig");
+    }
+
+    // Every frame stays in the context and is billed again on every later turn,
+    // so the low resolution's smaller per-frame count is paid for once per
+    // frame kept rather than once. A camera is only for presence and demeanour
+    // here; the code arrives as text. Omitted without video, where it would
+    // change nothing and is one more field a model could refuse.
+    if boot.candidate_video {
+        setup["setup"]["generationConfig"]["mediaResolution"] = json!("MEDIA_RESOLUTION_LOW");
+    }
+    if let Some(compression) = boot.context_compression {
+        setup["setup"]["contextWindowCompression"]["triggerTokens"] =
+            json!(compression.trigger_tokens.to_string());
+        setup["setup"]["contextWindowCompression"]["slidingWindow"]["targetTokens"] =
+            json!(compression.target_tokens.to_string());
+    }
     if let Some(end) = boot.end_sensitivity {
         setup["setup"]["realtimeInputConfig"]["automaticActivityDetection"]["endOfSpeechSensitivity"] =
             json!(end);
@@ -1583,6 +1790,9 @@ struct ServerMessage {
     /// point resumable. An update that is not resumable carries a handle that
     /// would be refused on reconnect, so it must not overwrite a good one.
     resumption_handle: Option<String>,
+    /// Recorded by the reader before it dispatches `events`, so the usage of a
+    /// frame is on the ledger by the time the room loop sees its completion.
+    usage: Option<TokenUsage>,
 }
 
 fn parse_server_message(text: &str) -> ServerMessage {
@@ -1640,14 +1850,20 @@ fn parse_server_message(text: &str) -> ServerMessage {
         events.push(GeminiEvent::OutputTranscript(text.to_string()));
     }
 
-    // Before `TurnComplete`, because the frame that completes a turn is the
-    // frame that bills it and the two reach the room loop one at a time through
-    // a channel. Behind the completion, the last turn's tokens are still queued
-    // when the interview tears down or the socket is replaced, and
-    // `replace_gemini_session` empties that queue: the session's own billing
-    // line then reports less than the session spent.
-    if let Some(metadata) = message.get("usageMetadata") {
-        events.push(GeminiEvent::Usage(TokenUsage::from_metadata(metadata)));
+    // Completion co-occurrence is kept so periodic observations are not
+    // mistaken for distinct model turns.
+    let usage = message.get("usageMetadata").map(|metadata| {
+        let mut usage = TokenUsage::from_metadata(metadata);
+        usage.turn_complete_samples = u64::from(
+            message
+                .pointer("/serverContent/turnComplete")
+                .and_then(Value::as_bool)
+                == Some(true),
+        );
+        usage
+    });
+    if usage.is_some() {
+        events.push(GeminiEvent::UsageRecorded);
     }
 
     if message
@@ -1697,6 +1913,7 @@ fn parse_server_message(text: &str) -> ServerMessage {
     ServerMessage {
         events,
         resumption_handle,
+        usage,
     }
 }
 

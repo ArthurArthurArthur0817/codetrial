@@ -44,19 +44,20 @@ use integrity::integrity_hash;
 pub use integrity::{sanitize_integrity_event, sanitize_test_run};
 use problems::variant_for;
 pub use problems::{DEFAULT_PROBLEM_ID, PROBLEMS, find_problem, get_problem, topics_for};
-pub(crate) use prompts::end_interview_refusal;
 pub use prompts::{
     InterimReviewInput, LanguageChoiceContext, MAX_EXCERPT_LINE_CHARS, MAX_NUMBERED_BYTES,
     ReportPromptInput, SincePrevious, TestRecord, behavioral_silence_nudge,
     behavioral_time_warning, build_instructions_for_plan, changed_excerpt, cold_restart,
-    format_test_run, format_test_run_for_reaction, greeting, hint_ladder_used_text, hint_rung_text,
-    hint_rung_withheld_text, interim_review_prompt, interim_system_instruction, language_choice,
-    log_hint_text, numbered, numbered_from, owed_reply, proactive_review, read_editor_text,
-    released_follow_ups, report_prompt, report_system_instruction, resume, resumed_context,
-    rolling_assessment, round_skipped, round_started, silence_nudge, spoken_language,
-    test_results_reaction, test_runner_unavailable_reaction, test_setup_error_reaction,
-    time_warning, unrecorded_earlier_phases, wrap_up,
+    compressed_context, format_test_run, format_test_run_for_reaction, greeting,
+    hint_ladder_used_text, hint_rung_text, hint_rung_withheld_text, interim_review_prompt,
+    interim_system_instruction, language_choice, log_hint_text, numbered, numbered_from,
+    owed_reply, proactive_review, read_editor_text, released_follow_ups, report_prompt,
+    report_system_instruction, resume, resumed_context, rolling_assessment, round_skipped,
+    round_started, silence_nudge, spoken_language, test_results_reaction,
+    test_runner_unavailable_reaction, test_setup_error_reaction, time_warning,
+    unrecorded_earlier_phases, wrap_up,
 };
+pub(crate) use prompts::{editor_tool_continuity, end_interview_refusal};
 pub(crate) use report::sanitize_report_candidate;
 pub use report::{
     MAX_SUMMARY_TEXT, fallback_report, final_report, names_published_problem,
@@ -144,8 +145,8 @@ const ROUND_TRANSITION_SKEW: std::time::Duration = std::time::Duration::from_sec
 /// `the_time_warning_threshold_is_the_same_number_on_both_sides`.
 pub const TIME_WARNING_S: u64 = 300;
 
-pub const INTERVIEW_CONTRACT_BUNDLE_VERSION: u32 = 23;
-pub const LIVE_PROMPT_VERSION: u32 = 15;
+pub const INTERVIEW_CONTRACT_BUNDLE_VERSION: u32 = 24;
+pub const LIVE_PROMPT_VERSION: u32 = 16;
 pub const REPORT_PROMPT_VERSION: u32 = 15;
 pub const RUBRIC_VERSION: u32 = 1;
 pub const REPORT_SCHEMA_VERSION: u32 = 2;
@@ -851,6 +852,12 @@ pub struct RuntimeState {
     /// a request and not the end itself; `ended` is the end itself.
     pub end_requested: bool,
     pub ended: bool,
+    /// The Live session's explicit compression window, if it has one: the one
+    /// case in which older dialogue can leave the model's context, so tool
+    /// answers then carry the pending utterance and the room watches for cuts.
+    /// Held here alone, so the checkpoint and the tool answers cannot disagree
+    /// about whether compression is on.
+    pub context_compression: Option<crate::config::GeminiContextCompression>,
 }
 
 impl RuntimeState {
@@ -925,6 +932,7 @@ impl Default for RuntimeState {
             code_shown: String::new(),
             end_requested: false,
             ended: false,
+            context_compression: None,
         }
     }
 }

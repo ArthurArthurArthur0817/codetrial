@@ -46,7 +46,7 @@ async fn interim_failures_update_shared_cooldowns_without_retrying() {
             axum::serve(listener, app).await.unwrap();
         });
         assert!(
-            generate_interim_review_at(&keys, &url, "prompt")
+            generate_interim_review_at(&keys, &url, "prompt", "test-room")
                 .await
                 .is_err()
         );
@@ -70,7 +70,7 @@ async fn interim_failures_update_shared_cooldowns_without_retrying() {
             }
         );
         assert_eq!(
-            generate_interim_review_at(&keys, &url, "prompt")
+            generate_interim_review_at(&keys, &url, "prompt", "test-room")
                 .await
                 .unwrap(),
             "note"
@@ -101,7 +101,7 @@ async fn interim_quota_does_not_spend_the_only_keys_final_report_budget() {
     );
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     assert!(
-        generate_interim_review_at(&keys, &url, "prompt")
+        generate_interim_review_at(&keys, &url, "prompt", "test-room")
             .await
             .is_err()
     );
@@ -126,7 +126,7 @@ async fn interim_rejection_leaves_the_only_key_in_rotation() {
     );
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     assert!(
-        generate_interim_review_at(&keys, &url, "prompt")
+        generate_interim_review_at(&keys, &url, "prompt", "test-room")
             .await
             .is_err()
     );
@@ -283,7 +283,8 @@ async fn report_transport_fixture(
     let server = tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
-    let result = generate_report_transport(&keys, &url, "prompt", &mut budget, backoff).await;
+    let result =
+        generate_report_transport(&keys, &url, "prompt", &mut budget, backoff, "test-room").await;
     server.abort();
     let seen = requests.lock().unwrap().clone();
     (result, seen, budget.remaining)
@@ -386,8 +387,15 @@ async fn a_key_ruled_out_during_the_backoff_is_not_retried() {
     let url = format!("http://{}/", listener.local_addr().unwrap());
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let mut budget = ReportCallBudget::new();
-    let result =
-        generate_report_transport(&keys, &url, "prompt", &mut budget, REPORT_RETRY_BACKOFF).await;
+    let result = generate_report_transport(
+        &keys,
+        &url,
+        "prompt",
+        &mut budget,
+        REPORT_RETRY_BACKOFF,
+        "test-room",
+    )
+    .await;
     server.abort();
     assert_eq!(result.unwrap(), "report");
     assert_eq!(
@@ -547,11 +555,23 @@ fn live_open_retries_within_budget_and_rotates_only_with_backups() {
         assert!(retry_live_open(&error, false), "status={status}");
         assert!(retry_live_open(&error, true), "status={status}");
     }
-    for status in [401, 403] {
+    // A project out of credit is refused the same way until someone pays.
+    for status in [401, 402, 403] {
         let error = ApiFailure::from_response(status, &json!({}));
         assert!(retry_live_open(&error, true), "status={status}");
         assert!(!retry_live_open(&error, false), "status={status}");
     }
+    let depleted = ApiFailure {
+        status: 0,
+        credential: failure_from_reason("Your prepayment credits are depleted."),
+        detail: None,
+    };
+    assert!(is_billing_failure(&depleted));
+    assert!(!retry_live_open(&depleted, false));
+    assert!(!is_billing_failure(&ApiFailure::from_response(
+        429,
+        &json!({})
+    )));
     assert!(!GeminiKeys::single("only-key").has_backups());
     let exhausted = GeminiKeys::single("").select().unwrap_err();
     assert!(!retry_live_open(&exhausted, false));
@@ -1368,9 +1388,15 @@ async fn a_misrecognized_turn_neither_appears_in_nor_decides_the_report() {
         .expect("GOOGLE_API_KEY is set in the config file or the environment");
     let model = std::env::var("GEMINI_REPORT_MODEL")
         .unwrap_or_else(|_| crate::config::DEFAULT_GEMINI_REPORT_MODEL.to_string());
-    let report = generate_report_with_keys(&GeminiKeys::single(&key), &model, &prompt, problem)
-        .await
-        .expect("production returns a report");
+    let report = generate_report_with_keys(
+        &GeminiKeys::single(&key),
+        &model,
+        &prompt,
+        problem,
+        "report-probe",
+    )
+    .await
+    .expect("production returns a report");
     println!("{}", serde_json::to_string_pretty(&report).unwrap());
 
     let narrative = [
@@ -1497,7 +1523,7 @@ fn live_setup_uses_native_audio_voice_tools_and_transcription() {
         setup["systemInstruction"]["parts"][0]["text"]
             .as_str()
             .unwrap()
-            .contains("45-minute technical coding interview")
+            .contains("45-minute coding interview over video")
     );
 
     // Schema.Type is an enum, so these are value names and the case is not
@@ -1723,6 +1749,70 @@ fn a_frame_can_carry_both_a_resumption_update_and_content() {
         vec![GeminiEvent::OutputTranscript("go on".to_string())]
     );
     assert_eq!(message.resumption_handle.as_deref(), Some("handle-abc"));
+}
+
+#[test]
+fn live_setup_uses_minimal_thinking_level_for_3_1() {
+    // A dated preview of the same family keeps the level rather than falling
+    // back to the budget the family may not take.
+    for model in [
+        "gemini-3.1-flash-live-preview",
+        "models/gemini-3.1-flash-live-preview",
+        "gemini-3.1-flash-live-preview-2026-09",
+    ] {
+        let config = live_config(&[("GEMINI_LIVE_MODEL", model)]);
+        let boot = bootstrap(&config, "interview-fixed", Some("two-sum"), 45);
+        for resume in [None, Some("resume-handle")] {
+            assert_eq!(
+                live_setup_message(&boot, resume)["setup"]["generationConfig"]["thinkingConfig"],
+                json!({"thinkingLevel": "minimal"})
+            );
+        }
+    }
+}
+
+#[test]
+fn live_setup_omits_thinking_config_for_standard_3_8() {
+    let config = live_config(&[("GEMINI_LIVE_MODEL", "models/gemini-3.8-live")]);
+    let boot = bootstrap(&config, "interview-fixed", Some("two-sum"), 45);
+    for resume in [None, Some("resume-handle")] {
+        assert!(
+            live_setup_message(&boot, resume)["setup"]["generationConfig"]
+                .get("thinkingConfig")
+                .is_none()
+        );
+    }
+}
+
+#[test]
+fn live_setup_keeps_the_thinking_budget_for_other_models() {
+    let config = live_config(&[("GEMINI_LIVE_MODEL", "gemini-live-2.5")]);
+    let boot = bootstrap(&config, "interview-fixed", Some("two-sum"), 45);
+    assert_eq!(
+        live_setup_message(&boot, None)["setup"]["generationConfig"]["thinkingConfig"],
+        json!({"thinkingBudget": 0})
+    );
+}
+
+#[test]
+fn live_setup_asks_for_low_media_resolution_only_when_video_is_sent() {
+    let config = live_config(&[]);
+    let boot = bootstrap(&config, "interview-fixed", Some("two-sum"), 45);
+    assert!(
+        live_setup_message(&boot, None)["setup"]["generationConfig"]
+            .get("mediaResolution")
+            .is_none()
+    );
+    let video = RuntimeBootstrap {
+        candidate_video: true,
+        ..bootstrap(&config, "interview-fixed", Some("two-sum"), 45)
+    };
+    for resume in [None, Some("resume-handle")] {
+        assert_eq!(
+            live_setup_message(&video, resume)["setup"]["generationConfig"]["mediaResolution"],
+            "MEDIA_RESOLUTION_LOW"
+        );
+    }
 }
 
 #[test]
@@ -2117,17 +2207,13 @@ async fn shutdown_ends_the_reader_task() {
     let mut session = open_live_session_at(&format!("ws://{address}"), &boot, None)
         .await
         .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), session.shutdown())
+        .await
+        .expect("shutdown must finish rather than detach the reader")
+        .unwrap();
+    assert!(session.reader.is_finished());
     session.shutdown().await.unwrap();
-
-    // Bounded, because the detached reader this guards against never joins.
-    assert!(
-        tokio::time::timeout(Duration::from_secs(5), &mut session.reader)
-            .await
-            .expect("shutdown must end the reader task rather than detach it")
-            .expect_err("a reader that was aborted cannot have joined")
-            .is_cancelled(),
-        "shutdown must end the reader task rather than detach it"
-    );
+    assert!(session.drain_usage().is_empty());
 }
 
 /// A peer that finished setup and then stopped reading without closing: the
@@ -2242,10 +2328,8 @@ async fn a_close_the_peer_never_takes_is_bounded() {
         .expect("shutdown must not wait on a peer that stopped reading");
     assert!(closed.is_err(), "a close that did not land must say so");
     assert!(
-        (&mut session.reader)
-            .await
-            .expect_err("the reader has to be ended even when the close fails")
-            .is_cancelled()
+        session.reader.is_finished(),
+        "the reader must end even when close fails"
     );
 }
 
@@ -2496,9 +2580,8 @@ fn the_interim_review_asks_for_bounded_prose_and_no_thinking() {
     );
 }
 
-/// Live reports each turn's billing once, on the frame that completes it, and
-/// the prompt count covers the whole context the turn ran in: summing the
-/// frames is what the session spent.
+/// Usage on a completion frame is recorded apart from the frame's events, and
+/// marked as sharing it with the completion.
 #[test]
 fn a_turns_usage_is_read_off_the_frame_that_completes_it() {
     let message = parse_server_message(
@@ -2512,20 +2595,29 @@ fn a_turns_usage_is_read_off_the_frame_that_completes_it() {
         }"#,
     );
 
-    // Usage first: the room loop reads these one at a time, and a completion
-    // that ends the interview or replaces the socket would leave the tokens
-    // behind it unread.
+    // The marker comes first: the room takes the turn's count before it handles
+    // the completion that may end the room or replace the socket.
     assert_eq!(
         message.events,
-        vec![
-            GeminiEvent::Usage(TokenUsage {
-                prompt: 304,
-                response: 185,
-                cached: 0,
-                thoughts: 0,
-            }),
-            GeminiEvent::TurnComplete,
-        ]
+        vec![GeminiEvent::UsageRecorded, GeminiEvent::TurnComplete]
+    );
+    assert_eq!(
+        message.usage,
+        Some(TokenUsage {
+            prompt: 304,
+            response: 185,
+            cached: 0,
+            thoughts: 0,
+            samples: 1,
+            total: 489,
+            turn_complete_samples: 1,
+            prompt_details: ModalityUsage {
+                text: 281,
+                samples: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        })
     );
 
     // The HTTP calls spell the response count differently.
@@ -2538,10 +2630,11 @@ fn a_turns_usage_is_read_off_the_frame_that_completes_it() {
         response: 1,
         cached: 1,
         thoughts: 1,
+        ..Default::default()
     });
     assert_eq!(
         total.log_fields(),
-        "prompt_tokens=2431 response_tokens=901 cached_tokens=1025 thought_tokens=4"
+        "prompt_tokens=2431 response_tokens=901 cached_tokens=1025 thought_tokens=4 usage_samples=1 total_tokens=0 tool_use_prompt_tokens=0 turn_complete_samples=0 prompt_detail_samples=0 prompt_text_tokens=0 prompt_audio_tokens=0 prompt_image_tokens=0 prompt_video_tokens=0 prompt_other_tokens=0 response_detail_samples=0 response_text_tokens=0 response_audio_tokens=0 response_image_tokens=0 response_video_tokens=0 response_other_tokens=0 tool_use_detail_samples=0 tool_use_text_tokens=0 tool_use_audio_tokens=0 tool_use_image_tokens=0 tool_use_video_tokens=0 tool_use_other_tokens=0 cache_detail_samples=0 cache_text_tokens=0 cache_audio_tokens=0 cache_image_tokens=0 cache_video_tokens=0 cache_other_tokens=0"
     );
 }
 
@@ -2596,4 +2689,349 @@ async fn tool_answers_leave_on_the_socket_in_one_frame() {
     assert_eq!(answers[0]["id"], "a");
     assert_eq!(answers[1]["id"], "b");
     session.close().await.unwrap();
+}
+
+#[test]
+fn modality_usage_preserves_missing_details_and_unknown_modalities() {
+    let mut usage = TokenUsage::from_metadata(&json!({
+        "promptTokenCount": 110,
+        "promptTokensDetails": [
+            {"modality": "AUDIO", "tokenCount": 70},
+            {"modality": "IMAGE", "tokenCount": 20},
+            {"modality": "VIDEO", "tokenCount": 10},
+            {"modality": "NEW_MODALITY", "tokenCount": 10}
+        ],
+        "candidatesTokensDetails": [{"modality": "TEXT", "tokenCount": 5}]
+    }));
+    usage.add(TokenUsage::from_metadata(&json!({"promptTokenCount": 90})));
+    assert_eq!(usage.prompt, 200);
+    assert_eq!(usage.samples, 2);
+    assert_eq!(
+        usage.prompt_details,
+        ModalityUsage {
+            audio: 70,
+            image: 20,
+            video: 10,
+            other: 10,
+            samples: 1,
+            ..Default::default()
+        }
+    );
+    assert_eq!(usage.response_details.text, 5);
+    assert_eq!(usage.response_details.samples, 1);
+    assert!(usage.log_fields().contains("prompt_detail_samples=1"));
+    assert_eq!(
+        ModalityUsage::from_details(Some(&json!([
+            {"modality": "AUDIO"}
+        ])))
+        .samples,
+        1
+    );
+}
+
+#[test]
+fn invalid_modality_details_do_not_contribute_partial_counts() {
+    for invalid in [json!("70"), json!(-1), json!(null)] {
+        assert_eq!(
+            ModalityUsage::from_details(Some(&json!([
+                {"modality": "AUDIO", "tokenCount": 70},
+                {"modality": "IMAGE", "tokenCount": invalid},
+                {"modality": "TEXT", "tokenCount": 5}
+            ]))),
+            ModalityUsage::default()
+        );
+    }
+}
+
+#[test]
+fn usage_preserves_totals_tools_and_response_aliases() {
+    let usage = TokenUsage::from_metadata(&json!({
+        "promptTokenCount": 10, "responseTokenCount": 5,
+        "candidatesTokenCount": 5, "thoughtsTokenCount": 2,
+        "toolUsePromptTokenCount": 3, "totalTokenCount": 20,
+        "toolUsePromptTokensDetails": [{"modality": "TEXT", "tokenCount": 3}]
+    }));
+    assert_eq!(usage.response, 5);
+    assert_eq!(usage.total, 20);
+    assert_eq!(usage.tool_use_prompt, 3);
+    assert_eq!(usage.tool_use_details.text, 3);
+    assert!(
+        usage
+            .log_fields()
+            .contains("total_tokens=20 tool_use_prompt_tokens=3")
+    );
+    let parsed = parse_server_message(r#"{"usageMetadata":{"promptTokenCount":10}}"#);
+    assert_eq!(parsed.events, vec![GeminiEvent::UsageRecorded]);
+    assert_eq!(
+        parsed.usage.map(|usage| usage.turn_complete_samples),
+        Some(0)
+    );
+
+    // Cached tokens are priced by modality, so their breakdown is kept.
+    let cached = TokenUsage::from_metadata(&json!({
+        "cachedContentTokenCount": 9,
+        "cacheTokensDetails": [
+            {"modality": "TEXT", "tokenCount": 4},
+            {"modality": "AUDIO", "tokenCount": 5}
+        ]
+    }));
+    assert_eq!(
+        (cached.cache_details.text, cached.cache_details.audio),
+        (4, 5)
+    );
+    assert!(
+        cached
+            .log_fields()
+            .contains("cache_detail_samples=1 cache_text_tokens=4 cache_audio_tokens=5")
+    );
+}
+
+/// A room loop that stops reading leaves the reader parked on a full event
+/// queue. The usage of the frame it is parked on was received and billed, so
+/// it must be on the ledger before that frame's content is queued, or a
+/// shutdown loses it with the content.
+#[tokio::test]
+async fn usage_is_recorded_before_the_frame_waits_on_a_full_queue() {
+    let config = live_config(&[]);
+    let boot = bootstrap(&config, "interview-fixed", Some("two-sum"), 45);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let (socket, _) = listener.accept().await.unwrap();
+        let mut socket = accept_async(socket).await.unwrap();
+        let _ = socket.next().await;
+        socket
+            .send(Message::Text(r#"{"setupComplete":{}}"#.into()))
+            .await
+            .unwrap();
+        let audio = r#"{"serverContent":{"modelTurn":{"parts":[{"inlineData":{"mimeType":"audio/pcm","data":"AAAA"}}]}}}"#;
+        for _ in 0..GEMINI_EVENT_QUEUE {
+            socket.send(Message::Text(audio.into())).await.unwrap();
+        }
+        socket
+            .send(Message::Text(
+                r#"{"serverContent":{"modelTurn":{"parts":[{"inlineData":{"mimeType":"audio/pcm","data":"AAAA"}}]},"turnComplete":true},"usageMetadata":{"promptTokenCount":42}}"#.into(),
+            ))
+            .await
+            .unwrap();
+        std::future::pending::<()>().await;
+    });
+
+    let mut session = open_live_session_at(&format!("ws://{address}"), &boot, None)
+        .await
+        .unwrap();
+    let observed = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let usage = session.drain_usage();
+            if !usage.is_empty() {
+                return usage;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("usage must not wait behind the frame's queued audio");
+    assert_eq!(observed.len(), 1);
+    assert_eq!(observed[0].prompt, 42);
+    assert_eq!(observed[0].turn_complete_samples, 1);
+    session.shutdown().await.unwrap();
+    assert!(session.drain_usage().is_empty());
+}
+
+/// The reader decodes ahead of the room, so the ledger can already hold the
+/// next turn's count when this turn's completion is handled. Each marker takes
+/// the entry of its own frame, never a later one.
+#[tokio::test]
+async fn each_usage_marker_takes_its_own_frames_observation() {
+    let config = live_config(&[]);
+    let boot = bootstrap(&config, "interview-fixed", Some("two-sum"), 45);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let (socket, _) = listener.accept().await.unwrap();
+        let mut socket = accept_async(socket).await.unwrap();
+        let _ = socket.next().await;
+        socket
+            .send(Message::Text(r#"{"setupComplete":{}}"#.into()))
+            .await
+            .unwrap();
+        for prompt in [10, 20] {
+            let frame = format!(
+                r#"{{"serverContent":{{"turnComplete":true}},"usageMetadata":{{"promptTokenCount":{prompt}}}}}"#
+            );
+            socket.send(Message::Text(frame.into())).await.unwrap();
+        }
+        std::future::pending::<()>().await;
+    });
+
+    let mut session = open_live_session_at(&format!("ws://{address}"), &boot, None)
+        .await
+        .unwrap();
+    // Both frames decoded before the first event is read.
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while session.usage.lock().unwrap().len() < 2 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let mut taken = Vec::new();
+    for _ in 0..4 {
+        match session.next_event().await.unwrap() {
+            GeminiEvent::UsageRecorded => taken.push(session.take_usage().unwrap().prompt),
+            GeminiEvent::TurnComplete => taken.push(0),
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+    assert_eq!(taken, vec![10, 0, 20, 0]);
+    assert!(session.drain_usage().is_empty());
+    session.shutdown().await.unwrap();
+}
+
+/// A live socket Gemini closes because the project cannot pay ends the
+/// interview only when no other key can take over, and only for that reason.
+#[tokio::test]
+async fn a_billing_close_is_final_only_for_a_sole_key() {
+    async fn closed_with(reason: &'static str) -> GeminiLiveSession {
+        let config = live_config(&[]);
+        let boot = bootstrap(&config, "interview-fixed", Some("two-sum"), 45);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let mut socket = accept_async(socket).await.unwrap();
+            let _ = socket.next().await;
+            socket
+                .send(Message::Text(r#"{"setupComplete":{}}"#.into()))
+                .await
+                .unwrap();
+            socket
+                .send(Message::Close(Some(
+                    tokio_tungstenite::tungstenite::protocol::CloseFrame {
+                        code: tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode::Error,
+                        reason: reason.into(),
+                    },
+                )))
+                .await
+                .unwrap();
+        });
+        let mut session = open_live_session_at(&format!("ws://{address}"), &boot, None)
+            .await
+            .unwrap();
+        // The close is recorded by the reader, which then ends the stream.
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while session.next_event().await.is_some() {}
+        })
+        .await
+        .unwrap();
+        session
+    }
+
+    let sole = GeminiKeys::single("billing-sole");
+    let rotation = GeminiKeys::from_config(&live_config(&[(
+        "GOOGLE_API_KEYS",
+        "billing-one,billing-two",
+    )]));
+    let depleted = closed_with("Your prepayment credits are depleted.").await;
+    assert!(depleted.closed_for_billing(&sole));
+    assert!(!depleted.closed_for_billing(&rotation));
+    let rate_limited = closed_with("RESOURCE_EXHAUSTED").await;
+    assert!(!rate_limited.closed_for_billing(&sole));
+    let internal = closed_with("Internal error encountered.").await;
+    assert!(!internal.closed_for_billing(&sole));
+}
+
+/// Every scalar counter is summed, the ones a short probe leaves at zero too.
+#[test]
+fn usage_sums_every_counter() {
+    let one = TokenUsage {
+        prompt: 1,
+        response: 2,
+        cached: 3,
+        thoughts: 4,
+        samples: 5,
+        total: 6,
+        tool_use_prompt: 7,
+        turn_complete_samples: 8,
+        ..Default::default()
+    };
+    let mut sum = one;
+    sum.add(one);
+    sum.add(one);
+    assert_eq!(
+        (
+            sum.prompt,
+            sum.response,
+            sum.cached,
+            sum.thoughts,
+            sum.samples,
+            sum.total,
+            sum.tool_use_prompt,
+            sum.turn_complete_samples
+        ),
+        (3, 6, 9, 12, 15, 18, 21, 24)
+    );
+}
+
+/// Every modality field and the sample count are summed, not only the ones a
+/// single observation happens to use.
+#[test]
+fn modality_breakdowns_sum_every_field() {
+    let one = TokenUsage::from_metadata(&json!({
+        "promptTokensDetails": [
+            {"modality": "TEXT", "tokenCount": 1},
+            {"modality": "AUDIO", "tokenCount": 2},
+            {"modality": "IMAGE", "tokenCount": 3},
+            {"modality": "VIDEO", "tokenCount": 4},
+            {"modality": "DOCUMENT", "tokenCount": 5}
+        ]
+    }));
+    let mut total = one;
+    total.add(one);
+    assert_eq!(
+        total.prompt_details,
+        ModalityUsage {
+            text: 2,
+            audio: 4,
+            image: 6,
+            video: 8,
+            other: 10,
+            samples: 2,
+        }
+    );
+}
+
+#[test]
+fn compression_settings_are_optional_and_survive_resumption() {
+    let config = live_config(&[]);
+    let boot = bootstrap(&config, "test-room", None, 30);
+    assert_eq!(
+        live_setup_message(&boot, None)["setup"]["contextWindowCompression"],
+        json!({"slidingWindow": {}})
+    );
+    let tuned_config = live_config(&[
+        ("GEMINI_CONTEXT_TRIGGER_TOKENS", "25000"),
+        ("GEMINI_CONTEXT_TARGET_TOKENS", "8000"),
+    ]);
+    let tuned = bootstrap(&tuned_config, "test-room", None, 30);
+    for handle in [None, Some("handle")] {
+        assert_eq!(
+            live_setup_message(&tuned, handle)["setup"]["contextWindowCompression"],
+            json!({
+                "triggerTokens": "25000", "slidingWindow": {"targetTokens": "8000"}
+            })
+        );
+    }
+}
+
+#[test]
+fn http_usage_labels_separate_rooms_calls_and_retries() {
+    assert_eq!(
+        http_usage_label("report", "room-a", 3, 1),
+        "report room=room-a call=3 retry=1"
+    );
+    assert_eq!(
+        http_usage_label("interim", "room-b", 1, 0),
+        "interim room=room-b call=1 retry=0"
+    );
 }

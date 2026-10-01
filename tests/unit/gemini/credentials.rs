@@ -305,6 +305,85 @@ fn only_credential_or_quota_errors_disable_a_key() {
     assert_eq!(failure_from_reason("service unavailable"), None);
 }
 
+/// The close reason a depleted prepaid account produced in the field, and the
+/// status the HTTP calls got for it in the same session. Billing, not quota:
+/// waiting out a quota cooldown and trying the same project again spends the
+/// restart budget on a result that cannot change.
+#[test]
+fn a_project_that_cannot_pay_is_a_billing_failure() {
+    for reason in [
+        "Your prepayment credits are depleted. Please go to AI Studio to manage your project and billing.",
+        "RESOURCE_EXHAUSTED: prepayment credits are depleted",
+        "Billing account is not active",
+        "Billing is not enabled for this project.",
+        "billing has not been enabled on the project",
+        "BILLING_DISABLED",
+    ] {
+        assert_eq!(
+            failure_from_reason(reason),
+            Some(CredentialFailure::Billing),
+            "{reason}"
+        );
+    }
+
+    // The rate-limit text mentions billing too, and it is a rate limit.
+    let rate_limit = "You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits.";
+    assert_eq!(
+        failure_from_reason(rate_limit),
+        Some(CredentialFailure::Quota)
+    );
+    assert_eq!(
+        ApiFailure::from_response(400, &json!({"error":{"message": rate_limit}})).credential,
+        Some(CredentialFailure::Quota)
+    );
+    let failure = ApiFailure::from_response(402, &json!({}));
+    assert_eq!(failure.credential, Some(CredentialFailure::Billing));
+    assert_eq!(
+        failure.to_string(),
+        "Gemini billing or prepaid credit exhausted"
+    );
+    assert_eq!(
+        ApiFailure::from_response(
+            403,
+            &json!({"error":{"message":"This API method requires billing to be enabled."}})
+        )
+        .credential,
+        Some(CredentialFailure::Billing)
+    );
+
+    // Worded as an exhausted resource, and still not something waiting fixes.
+    let depleted = json!({"error":{
+        "status": "RESOURCE_EXHAUSTED",
+        "message": "Your prepayment credits are depleted. Please go to AI Studio to manage your project and billing.",
+    }});
+    for status in [400, 403, 429] {
+        assert_eq!(
+            ApiFailure::from_response(status, &depleted).credential,
+            Some(CredentialFailure::Billing),
+            "{status}"
+        );
+    }
+    assert_eq!(
+        ApiFailure::from_response(429, &json!({"error":{"message": rate_limit}})).credential,
+        Some(CredentialFailure::Quota)
+    );
+}
+
+#[test]
+fn a_billing_failure_takes_the_key_off_both_surfaces() {
+    let keys = GeminiKeys::new(vec!["billing-a".into(), "billing-b".into()]);
+    assert_eq!(keys.select().unwrap(), "billing-a");
+    keys.failed("billing-a", CredentialFailure::Billing, ApiSurface::Live);
+    assert_eq!(keys.select().unwrap(), "billing-b");
+    assert_eq!(keys.select_report().unwrap(), "billing-b");
+    keys.failed("billing-b", CredentialFailure::Billing, ApiSurface::Report);
+
+    // Out for good as far as this rotation can tell, so there is no quota
+    // cooldown worth waiting for.
+    let error = keys.select().unwrap_err();
+    assert_eq!(crate::gemini::exhausted_until(&error), None);
+}
+
 #[test]
 fn failover_visits_the_next_key_before_returning_to_a_recovered_one() {
     let keys = GeminiKeys::new(vec![

@@ -145,11 +145,34 @@ pub(super) struct RuntimeActivity {
     /// The behavioral round gets one silence nudge. Repeating it every
     /// cooldown would keep inviting a candidate who has declined or finished.
     pub(super) behavioral_nudged: bool,
-    /// What the Live turns of this interview were billed, summed over every
-    /// socket it ran on. Operational, logged at the end; never model input.
+    /// Observed Live usage summed over every socket in this interview. Provider
+    /// counters are not an invoice. Logged at the end; never model input.
     pub(super) live_usage: crate::gemini::TokenUsage,
-    pub(super) live_turns: u64,
+    /// Which of this interview's sockets the next usage line belongs to.
+    pub(super) live_socket: u64,
+    /// The epoch second this room loop started. On every usage line, so two
+    /// runs that shared a room name are not summed as one.
+    pub(super) live_session_id: u64,
+    /// Why the room loop let the interview go when that was not an error
+    /// return, for the summary line's `outcome`.
+    pub(super) live_exit: super::LiveOutcome,
+    /// The latest prompt count observed since the last completed turn, and the
+    /// largest since then, the completed turn's own count included. A turn's
+    /// usage may arrive on frames other than the one completing it, so the
+    /// drop is judged at completion.
+    pub(super) latest_prompt_tokens: Option<u64>,
+    pub(super) peak_prompt_tokens: u64,
+    pub(super) context_refresh_pending: bool,
+    /// When the candidate's microphone last carried more than room noise. The
+    /// transcript is no guide here: it arrives after the speech it transcribes,
+    /// and a checkpoint sent in that gap lands in the middle of an utterance.
+    pub(super) candidate_voice_at: Option<Instant>,
 }
+
+/// How long the microphone has to stay quiet before a checkpoint may go out:
+/// above the default one-second end-of-speech silence, so a pause between two
+/// sentences is not taken for the end of the turn.
+pub(super) const CHECKPOINT_VOICE_QUIET: Duration = Duration::from_secs(2);
 
 /// A prompt the watcher wants spoken, and whether delivering it spends the
 /// behavioral round's one silence nudge. Carried with the text so the sender
@@ -194,9 +217,138 @@ pub(super) enum Floor {
 }
 
 impl RuntimeActivity {
+    /// Whether a pending checkpoint may go out now, for an interview still
+    /// running: one that has ended, or asked to, owes the model no context.
+    pub(super) fn checkpoint_due(
+        &self,
+        state: &RuntimeState,
+        audio_playing: bool,
+        candidate_open: bool,
+        now: Instant,
+    ) -> bool {
+        !state.ended
+            && !state.end_requested
+            && self.can_refresh_context(state.paused, audio_playing, candidate_open, now)
+    }
+
+    /// A pending checkpoint implies a compression window: only
+    /// `observe_turn_complete` sets it, and only under one.
+    pub(super) fn can_refresh_context(
+        &self,
+        paused: bool,
+        audio_playing: bool,
+        candidate_open: bool,
+        now: Instant,
+    ) -> bool {
+        self.context_refresh_pending
+            && !paused
+            && !candidate_open
+            && self
+                .candidate_voice_at
+                .is_none_or(|at| now.saturating_duration_since(at) >= CHECKPOINT_VOICE_QUIET)
+            && !self.generating
+            && !self.owes_reply()
+            && super::output_settled(self.floor, audio_playing)
+    }
+
+    /// Adds one usage observation to the interview's sum and the compression
+    /// watch, and returns its log line. `cause` is the last platform input
+    /// that asked for a reply, or `None` when nothing did since the previous
+    /// completed turn, which is the candidate's speech. A label for where turns
+    /// come from, not a causal record: speech overlapping a platform input is
+    /// credited to the input.
+    pub(super) fn account_live_usage(
+        &mut self,
+        room: &str,
+        clock: &str,
+        cause: Option<&str>,
+        compression: Option<crate::config::GeminiContextCompression>,
+        usage: crate::gemini::TokenUsage,
+    ) -> String {
+        let line = format!(
+            "codetrial live_turn_usage room={room} session={} at={clock} socket={} usage_event={} cause={} {}",
+            self.live_session_id,
+            self.live_socket,
+            self.live_usage.samples + 1,
+            cause.unwrap_or("candidate"),
+            usage.log_fields()
+        );
+        self.observe_prompt_tokens(compression, usage.prompt);
+        self.live_usage.add(usage);
+        line
+    }
+
+    /// Every observation, periodic or not; a zero says nothing about the
+    /// context and is ignored.
+    pub(super) fn observe_prompt_tokens(
+        &mut self,
+        compression: Option<crate::config::GeminiContextCompression>,
+        prompt: u64,
+    ) {
+        if compression.is_none() || prompt == 0 {
+            return;
+        }
+        self.latest_prompt_tokens = Some(prompt);
+        self.peak_prompt_tokens = self.peak_prompt_tokens.max(prompt);
+    }
+
+    /// Schedules a checkpoint when the turn just completed ran on a context the
+    /// provider had cut. The reference is the larger of the last completed
+    /// count and any observation since, so usage reported on a frame of its
+    /// own still counts. A drop of the threshold is a cut, and so is any drop
+    /// from a context that had reached the trigger: new input in the same turn
+    /// can make up most of what was cut, but a context only shrinks when the
+    /// provider cuts it. A heuristic, not an API compression event.
+    pub(super) fn observe_turn_complete(
+        &mut self,
+        compression: Option<crate::config::GeminiContextCompression>,
+    ) {
+        let Some(compression) = compression else {
+            return;
+        };
+        let Some(latest) = self.latest_prompt_tokens.take() else {
+            return;
+        };
+        let threshold = u64::from(
+            compression
+                .trigger_tokens
+                .saturating_sub(compression.target_tokens),
+        )
+        .saturating_div(2)
+        .clamp(1, 2048);
+        let reference = self.peak_prompt_tokens;
+        let cut_at_trigger =
+            reference >= u64::from(compression.trigger_tokens) && latest < reference;
+        if reference.saturating_sub(latest) >= threshold || cut_at_trigger {
+            self.context_refresh_pending = true;
+        }
+        self.peak_prompt_tokens = latest;
+    }
+
+    /// A replacement's briefing already carries the local state a checkpoint
+    /// would, so a pending one is dropped. A resumed socket keeps the
+    /// provider's context and so its baseline, or a cut in its first turn
+    /// would have nothing to be measured against; a cold one starts over.
+    pub(super) fn reset_context_observations(&mut self, resumed: bool) {
+        if !resumed {
+            self.peak_prompt_tokens = 0;
+        }
+        self.latest_prompt_tokens = None;
+        self.context_refresh_pending = false;
+    }
+
     #[cfg(test)]
     pub(super) fn new(now: Instant) -> Self {
         Self::with_interim_review_cap(now, DEFAULT_MAX_INTERIM_REVIEWS)
+    }
+
+    /// The activity a room's interview starts with, named on every usage line
+    /// by `session_id`.
+    pub(super) fn for_interview(now: Instant, max_interim_reviews: usize, session_id: u64) -> Self {
+        Self {
+            live_session_id: session_id,
+            ..Self::with_interim_review_cap(now, max_interim_reviews)
+        }
     }
 
     pub(super) fn with_interim_review_cap(now: Instant, max_interim_reviews: usize) -> Self {
@@ -229,7 +381,13 @@ impl RuntimeActivity {
             tool_response_outstanding: false,
             behavioral_nudged: false,
             live_usage: crate::gemini::TokenUsage::default(),
-            live_turns: 0,
+            live_socket: 1,
+            live_session_id: 0,
+            live_exit: super::LiveOutcome::Ok,
+            latest_prompt_tokens: None,
+            peak_prompt_tokens: 0,
+            context_refresh_pending: false,
+            candidate_voice_at: None,
 
             // Seeded at `now` rather than in the past: the first minutes of an
             // interview are the greeting and the problem statement, and there

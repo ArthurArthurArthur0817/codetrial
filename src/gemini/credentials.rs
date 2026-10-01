@@ -29,6 +29,35 @@ const INVALID_REASONS: &[&str] = &[
 ];
 const QUOTA_REASONS: &[&str] = &["QUOTA_EXCEEDED", "RATE_LIMIT_EXCEEDED"];
 
+/// The same three verdicts in the words of a message or close reason, read
+/// billing first: a depleted prepayment can arrive worded as an exhausted
+/// resource, and waiting out a quota cooldown would not bring it back. Never
+/// the bare word "billing": Google's ordinary rate-limit text ends by asking
+/// the reader to "check your plan and billing details", and a rate limit is
+/// exactly the failure that waiting does fix.
+const BILLING_PHRASES: &[&str] = &[
+    "prepayment credits",
+    "credits are depleted",
+    "requires billing",
+    "billing to be enabled",
+    "billing is not enabled",
+    "billing has not been enabled",
+    "billing account",
+    "billing_disabled",
+];
+const QUOTA_PHRASES: &[&str] = &[
+    "resource_exhausted",
+    "quota exceeded",
+    "exceeded your current quota",
+    "quota exhausted",
+];
+const INVALID_PHRASES: &[&str] = &[
+    "api key not valid",
+    "api key was reported as leaked",
+    "api key has expired",
+    "api key is disabled",
+];
+
 #[derive(Default)]
 struct Cooldown {
     live: Option<Instant>,
@@ -37,6 +66,9 @@ struct Cooldown {
     // Read only to decide whether an exhausted Live rotation is worth waiting
     // out. It never outlives `live`, so pruning and selection ignore it.
     live_rejected: Option<Instant>,
+
+    // Read only to say why a rotation ran dry, in the same way.
+    billing: Option<Instant>,
 }
 
 // Pruning and selection share the same expiry boundary.
@@ -118,7 +150,11 @@ impl GeminiKeys {
         // Short of the shared map as well, which another interview's list
         // holding the same key string would otherwise write for it.
         if !self.has_backups() {
-            return self.keys.first().cloned().ok_or_else(|| exhausted(None));
+            return self
+                .keys
+                .first()
+                .cloned()
+                .ok_or_else(|| exhausted(None, false));
         }
         let mut cooldowns = COOLDOWNS
             .get_or_init(Mutex::default)
@@ -155,7 +191,7 @@ impl GeminiKeys {
             .ok_or_else(|| {
                 // The earliest Live key to come back that was out on quota
                 // alone. A refused key would only be refused again.
-                exhausted(match surface {
+                let retry_at = match surface {
                     ApiSurface::Live => self
                         .keys
                         .iter()
@@ -164,7 +200,13 @@ impl GeminiKeys {
                         .filter_map(|cooldown| cooldown.live)
                         .min(),
                     ApiSurface::Report => None,
-                })
+                };
+                let billing = self.keys.iter().any(|key| {
+                    cooldowns
+                        .get(key)
+                        .is_some_and(|cooldown| cooling_down(cooldown.billing, now))
+                });
+                exhausted(retry_at, billing)
             })?;
         match surface {
             ApiSurface::Live => current.live = index,
@@ -185,10 +227,15 @@ impl GeminiKeys {
         let now = Instant::now();
         let rejected = now + INVALID_COOLDOWN;
         match failure {
-            CredentialFailure::Invalid => {
+            // Credit belongs to the project behind the key, so both surfaces
+            // are out until someone pays; another project's key may not be.
+            CredentialFailure::Invalid | CredentialFailure::Billing => {
                 extend(&mut entry.live, rejected);
                 extend(&mut entry.report, rejected);
                 extend(&mut entry.live_rejected, rejected);
+                if failure == CredentialFailure::Billing {
+                    extend(&mut entry.billing, rejected);
+                }
             }
             CredentialFailure::Refused => match surface {
                 ApiSurface::Live => {
@@ -216,6 +263,9 @@ impl GeminiKeys {
 #[derive(Debug)]
 struct Exhausted {
     retry_at: Option<Instant>,
+    /// A key is out because its project cannot pay, which is the reason an
+    /// interview names when the rotation it ran dry was billing's doing.
+    billing: bool,
 }
 
 impl std::fmt::Display for Exhausted {
@@ -226,17 +276,25 @@ impl std::fmt::Display for Exhausted {
 
 impl std::error::Error for Exhausted {}
 
-fn exhausted(retry_at: Option<Instant>) -> io::Error {
-    io::Error::other(Exhausted { retry_at })
+fn exhausted(retry_at: Option<Instant>, billing: bool) -> io::Error {
+    io::Error::other(Exhausted { retry_at, billing })
+}
+
+fn as_exhausted<'a>(error: &'a (dyn std::error::Error + 'static)) -> Option<&'a Exhausted> {
+    error
+        .downcast_ref::<io::Error>()?
+        .get_ref()?
+        .downcast_ref::<Exhausted>()
+}
+
+/// Whether `error` is a rotation emptied with a key out for billing.
+pub(super) fn exhausted_by_billing(error: &(dyn std::error::Error + 'static)) -> bool {
+    as_exhausted(error).is_some_and(|exhausted| exhausted.billing)
 }
 
 /// When an exhausted Live rotation has a key back from its quota cooldown.
 pub(crate) fn exhausted_until(error: &(dyn std::error::Error + 'static)) -> Option<Instant> {
-    error
-        .downcast_ref::<io::Error>()?
-        .get_ref()?
-        .downcast_ref::<Exhausted>()?
-        .retry_at
+    as_exhausted(error)?.retry_at
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -247,6 +305,22 @@ pub(super) enum CredentialFailure {
     /// asked for rather than the key, such as a report model the project cannot
     /// use, so it takes the key off that surface alone.
     Refused,
+    /// The project cannot pay: a 402, or a close reason saying the prepaid
+    /// credit is depleted. Unlike a rate limit it does not clear by waiting,
+    /// so it is retried only on another key.
+    Billing,
+}
+
+impl CredentialFailure {
+    /// Whether only another key can get past this, the same key failing the
+    /// same way however long it waits. Retry policy on every surface reads
+    /// this, so a new kind of failure is classified once.
+    pub(super) fn needs_other_key(self) -> bool {
+        match self {
+            Self::Quota => false,
+            Self::Invalid | Self::Refused | Self::Billing => true,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -263,6 +337,9 @@ impl std::fmt::Display for ApiFailure {
         }
         match self.credential {
             Some(CredentialFailure::Quota) => return formatter.write_str("Gemini quota exhausted"),
+            Some(CredentialFailure::Billing) => {
+                return formatter.write_str("Gemini billing or prepaid credit exhausted");
+            }
             Some(CredentialFailure::Invalid | CredentialFailure::Refused) => {
                 return formatter.write_str("Gemini credential rejected");
             }
@@ -290,7 +367,15 @@ impl std::error::Error for ApiFailure {}
 
 impl ApiFailure {
     pub(super) fn from_response(status: u16, body: &Value) -> Self {
-        let credential = if status == 429 {
+        // Billing first, as `failure_from_reason` reads it: a depleted project
+        // can answer 429 or RESOURCE_EXHAUSTED, and a quota cooldown on the
+        // same key would never bring it back.
+        let billing = matches!(status, 400 | 403 | 429)
+            && failure_from_reason(body["error"]["message"].as_str().unwrap_or_default())
+                == Some(CredentialFailure::Billing);
+        let credential = if status == 402 || billing {
+            Some(CredentialFailure::Billing)
+        } else if status == 429 {
             Some(CredentialFailure::Quota)
         } else if status == 401 {
             Some(CredentialFailure::Invalid)
@@ -364,18 +449,12 @@ pub(super) fn failure_from_reason(reason: &str) -> Option<CredentialFailure> {
     let code = reason.to_ascii_uppercase();
     let names = |reasons: &[&str]| reasons.iter().any(|reason| code.contains(reason));
     let reason = reason.to_ascii_lowercase();
-    if reason.contains("resource_exhausted")
-        || names(QUOTA_REASONS)
-        || reason.contains("quota exceeded")
-        || reason.contains("quota exhausted")
-    {
+    let says = |phrases: &[&str]| phrases.iter().any(|phrase| reason.contains(phrase));
+    if says(BILLING_PHRASES) {
+        Some(CredentialFailure::Billing)
+    } else if says(QUOTA_PHRASES) || names(QUOTA_REASONS) {
         Some(CredentialFailure::Quota)
-    } else if reason.contains("api key not valid")
-        || names(INVALID_REASONS)
-        || reason.contains("api key was reported as leaked")
-        || reason.contains("api key has expired")
-        || reason.contains("api key is disabled")
-    {
+    } else if says(INVALID_PHRASES) || names(INVALID_REASONS) {
         Some(CredentialFailure::Invalid)
     } else {
         None
