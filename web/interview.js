@@ -276,7 +276,12 @@ const board = {
   color: PEN_COLORS[0],
   tool: "pen",
   eraserWidth: ERASER_WIDTH,
+  /// Whether the board takes edits yet; see `boardLocked`.
+  ready: false,
   settle: null,
+  /// When the oldest edit not yet sent was made, or 0 when there is none.
+  /// What bounds the settle wait; see `scheduleBoardPublish`.
+  unsentSince: 0,
   /// One board at a time on the wire, chained the way integrity events are: a
   /// settle that fires while the previous export is still uploading would open
   /// a second stream, and the agent would show whichever finished last.
@@ -292,6 +297,17 @@ const board = {
   /// A phase can complete while a pointer is still down. Its checkpoint waits
   /// for pointerup so the JPEG and replay operations describe the same stroke.
   pendingCheckpoints: [],
+  /// The board as each phase left it, for the candidate's own report card.
+  /// Kept as the data URL the card shows rather than as the JPEG that was
+  /// sent, and never saved: six of them are most of what an account report
+  /// may weigh, and the recording is where a board is kept.
+  snapshots: new Map(),
+  /// Checkpoint images that did not go out, by phase. Kept rather than
+  /// dropped like an ordinary board: a checkpoint is the board as one phase
+  /// left it, and the candidate may have cleared that drawing since, so
+  /// nothing sent later can stand in for it. Retried ahead of every later
+  /// board; see `retryHeldCheckpoints`.
+  heldCheckpoints: new Map(),
 };
 let behavioralMinutes =
   interviewLoop === "coding_behavioral" ? Math.min(8, durationMin) : 0;
@@ -1211,8 +1227,16 @@ async function connect(preflight, presenting = false) {
       // title for the whole interview.
       recordStage();
       // The starter code, once, so a candidate who never types is not recorded
-      // beside an empty editor.
-      recordReplay("editor", { code: currentCode(), language: state.language });
+      // beside an empty editor. At a whiteboard the empty board instead: there
+      // is no editor to record, and the replay and the recording both switch
+      // to the board on its first event, so a candidate who never drew is
+      // still shown the surface they had rather than a blank code panel.
+      if (whiteboard) recordReplay("board", { ops: [] });
+      else
+        recordReplay("editor", {
+          code: currentCode(),
+          language: state.language,
+        });
     }
   } catch (error) {
     // Swallowed for the candidate, logged for everyone else. Offline practice
@@ -1242,6 +1266,12 @@ async function connect(preflight, presenting = false) {
       "Offline mode is ready. Talk through your approach and run tests when you are ready.",
       true,
     );
+  }
+  // Joined and recording, or offline with nothing to send: either way the
+  // board's first stroke now reaches everything that should see it.
+  if (whiteboard) {
+    board.ready = true;
+    paintBoard();
   }
 }
 
@@ -1321,8 +1351,17 @@ async function connectLiveKit(connection, preflight, presenting = false) {
     // Everything held during the gap, in order, then the current buffer on top
     // so Jim is reading what the candidate is actually looking at rather than
     // whatever the last queued keystroke said.
-    flushPendingPublishes();
-    publishCode();
+    //
+    // At a whiteboard the boards go first. An `end_interview` pressed during
+    // the gap is in the queue, and the agent freezes the report the moment it
+    // arrives, so the final board has to be on the wire ahead of it.
+    if (whiteboard) {
+      republishBoard();
+      void boardUploadsSettled().then(flushPendingPublishes);
+    } else {
+      flushPendingPublishes();
+      publishCode();
+    }
     updateAgentState();
   });
   room.on(livekit.RoomEvent.Disconnected, () => {
@@ -2131,6 +2170,7 @@ function receiveControl(bytes) {
         nodes.resultsLabel.textContent = "Coding round complete";
         // The round changed, so the checklist and the offer change with it.
         frameworkRound = "behavioral";
+        if (whiteboard) paintBoard();
         renderFrameworkProgress();
         showFrameworkHint();
       }
@@ -2290,6 +2330,7 @@ function applyPause(paused) {
   // behavioral round disables the editor and the runner on purpose, and a
   // pause taken during it used to give both back on the way out.
   nodes.editor.disabled = paused || codingClosed();
+  if (whiteboard) paintBoard();
   updateRunAvailability();
   recordReplay("lifecycle", { state: paused ? "paused" : "resumed" });
   recordStage();
@@ -2625,10 +2666,20 @@ function endInterview(reason) {
   // stops being one that runs timers a moment from now.
   if (whiteboard) {
     clearTimeout(board.settle);
+    board.settle = null;
+    board.unsentSince = 0;
+    // An interview can end with the pointer still down, the timer most often.
+    // The open stroke is already in the pixels the final board is cut from,
+    // so it is ended here to be in the replay too, and a phase that completed
+    // during it is captured rather than left waiting for a pointerup that no
+    // longer captures anything.
+    board.model.end();
+    flushPendingBoardCheckpoints();
     recordBoardOps();
     // The report is frozen as soon as the agent receives `end_interview`, so
     // the current pixels have to enter the stream first. This also covers an
-    // interview ended before the next phase checkpoint or settle fired.
+    // interview ended before the next phase checkpoint or settle fired, and is
+    // the last retry of any checkpoint still held.
     queueBoardPublish();
   }
   recordReplay("lifecycle", { state: "ended", reason });
@@ -2684,7 +2735,7 @@ function endInterview(reason) {
       endInterviewPayload(reason, currentCode(), state.language),
     );
   if (whiteboard) {
-    void board.publishing.then(publishEnd);
+    void boardUploadsSettled().then(publishEnd);
   } else {
     publishEnd();
   }
@@ -2835,6 +2886,7 @@ function renderReport() {
     language: state.language,
     code: currentCode(),
     board: finalBoardImage(),
+    boardPhases: [...board.snapshots],
     saveResult: null,
   });
   mountBehavioralReview(nodes.report, state.transcript.values());
@@ -3196,6 +3248,15 @@ function editorFontSize() {
 /// the candidate has already moved on from.
 const BOARD_SETTLE_MS = 1000;
 
+/// The longest a board waits to be sent while strokes keep landing; see
+/// `scheduleBoardPublish`. Well inside the silence the interviewer waits out
+/// before prompting a candidate who has gone quiet.
+const BOARD_MAX_SETTLE_MS = 4000;
+
+/// The longest the end of an interview, or the queue a reconnect releases,
+/// waits for board uploads ahead of it; see `boardUploadsSettled`.
+const BOARD_UPLOAD_WAIT_MS = 2000;
+
 /// What a board is exported at. Below this the handwriting in a dense diagram
 /// stops being legible to the model; above it the image outgrows what a
 /// realtime frame is worth for what it adds.
@@ -3270,6 +3331,7 @@ function initWhiteboard() {
 function bindBoardPointer() {
   nodes.board.addEventListener("pointerdown", (event) => {
     if (event.pointerType !== "mouse" || event.button !== 0) return;
+    if (boardLocked()) return;
     const point = boardPoint(nodes.board, event);
     if (
       !board.model.begin(
@@ -3376,21 +3438,59 @@ function applyBoardEdit(changed) {
 
 function paintBoard() {
   drawBoard(board.context, board.model.strokes(), BOARD_WIDTH, BOARD_HEIGHT);
-  nodes.boardUndo.disabled = !board.model.canUndo();
-  nodes.boardRedo.disabled = !board.model.canRedo();
-  nodes.boardClear.disabled = board.model.strokeCount() === 0;
+  const locked = boardLocked();
+  nodes.boardUndo.disabled = locked || !board.model.canUndo();
+  nodes.boardRedo.disabled = locked || !board.model.canRedo();
+  nodes.boardClear.disabled = locked || board.model.strokeCount() === 0;
+}
+
+/// Whether the board takes edits: not until the connect attempt has settled,
+/// not while paused, not once the behavioral round has started, and not once
+/// the interview has ended.
+///
+/// Before the room is joined, the replay is not yet recording and there is no
+/// room to send a board to, so a stroke drawn then would be missing from the
+/// replay, a later undo in the replay would take off the wrong one, and the
+/// interviewer would not see the board until the next stroke. Paused and
+/// behavioral are the two moments the editor is disabled for the same
+/// reasons: a paused interview is not collecting evidence, and a board left
+/// live through it sent Jim work drawn while he had been told to wait. And an
+/// ended interview has already sent its final board.
+function boardLocked() {
+  return (
+    !board.ready ||
+    state.paused ||
+    frameworkRound === "behavioral" ||
+    state.phase !== "live"
+  );
 }
 
 /// Restarts the settle timer. A candidate drawing steadily therefore sends
-/// nothing until they stop, which is the point: the interviewer is meant to
+/// nothing until they pause, which is the point: the interviewer is meant to
 /// see finished thoughts, not every stroke of them.
+///
+/// Up to a point. Steady handwriting leaves gaps shorter than the settle, and
+/// waiting for a pause that never comes left the interviewer on a stale board
+/// and let the silence nudge interrupt a candidate who was busy writing. So a
+/// board unsent for `BOARD_MAX_SETTLE_MS` goes out at the next stroke's end,
+/// which is still never in the middle of one.
 function scheduleBoardPublish() {
   clearTimeout(board.settle);
-  board.settle = setTimeout(() => {
-    board.settle = null;
-    recordBoardOps();
-    queueBoardPublish();
-  }, BOARD_SETTLE_MS);
+  board.settle = null;
+  board.unsentSince ||= Date.now();
+  if (Date.now() - board.unsentSince >= BOARD_MAX_SETTLE_MS) {
+    publishSettledBoard();
+    return;
+  }
+  board.settle = setTimeout(publishSettledBoard, BOARD_SETTLE_MS);
+}
+
+function publishSettledBoard() {
+  clearTimeout(board.settle);
+  board.settle = null;
+  board.unsentSince = 0;
+  recordBoardOps();
+  queueBoardPublish();
 }
 
 /// Captures every newly completed coding phase at the board.
@@ -3426,8 +3526,10 @@ function flushPendingBoardCheckpoints() {
 function checkpointBoard(phase) {
   clearTimeout(board.settle);
   board.settle = null;
+  board.unsentSince = 0;
   recordBoardOps(phase);
   queueBoardPublish(phase);
+  board.snapshots.set(phase, boardDataUrl());
 }
 
 /// The board as the candidate left it, for their own report card.
@@ -3438,7 +3540,10 @@ function checkpointBoard(phase) {
 /// data URL is a hundred kilobytes and the saved report has a quota, and the
 /// recording is where a board is kept.
 function finalBoardImage() {
-  if (!whiteboard) return undefined;
+  return whiteboard ? boardDataUrl() : undefined;
+}
+
+function boardDataUrl() {
   try {
     return nodes.board.toDataURL("image/jpeg", BOARD_JPEG_QUALITY);
   } catch (error) {
@@ -3478,32 +3583,113 @@ function recordBoardOps(checkpoint = "") {
 
 /// Captures the board and appends its upload to the one stream-at-a-time chain.
 function queueBoardPublish(checkpoint = "") {
-  const strokes = board.model.strokeCount();
+  const strokes = board.model.inkCount();
   const image = new Promise((resolve) => {
     nodes.board.toBlob(resolve, "image/jpeg", BOARD_JPEG_QUALITY);
   });
+  chainBoardPublish(image, strokes, checkpoint);
+}
+
+/// Appends one captured board to the upload chain, behind any checkpoint
+/// still held.
+function chainBoardPublish(image, strokes, checkpoint) {
   board.publishing = board.publishing
-    .then(async () => publishBoard(await image, strokes, checkpoint))
+    .then(async () => {
+      await retryHeldCheckpoints();
+      await sendBoard(await image, strokes, checkpoint);
+    })
     .catch((error) => {
       console.warn("codetrial board_publish_failed", error);
     });
 }
 
-/// Sends one already-captured board JPEG over its own byte stream.
+/// Sends one captured board, and holds it if it is a checkpoint that did not
+/// make it out; see `board.heldCheckpoints`.
+async function sendBoard(blob, strokes, checkpoint) {
+  try {
+    if (await publishBoard(blob, strokes, checkpoint)) return;
+  } catch (error) {
+    console.warn("codetrial board_publish_failed", error);
+  }
+  if (checkpoint && blob)
+    board.heldCheckpoints.set(checkpoint, { blob, strokes });
+}
+
+/// Every held checkpoint, each as it was captured, ahead of the board about to
+/// go out.
 ///
-/// Dropped rather than queued while the room is down. A board is the whole
-/// state of the drawing, so the next settle after the reconnect carries
-/// everything this one would have, where the publish queue would deliver a
-/// stale board first.
+/// Inside the chain rather than only on a reconnect: an upload that began
+/// before a drop can fail after the reconnect was handled, and a write can
+/// throw with the room still up, and either would otherwise wait for a
+/// reconnect that may never come. Ahead of the next board, because the agent
+/// shows the newest board it read, and that has to be the current one.
+async function retryHeldCheckpoints() {
+  if (!state.connected) return;
+  const held = [...board.heldCheckpoints];
+  board.heldCheckpoints.clear();
+  for (const [checkpoint, { blob, strokes }] of held)
+    await sendBoard(blob, strokes, checkpoint);
+}
+
+/// After a reconnect: the board as it is now, behind whatever checkpoints the
+/// gap held back. Without it, a board that settled while the room was down
+/// reached the interviewer only with the candidate's next stroke, and one who
+/// had stopped drawing never made one.
+function republishBoard() {
+  if (!whiteboard) return;
+  queueBoardPublish();
+}
+
+/// Resolves once every board upload queued so far has finished, or after
+/// `BOARD_UPLOAD_WAIT_MS`, whichever is first.
+///
+/// Bounded because an upload that never settles would otherwise hold back
+/// whatever waits on it, `end_interview` included, until the hard deadline,
+/// and the agent itself waits only two seconds for boards still on their way.
+/// The chain is read again each time it settles, so an upload appended while
+/// waiting, by a reconnect for one, is waited for too.
+async function boardUploadsSettled() {
+  const deadline = Date.now() + BOARD_UPLOAD_WAIT_MS;
+  for (;;) {
+    const current = board.publishing;
+    const left = deadline - Date.now();
+    if (left <= 0) return;
+    let timer;
+    const timedOut = await Promise.race([
+      current.then(() => false),
+      new Promise((resolve) => {
+        timer = setTimeout(resolve, left, true);
+      }),
+    ]);
+    clearTimeout(timer);
+    if (timedOut || board.publishing === current) return;
+  }
+}
+
+/// Sends one already-captured board JPEG over its own byte stream, and says
+/// whether it did.
+///
+/// An ordinary board is dropped rather than queued while the room is down: it
+/// is the whole state of the drawing, so the one `republishBoard` sends after
+/// the reconnect carries everything this one would have.
 async function publishBoard(blob, strokes, checkpoint) {
-  if (!state.room || !state.connected || !blob) return;
+  if (!state.room || !state.connected || !blob) return false;
   const bytes = new Uint8Array(await blob.arrayBuffer());
   board.sequence += 1;
   const writer = await state.room.localParticipant.streamBytes(
     boardStreamOptions(board.sequence, strokes, bytes.byteLength, checkpoint),
   );
-  await writer.write(bytes);
+  try {
+    await writer.write(bytes);
+  } catch (error) {
+    // Closed anyway. A writer left open keeps the agent's reader open, and a
+    // reader holds one of the few slots boards are read in. Closed short of
+    // `totalSize`, the stream ends incomplete and the agent drops it.
+    await writer.close().catch(() => {});
+    throw error;
+  }
   await writer.close();
+  return true;
 }
 
 function currentCode() {

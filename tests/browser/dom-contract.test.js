@@ -777,6 +777,54 @@ test("a dropped connection is visible and recovers its state", () => {
   // Nothing published during the gap arrived, so the buffer is resent rather
   // than left to drift until the next keystroke.
   assert.match(connect, /Reconnected[\s\S]*?publishCode\(/);
+  // The board too, or one that settled during the gap waits for a stroke a
+  // candidate who has stopped drawing never makes. It goes ahead of the queue
+  // the gap held, because an `end_interview` in that queue freezes the report.
+  assert.match(
+    connect,
+    /Reconnected[\s\S]*?republishBoard\(\);\s*void boardUploadsSettled\(\)\.then\(flushPendingPublishes\)/,
+  );
+  assert.match(functionBody(script, "republishBoard"), /queueBoardPublish\(\)/);
+  // And the checkpoints a failed upload held go ahead of every later board,
+  // whether or not a reconnect ever comes, since nothing drawn since can
+  // stand in for them.
+  assert.match(
+    functionBody(script, "chainBoardPublish"),
+    /retryHeldCheckpoints\(\);[\s\S]*?sendBoard\(/,
+  );
+});
+
+// The board is locked when the editor is, and for the same two reasons: a
+// paused interview collects no evidence, and the behavioral round retires the
+// coding surface. Left live, a pause sent Jim work drawn while he waited.
+test("the board takes no edits while the interview is paused", () => {
+  const script = interviewSource();
+  const locked = functionBody(script, "boardLocked");
+  assert.match(locked, /state\.paused \|\|/);
+  assert.match(locked, /frameworkRound === "behavioral"/);
+  // Nor before the room is joined, where a stroke would miss the replay.
+  assert.match(locked, /!board\.ready/);
+  assert.match(
+    functionBody(script, "bindBoardPointer"),
+    /"pointerdown"[\s\S]*?if \(boardLocked\(\)\) return;/,
+  );
+  const paint = functionBody(script, "paintBoard");
+  for (const button of ["boardUndo", "boardRedo", "boardClear"]) {
+    assert.match(
+      paint,
+      new RegExp(`nodes\\.${button}\\.disabled = locked \\|\\|`),
+      `${button} stays usable on a locked board`,
+    );
+  }
+  // Both moments the lock changes repaint the toolbar, after the state moved.
+  assert.match(
+    functionBody(script, "applyPause"),
+    /state\.paused = paused;[\s\S]*?if \(whiteboard\) paintBoard\(\);/,
+  );
+  assert.match(
+    script,
+    /frameworkRound = "behavioral";\s*if \(whiteboard\) paintBoard\(\);/,
+  );
 });
 
 // The agent's reason and wait estimate reach the page only if the whole
