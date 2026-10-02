@@ -19,6 +19,7 @@ SOURCE = ROOT / "problem-bank" / "problems.json"
 # the only one that reads them. Run it first.
 PAGE_MAP = ROOT / "web" / "problem-pages.json"
 INDEX = ROOT / "web" / "index.html"
+TOPIC_MAP = ROOT / "web" / "problem-topics.json"
 # Matched without their indentation, which the surrounding markup owns and has
 # already changed once: wrapping the grid in a `<details>` moved it two columns
 # right, and the six-space literals these used to be went on matching only
@@ -43,18 +44,15 @@ def read_json(path: Path) -> object:
 def card(problem: dict[str, object], page: str, title: str) -> str:
     """One lobby card, named the way the interview will name the exercise.
 
-    Keyed by page name, with the scenario title and topic metadata: the
-    recommendation line reads the title off this card, and "Recommended: Coin
-    Change", a `coin-change` key or a "Dynamic Programming" tag tells the
-    candidate what they are about to be asked. Topics stay in data attributes
-    for local filtering and are not rendered on the card. The published title
-    is not in the page at all; the source slot is filled from the page map only
-    when the candidate turns that on to drill one problem by name.
+    Keyed by page name, with the scenario title the recommendation line reads.
+    A `coin-change` key, published title or "Dynamic Programming" tag tells the
+    candidate what they are about to be asked, so none ships in the initial
+    page. The published title and topic map are fetched only after the candidate
+    opts into the corresponding picker control.
     """
-    topics = "|".join(str(topic) for topic in problem.get("topics", []))
     return "\n".join(
         [
-            f'  <button class="problem-card" type="button" data-problem="{html.escape(page)}" data-difficulty="{html.escape(problem["difficulty"])}" data-topics="{html.escape(topics)}">',
+            f'  <button class="problem-card" type="button" data-problem="{html.escape(page)}" data-difficulty="{html.escape(problem["difficulty"])}">',
             f'    <span class="problem-title">{html.escape(title)}</span>',
             '    <span class="problem-source" hidden></span>',
             f'    <span class="problem-meta">{html.escape(problem["difficulty"])}</span>',
@@ -63,8 +61,7 @@ def card(problem: dict[str, object], page: str, title: str) -> str:
     )
 
 
-def generated(problems: list) -> str:
-    pages = read_json(PAGE_MAP)
+def generated(problems: list, pages: dict) -> str:
     cards = "\n".join(
         card(problem, pages[problem["id"]]["page"], pages[problem["id"]]["title"])
         for problem in problems
@@ -77,6 +74,14 @@ def generated(problems: list) -> str:
             END,
         ]
     )
+
+
+def generated_topics(problems: list, pages: dict) -> str:
+    """The opt-in topic filter's page-to-topic lookup."""
+    mapping = {
+        pages[problem["id"]]["page"]: problem.get("topics", []) for problem in problems
+    }
+    return json.dumps(mapping, ensure_ascii=False, indent=2) + "\n"
 
 
 def main() -> int:
@@ -103,12 +108,20 @@ def main() -> int:
         return 1
 
     problems = read_json(SOURCE)
-    block = textwrap.indent(generated(problems), indent)
+    pages = read_json(PAGE_MAP)
+    block = textwrap.indent(generated(problems, pages), indent)
     updated = html_text[: opening.start()] + block + html_text[end.end() :]
+    topics = generated_topics(problems, pages)
+    current_topics = TOPIC_MAP.read_text(encoding="utf-8") if TOPIC_MAP.exists() else ""
     if args.check:
+        stale = []
         if updated != html_text:
+            stale.append("web/index.html problem cards")
+        if topics != current_topics:
+            stale.append("web/problem-topics.json")
+        if stale:
             print(
-                "web/index.html problem cards are stale; run: python3 scripts/gen-problem-cards.py",
+                f"{', '.join(stale)} are stale; run: python3 scripts/gen-problem-cards.py",
                 file=sys.stderr,
             )
             return 1
@@ -117,6 +130,9 @@ def main() -> int:
     if updated != html_text:
         INDEX.write_text(updated, encoding="utf-8")
         print(f"updated {len(problems)} problem cards in web/index.html")
+    if topics != current_topics:
+        TOPIC_MAP.write_text(topics, encoding="utf-8")
+        print(f"updated {len(problems)} problem topics in web/problem-topics.json")
     return 0
 
 

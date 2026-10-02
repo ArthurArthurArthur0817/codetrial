@@ -61,6 +61,7 @@ register("./dom-hooks.js", pathToFileURL(`${import.meta.dirname}/`));
 /// properties that put a string on the page without going through `textContent`.
 const SPOKEN_ATTRIBUTES = ["title", "ariaLabel", "alt", "placeholder", "value"];
 const MARKUP = ["innerHTML", "innerText", "outerHTML"];
+const FORM_CONTROLS = new Set(["button", "input", "select", "textarea"]);
 
 class Element {
   #text = "";
@@ -376,7 +377,7 @@ export function installDocument(markup) {
           created.dataset[key] = value;
         }
       }
-      if ("value" in element.attributes)
+      if (FORM_CONTROLS.has(element.tag) && "value" in element.attributes)
         created.value = element.attributes.value;
       nodes.set(element, created);
     }

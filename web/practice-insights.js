@@ -1,3 +1,5 @@
+import { reportTopics } from "./lib.js";
+
 export function availableTopics(problems) {
   return [...new Set(problems.flatMap((problem) => problem.topics ?? []))].sort(
     (left, right) => left.localeCompare(right),
@@ -17,14 +19,13 @@ export function filterProblems(
 
 const ASSESSED = new Set(["HIRE", "NO_HIRE"]);
 
-export function recentPerformance(problems, reports, limit = 8) {
-  const topicsByProblem = new Map(
-    problems.map((problem) => [problem.id, problem.topics ?? []]),
-  );
+export function recentPerformance(reports, limit = 8) {
   const attempts = reports
     .filter(
       (entry) =>
-        Number.isFinite(entry.at) && ASSESSED.has(entry.report?.decision),
+        Number.isFinite(entry.at) &&
+        !entry.report?.incomplete &&
+        ASSESSED.has(entry.report?.decision),
     )
     .sort((left, right) => right.at - left.at)
     .slice(0, limit);
@@ -35,7 +36,7 @@ export function recentPerformance(problems, reports, limit = 8) {
   ).length;
   const topicResults = new Map();
   for (const entry of attempts) {
-    for (const topic of topicsByProblem.get(entry.problemId) ?? []) {
+    for (const topic of new Set(reportTopics(entry.report) ?? [])) {
       const result = topicResults.get(topic) ?? { passes: 0, misses: 0 };
       result[entry.report.decision === "HIRE" ? "passes" : "misses"] += 1;
       topicResults.set(topic, result);

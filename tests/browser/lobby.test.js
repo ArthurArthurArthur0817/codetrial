@@ -221,6 +221,7 @@ const markupDuration = () =>
 /// The page name a card ships in the URL, from the map the generator writes.
 const pageOf = (problemId) =>
   JSON.parse(read("web/problem-pages.json"))[problemId].page;
+const TOPICS_BY_PAGE = JSON.parse(read("web/problem-topics.json"));
 
 const hired = (problemId) => ({
   problemId,
@@ -331,6 +332,13 @@ const restore = (page) =>
     ),
   );
 
+async function openTopicFilter(page) {
+  await page.click("details.problem-picker summary");
+  await page.waitForFunction(
+    () => !document.querySelector("#problem-topic").disabled,
+  );
+}
+
 /// What the difficulty filter did to one card.
 const cardInfo = (page, id) =>
   page.evaluate((problem) => {
@@ -365,22 +373,44 @@ lobbyTest(
 lobbyTest(
   "topic and difficulty filters narrow the problem cards together",
   async (page) => {
+    const requests = [];
+    page.on("request", (request) =>
+      requests.push(new URL(request.url()).pathname),
+    );
     await lobby(page);
-    await page.click("details.problem-picker summary");
+    assert.equal(
+      requests.includes("/problem-topics.json"),
+      false,
+      "the initial lobby disclosed the topic map",
+    );
+    assert.equal(
+      await page.locator("[data-topics]").count(),
+      0,
+      "a problem card disclosed its topics in the HTML",
+    );
+    assert.equal(
+      await page.locator("#problem-filter-summary").textContent(),
+      "",
+      "the untouched live region announced a count",
+    );
+    await openTopicFilter(page);
+    assert.equal(requests.includes("/problem-topics.json"), true);
 
     await page.selectOption("#problem-topic", "Array");
     const filtered = await page
       .locator("[data-problem]:visible")
       .evaluateAll((cards) =>
         cards.map((card) => ({
+          id: card.dataset.problem,
           difficulty: card.dataset.difficulty,
-          topics: card.dataset.topics.split("|"),
         })),
       );
     assert.ok(filtered.length > 0, "the topic filter hid every problem");
     assert.ok(
       filtered.every(
-        (card) => card.difficulty === "Medium" && card.topics.includes("Array"),
+        (card) =>
+          card.difficulty === "Medium" &&
+          TOPICS_BY_PAGE[card.id].includes("Array"),
       ),
       "a visible card did not match both filters",
     );
@@ -390,6 +420,198 @@ lobbyTest(
       (await page.locator("[data-problem]:visible").count()) > filtered.length,
       "reset did not restore the other Medium problems",
     );
+    assert.equal(
+      await page.locator("#problem-filter-summary").textContent(),
+      "",
+    );
+  },
+);
+
+lobbyTest(
+  "a failed topic lookup is retried when the picker reopens",
+  async (page) => {
+    let requests = 0;
+    await page.route("**/problem-topics.json", async (route) => {
+      requests += 1;
+      // The data loader already retries one dropped request. Fail both of its
+      // bounded attempts so reopening the picker has to start a new load.
+      if (requests <= 2) {
+        await route.fulfill({ status: 500, body: "nope" });
+        return;
+      }
+      await route.continue();
+    });
+    await lobby(page);
+
+    await page.click("details.problem-picker summary");
+    await page.waitForFunction(() =>
+      document
+        .querySelector("#problem-filter-summary")
+        .textContent.includes("could not be loaded"),
+    );
+    assert.equal(await page.locator("#problem-topic").isDisabled(), true);
+
+    await page.click("details.problem-picker summary");
+    await openTopicFilter(page);
+    assert.equal(requests, 3);
+    assert.ok((await page.locator("#problem-topic option").count()) > 1);
+    assert.equal(
+      await page.locator("#problem-filter-summary").textContent(),
+      "",
+    );
+  },
+);
+
+lobbyTest("a topic choice does not survive a lobby restore", async (page) => {
+  await lobby(page);
+  await openTopicFilter(page);
+  await page.selectOption("#problem-topic", "Array");
+  assert.match(
+    await page.locator("#problem-filter-summary").textContent(),
+    /tagged Array/,
+  );
+
+  await restore(page);
+  await awaitReady(page);
+  assert.equal(await page.locator("#problem-topic").inputValue(), "");
+  assert.equal(await page.locator("#problem-filter-summary").textContent(), "");
+});
+
+lobbyTest(
+  "a hidden manual pick does not survive the combined filters",
+  async (page) => {
+    const hardArray = Object.entries(TOPICS_BY_PAGE).find(
+      ([pageName, topics]) =>
+        topics.includes("Array") &&
+        read("web/index.html").includes(
+          `data-problem="${pageName}" data-difficulty="Hard"`,
+        ),
+    )[0];
+    await lobby(page);
+    await openTopicFilter(page);
+    await page.evaluate((id) => {
+      const card = document.querySelector(`[data-problem="${id}"]`);
+      card.hidden = false;
+      card.click();
+    }, hardArray);
+
+    await page.selectOption("#problem-topic", "Array");
+    const state = await snapshot(page);
+    assert.notEqual(state.card, hardArray);
+    assert.equal((await cardInfo(page, hardArray)).hidden, true);
+    assert.equal((await cardInfo(page, state.card)).hidden, false);
+  },
+);
+
+lobbyTest(
+  "a due review outside the selected topic remains the first priority",
+  async (page) => {
+    const due = pageOf("valid-parentheses");
+    assert.equal(TOPICS_BY_PAGE[due].includes("Array"), false);
+    reports = [savedAttempt(due)];
+    await lobby(page);
+    await openTopicFilter(page);
+    await page.selectOption("#problem-topic", "Array");
+
+    const state = await snapshot(page);
+    assert.equal(state.card, due);
+    assert.match(state.note, /Review due after/);
+    assert.equal((await cardInfo(page, due)).hidden, false);
+  },
+);
+
+lobbyTest(
+  "a difficulty change keeps an out-of-filter due review visible",
+  async (page) => {
+    const due = pageOf("valid-parentheses");
+    assert.equal(TOPICS_BY_PAGE[due].includes("Array"), false);
+    reports = [savedAttempt(due)];
+    await lobby(page);
+    await openTopicFilter(page);
+    await page.selectOption("#problem-topic", "Array");
+
+    await setLevel(page, "Easy", true);
+    const state = await snapshot(page);
+    assert.equal(state.card, due);
+    assert.match(state.note, /Review due after/);
+    assert.equal((await cardInfo(page, due)).hidden, false);
+
+    await page.click("#start");
+    await page.waitForURL(/\/interview/);
+    assert.equal(new URL(page.url()).searchParams.get("problem"), due);
+  },
+);
+
+lobbyTest(
+  "a topic change redraws a kept problem that the topic hides",
+  async (page) => {
+    await page.addInitScript(() => {
+      Math.random = () => 0;
+    });
+    await lobby(page);
+    const drawn = await snapshot(page);
+
+    await setLevel(page, "Easy", true);
+    assert.equal((await snapshot(page)).card, drawn.card);
+    await openTopicFilter(page);
+    const topic = Object.entries(TOPICS_BY_PAGE)
+      .filter(([pageName]) => pageName !== drawn.card)
+      .flatMap(([, topics]) => topics)
+      .find(
+        (candidate, index, topics) =>
+          topics.indexOf(candidate) === index &&
+          !TOPICS_BY_PAGE[drawn.card].includes(candidate) &&
+          Object.entries(TOPICS_BY_PAGE).some(
+            ([pageName, cardTopics]) =>
+              cardTopics.includes(candidate) &&
+              ["Easy", "Medium"].includes(
+                read("web/index.html").match(
+                  new RegExp(
+                    `data-problem="${pageName}" data-difficulty="([^"]+)"`,
+                  ),
+                )?.[1],
+              ),
+          ),
+      );
+    assert.ok(topic, "the bank has no topic that excludes the drawn problem");
+
+    await page.selectOption("#problem-topic", topic);
+    const redrawn = await snapshot(page);
+    assert.notEqual(redrawn.card, drawn.card);
+    assert.equal(TOPICS_BY_PAGE[redrawn.card].includes(topic), true);
+    assert.equal((await cardInfo(page, redrawn.card)).hidden, false);
+
+    await page.click("#start");
+    await page.waitForURL(/\/interview/);
+    assert.equal(new URL(page.url()).searchParams.get("problem"), redrawn.card);
+  },
+);
+
+lobbyTest(
+  "a completed topic and level are described without overstating progress",
+  async (page) => {
+    const markup = read("web/index.html");
+    const mediumArray = Object.entries(TOPICS_BY_PAGE)
+      .filter(
+        ([pageName, topics]) =>
+          topics.includes("Array") &&
+          markup.includes(
+            `data-problem="${pageName}" data-difficulty="Medium"`,
+          ),
+      )
+      .map(([pageName]) => pageName);
+    reports = mediumArray.map(hired);
+    await lobby(page);
+    await setLevel(page, "Medium", true);
+    await setLevel(page, "Easy", false);
+    await setLevel(page, "Hard", false);
+    await openTopicFilter(page);
+    await page.selectOption("#problem-topic", "Array");
+
+    assert.match(
+      (await snapshot(page)).note,
+      /You have passed every problem matching this topic and level\./,
+    );
   },
 );
 
@@ -397,6 +619,11 @@ lobbyTest(
   "recent assessed reports produce a practice snapshot",
   async (page) => {
     reports = [
+      {
+        problemId: HARD[0],
+        createdAt: 40,
+        payload: { report: { incomplete: true, decision: "HIRE" } },
+      },
       {
         problemId: EASY[0],
         createdAt: 30,

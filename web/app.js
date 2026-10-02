@@ -18,7 +18,7 @@ import {
 } from "./progress.js";
 import { reportMarkdown, reportMarkup } from "./render.js";
 import { downloadMarkdown, reportFilename } from "./download.js";
-import { loadPageMap } from "./problem-data.js";
+import { loadPageMap, loadTopicMap } from "./problem-data.js";
 import {
   availableTopics,
   filterProblems,
@@ -117,6 +117,7 @@ const nodes = {
   groundingError: document.querySelector("#grounding-error"),
   durationNote: document.querySelector("#duration-note"),
   problemTopic: document.querySelector("#problem-topic"),
+  problemPicker: document.querySelector("details.problem-picker"),
   problemFiltersReset: document.querySelector("#problem-filters-reset"),
   problemFilterSummary: document.querySelector("#problem-filter-summary"),
   recentPerformance: document.querySelector("#recent-performance"),
@@ -133,9 +134,7 @@ const cards = [...document.querySelectorAll("[data-problem]")].map(
   (button) => ({
     id: button.dataset.problem,
     difficulty: button.dataset.difficulty,
-    topics: String(button.dataset.topics || "")
-      .split("|")
-      .filter(Boolean),
+    topics: [],
     button,
   }),
 );
@@ -182,20 +181,38 @@ showSources.addEventListener("change", () => {
 });
 void applySources();
 const levels = [...document.querySelectorAll('[name="difficulty"]')];
-const TOPIC_KEY = "codetrial.problemTopic";
-const topics = availableTopics(cards);
-for (const topic of topics) {
-  const option = document.createElement("option");
-  option.value = topic;
-  option.textContent = topic;
-  nodes.problemTopic.append(option);
+let topicLoad;
+nodes.problemTopic.disabled = true;
+
+// A topic names the technique behind a scenario, so the page does not ship the
+// full lookup. Opening the specific-problem picker opts into fetching it; no
+// later visit inherits that choice.
+async function loadTopics() {
+  topicLoad ??= loadTopicMap()
+    .then((mapping) => {
+      for (const card of cards) card.topics = mapping?.[card.id] ?? [];
+      for (const topic of availableTopics(cards)) {
+        const option = document.createElement("option");
+        option.value = topic;
+        option.textContent = topic;
+        nodes.problemTopic.append(option);
+      }
+      nodes.problemTopic.disabled = false;
+      nodes.problemFilterSummary.textContent = "";
+      return true;
+    })
+    .catch(() => {
+      topicLoad = undefined;
+      nodes.problemFilterSummary.textContent =
+        "Topic filters could not be loaded.";
+      return false;
+    });
+  return topicLoad;
 }
-try {
-  const storedTopic = localStorage.getItem(TOPIC_KEY) ?? "";
-  if (topics.includes(storedTopic)) nodes.problemTopic.value = storedTopic;
-} catch {
-  /* the filter still works for this visit */
-}
+
+nodes.problemPicker.addEventListener("toggle", () => {
+  if (nodes.problemPicker.open) void loadTopics();
+});
 
 // A picked card is a choice about this one interview, not about the filter the
 // checkboxes carry, so it leaves them alone. It suggests a length to go with
@@ -234,7 +251,7 @@ for (const input of levels) {
     // picked by hand or drawn: the checkbox answered which levels to offer,
     // not whether to throw away the problem on screen. Only a filter that now
     // hides it hands the choice back to the lobby.
-    if (selectedDifficulties().has(problem?.difficulty)) {
+    if (problem && !problem.button.hidden) {
       // Kept, a drawn problem is no longer what `roll` draws under this
       // filter, so the next `settle` would swap it. Held against the reports
       // in hand, which while the history is still loading are the ones about
@@ -261,21 +278,11 @@ for (const input of levels) {
 }
 
 nodes.problemTopic.addEventListener("change", () => {
-  try {
-    localStorage.setItem(TOPIC_KEY, nodes.problemTopic.value);
-  } catch {
-    /* the filter still works for this visit */
-  }
   filterSelectionChanged();
 });
 
 nodes.problemFiltersReset.addEventListener("click", () => {
   nodes.problemTopic.value = "";
-  try {
-    localStorage.removeItem(TOPIC_KEY);
-  } catch {
-    /* the filter still resets for this visit */
-  }
   filterSelectionChanged();
 });
 
@@ -506,6 +513,8 @@ window.addEventListener("pageshow", (event) => {
   // late enough to re-enable a button the candidate already pressed and hand
   // them a second navigation.
   if (!event.persisted) return;
+  nodes.problemTopic.value = "";
+  applyProblemFilters();
   // The cache holds the page as it was before the candidate left, and a login
   // recorded on the way out is in none of it, so restoring what it holds told
   // somebody who had just signed in to sign in. Ask the server instead, and
@@ -977,14 +986,16 @@ function applyProblemFilters(difficulties = selectedDifficulties()) {
   );
   for (const card of cards) card.button.hidden = !visible.has(card);
   const topic = nodes.problemTopic.value;
-  nodes.problemFilterSummary.textContent = `${visible.size} problem${visible.size === 1 ? "" : "s"}${topic ? ` tagged ${topic}` : ""} shown.`;
+  nodes.problemFilterSummary.textContent = topic
+    ? `${visible.size} problem${visible.size === 1 ? "" : "s"} tagged ${topic} shown.`
+    : "";
 }
 
 function filterSelectionChanged() {
-  const eligible = new Set(topicEligibleCards());
   applyProblemFilters();
-  if (manualProblem && eligible.has(problem)) return;
+  if (manualProblem && !problem?.button.hidden) return;
   manualProblem = false;
+  keptDraw = null;
   roll = Math.random();
   avoidedProblem = undefined;
   if (historyReady) recommend();
@@ -1009,6 +1020,7 @@ function recommend(note = "") {
     () => roll,
     undefined,
     avoidedProblem,
+    cards,
   );
   // Nothing to offer is still an answer, and it has to go through `setProblem`
   // like every other one. Returning here left whatever was picked for the
@@ -1032,7 +1044,7 @@ function recommend(note = "") {
     return;
   }
   nodes.recommendation.textContent = choice.repeat
-    ? `${note}Selected problem: ${title(choice.picked)}. You have passed every problem at this level.`
+    ? `${note}Selected problem: ${title(choice.picked)}. ${nodes.problemTopic.value ? "You have passed every problem matching this topic and level." : "You have passed every problem at this level."}`
     : `${note}Selected problem: ${title(choice.picked)}.`;
 }
 
@@ -1220,7 +1232,7 @@ function hideRecentPerformance() {
 }
 
 function renderRecentPerformance() {
-  const snapshot = recentPerformance(cards, reports);
+  const snapshot = recentPerformance(reports);
   if (!snapshot) {
     hideRecentPerformance();
     return;
