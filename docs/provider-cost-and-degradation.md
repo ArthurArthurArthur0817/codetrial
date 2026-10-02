@@ -16,12 +16,15 @@ Gemini will not send. The replacement resumes the same conversation when the
 server issued a handle; if the handle is unavailable or refused, the restart is
 logged as degraded and is grounded from the bounded local transcript tail,
 editor, round and evidence state instead. A resumed socket replaced
-before reaching the healthy, debt-free age is rebuilt locally on the next
-attempt, even if it answered once before failing. Resumption stays disabled
-through that failure run until completed output or a healthy, debt-free socket
-proves recovery; these cold opens consume the same restart budget. The reply to
-a recovery briefing is not that proof: every replacement asks for one, so a run
-of sockets that each answer their briefing and die still ends the interview.
+within a minute of opening is rebuilt locally on the next attempt, even if it
+answered once before failing; one that stayed up longer did not fail at its
+checkpoint, whatever it owed when it was replaced. Resumption stays disabled
+through that failure run until completed output or a socket that stays up past
+a minute proves recovery; these cold opens consume the same restart budget. The
+reply to a recovery briefing is not that proof, whether the briefing went out
+at once or was held for an unpause or the end of a thinking hold: every
+replacement asks for one, so a run of sockets that each answer their briefing
+and die still ends the interview.
 
 A candidate turn, required prompt (including the opening greeting), or tool
 continuation that produces no output for 45 seconds replaces the socket even

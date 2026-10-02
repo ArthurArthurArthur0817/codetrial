@@ -265,14 +265,17 @@ fn take_restart_attempt(restarts: &mut usize, socket_age: Duration) -> bool {
 /// The answer to a recovery briefing proves nothing either way. Every
 /// replacement asks for one, so counting it would let a run of sockets that
 /// each answer their briefing and die reset the budget forever. It is the
-/// first turn to end after the briefing rather than a reply tagged with the
-/// briefing's cause, because a tool call in that answer retags the
-/// continuation that completes it.
+/// first turn to end after the briefing (`recovery_reply_pending`) rather than
+/// a reply tagged with the briefing's cause, because a tool call in that answer
+/// retags the continuation that completes it.
+///
+/// Judged by how long the socket stayed up, not by the debt-adjusted age the
+/// restart budget uses: a resumed socket that carried minutes of interview and
+/// was replaced owing a reply did not fail at its checkpoint.
 #[derive(Default)]
 struct ResumeRecovery {
     resumed: bool,
     suppressed: bool,
-    briefing_reply_pending: bool,
 }
 
 impl ResumeRecovery {
@@ -286,23 +289,20 @@ impl ResumeRecovery {
         !self.suppressed
     }
 
-    /// The replacement is up, and `briefed` says its briefing asked for a
-    /// reply.
-    fn connected(&mut self, resumed: bool, briefed: bool) {
+    fn connected(&mut self, resumed: bool) {
         self.resumed = resumed;
-        self.briefing_reply_pending = briefed;
     }
 
     fn note_event(
         &mut self,
         restarts: &mut usize,
-        state: &RuntimeState,
+        state: &mut RuntimeState,
         activity: &RuntimeActivity,
         event: &GeminiEvent,
     ) {
         // Whichever way the briefing's turn ends, silent or cut off by the
         // candidate, it is over, and the next reply is not its answer.
-        if session::ends_turn(event) && std::mem::take(&mut self.briefing_reply_pending) {
+        if session::ends_turn(event) && std::mem::take(&mut state.recovery_reply_pending) {
             return;
         }
         if completed_live_reply(state, activity, event) {
@@ -564,7 +564,7 @@ async fn replace_gemini_session(
     // Judged before the handle is looked at: `Option::filter` skips its closure
     // on `None`, which would leave suppression stale across a replacement that
     // had no handle to offer.
-    let allow_resume = loops.resume_recovery.allow_resume(age);
+    let allow_resume = loops.resume_recovery.allow_resume(context.gemini.age());
     let handle = handle.filter(|_| allow_resume);
 
     // The cold-rebuild line tells the two causes of a 1011 run apart: a resumed
@@ -657,6 +657,7 @@ async fn replace_gemini_session(
         .record_model_input(ModelInputKind::LiveSetup, &interview.boot.instructions);
 
     *context.gemini = session;
+    loops.resume_recovery.connected(resumed);
     context.activity.live_socket += 1;
     context.activity.reset_context_observations(resumed);
 
@@ -691,7 +692,6 @@ async fn replace_gemini_session(
         owed_prompt.as_deref(),
     )
     .await;
-    loops.resume_recovery.connected(resumed, spoke);
     if spoke {
         eprintln!(
             "{}",
@@ -837,6 +837,7 @@ async fn brief_replacement(
             // naming the briefing there would nest it, transcript and all,
             // inside the next one.
             activity.mark_prompted(Instant::now(), owed_prompt, false);
+            state.recovery_reply_pending = true;
             true
         }
         Ok(false) => false,
@@ -976,6 +977,7 @@ fn hold_owed_reply(state: &mut RuntimeState, owed_prompt: Option<&str>) {
 /// not create.
 fn clear_abandoned_socket_work(state: &mut RuntimeState, activity: &mut RuntimeActivity) {
     activity.discarding_output = false;
+    state.recovery_reply_pending = false;
 
     // A provisional request waits on its utterance's end, which the closed
     // socket will not send. A declared hold is the candidate's and survives.

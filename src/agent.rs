@@ -753,6 +753,10 @@ pub struct RuntimeState {
     /// A reply the hold dropped is still in the model's history, and the
     /// release has to say so; see `thinking_resume`.
     pub thinking_unheard_reply: bool,
+    /// A recovery briefing, sent at once or held for an unpause or the end of
+    /// a hold, asked for a reply that has not ended yet. Its answer proves
+    /// nothing about the socket, so it does not reset the restart budget.
+    pub recovery_reply_pending: bool,
     pub framework_evidence: Vec<FrameworkEvidence>,
     /// Deterministic, bounded facts derived from the live session.  The ledger
     /// deliberately holds no editor text or runner diagnostics: those remain
@@ -935,6 +939,7 @@ impl Default for RuntimeState {
             thinking_released_at: None,
             thinking_notice: None,
             thinking_unheard_reply: false,
+            recovery_reply_pending: false,
             framework_evidence: Vec::new(),
             evidence_ledger: EvidenceLedger::default(),
             code: String::new(),

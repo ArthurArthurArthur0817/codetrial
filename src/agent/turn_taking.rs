@@ -174,9 +174,15 @@ impl RuntimeState {
 
     /// The debt `thinking_debt` names has been delivered.
     pub(crate) fn clear_thinking_debt(&mut self) {
-        if std::mem::take(&mut self.needs_cold_brief) {
+        let cold_brief = std::mem::take(&mut self.needs_cold_brief);
+        if cold_brief {
             self.code_shown = self.code.clone();
         }
+
+        // A held briefing, or a reply owed across a pause or a replacement, is
+        // answered by the next turn. A pause can owe one with no replacement
+        // behind it; taking that answer as a briefing's only delays a reset.
+        self.recovery_reply_pending |= cold_brief || self.owed_reply_on_resume.is_some();
         self.owed_reply_on_resume = None;
         self.thinking_unheard_reply = false;
     }
