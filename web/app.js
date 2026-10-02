@@ -35,6 +35,11 @@ let reports = [];
 /// The practice focus the share box currently refers to.
 let sharedFocus = null;
 let manualProblem = false;
+/// The reports a drawn problem kept across a difficulty change was drawn from,
+/// serialized, or null when nothing is kept. Not `manualProblem`: a hand pick
+/// stands for good, while a kept draw stands only until the history it was
+/// drawn from changes.
+let keptDraw = null;
 let manualDuration = false;
 let manualDifficulty = false;
 let historyReady = false;
@@ -176,6 +181,7 @@ for (const card of cards) {
 nodes.randomProblem.addEventListener("click", () => {
   if (!historyReady || accountUpdatePending() || deletingReports) return;
   manualProblem = false;
+  keptDraw = null;
   roll = Math.random();
   avoidedProblem = problem?.id;
   applyDifficulties();
@@ -192,11 +198,20 @@ for (const input of levels) {
     }
     manualDifficulty = true;
     applyDifficulties();
-    // A pick made by hand survives a filter that still includes it. Only one
-    // that now hides it hands the choice back to the lobby.
-    if (manualProblem && selectedDifficulties().has(problem?.difficulty))
+    // A problem survives a filter that still includes it, whether it was
+    // picked by hand or drawn: the checkbox answered which levels to offer,
+    // not whether to throw away the problem on screen. Only a filter that now
+    // hides it hands the choice back to the lobby.
+    if (selectedDifficulties().has(problem?.difficulty)) {
+      // Kept, a drawn problem is no longer what `roll` draws under this
+      // filter, so the next `settle` would swap it. Held against the reports
+      // in hand, which while the history is still loading are the ones about
+      // to be replaced, so `settle` redraws then.
+      if (!manualProblem) keptDraw = JSON.stringify(reports);
       return;
+    }
     manualProblem = false;
+    keptDraw = null;
     roll = Math.random();
     avoidedProblem = undefined;
     // Not before the reports are in. Recommending from an empty history here
@@ -535,6 +550,10 @@ function refreshHistory() {
 /// describing history the page had already replaced.
 function settle() {
   historyReady = true;
+  // Refreshed reports that differ from the ones a kept draw came from may have
+  // just recorded it as passed, so the lobby draws again.
+  if (keptDraw !== null && keptDraw !== JSON.stringify(reports))
+    keptDraw = null;
   // The level suggestion only applies when the candidate has not already said
   // what they want. Moving their checkboxes would also hide the card they just
   // picked.
@@ -880,8 +899,9 @@ function applyDifficulties() {
 function recommend(note = "") {
   // A candidate who picked a card has answered the question this line asks, so
   // it stays answered. Naming a different problem here contradicted the card
-  // they had just selected.
-  if (manualProblem) return;
+  // they had just selected. A kept draw stands the same way until `settle`
+  // drops it.
+  if (manualProblem || keptDraw !== null) return;
   const choice = pickProblem(
     cards,
     selectedDifficulties(),
