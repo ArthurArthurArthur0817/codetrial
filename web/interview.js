@@ -159,6 +159,12 @@ const CODE_PUBLISH_DEBOUNCE_MS = 300;
 /// it is about. Measured against the hint text, not chosen round.
 const FRAMEWORK_HINT_MS = 12000;
 const HIDE_EXAMPLES_KEY = "codetrial:hideExamples";
+const EDITOR_FONT_SIZE_KEY = "codetrial:editorFontSize";
+/// In rem. A fixed ladder rather than a free number, so a stored value is
+/// either one of these or ignored, and every size the page can show is one the
+/// browser check has seen keep the three editor layers in line.
+const EDITOR_FONT_SIZES = ["0.75", "0.875", "1", "1.125", "1.25", "1.5"];
+const DEFAULT_EDITOR_FONT_SIZE = "0.875";
 
 // From /runtime-config.js, which is the only thing allowed to name what the
 // server does. A literal here would be a second answer to "does this server
@@ -360,6 +366,9 @@ const nodes = {
   editor: document.querySelector("#editor"),
   editorHighlight: document.querySelector("#editor-highlight"),
   editorLines: document.querySelector("#editor-lines"),
+  editorStack: document.querySelector(".editor-stack"),
+  editorFontSmaller: document.querySelector("#editor-font-smaller"),
+  editorFontLarger: document.querySelector("#editor-font-larger"),
   compileDisclosure: document.querySelector(".compile-disclosure"),
   run: document.querySelector("#run-tests"),
   candidateCaseInput: document.querySelector("#candidate-case-input"),
@@ -436,6 +445,7 @@ async function init() {
   state.transcript = createTranscriptView(document, nodes.transcriptPanel);
   renderRuntimeConfig();
   nodes.hideExamples.checked = readStored(HIDE_EXAMPLES_KEY) === "1";
+  applyEditorFontSize(readStored(EDITOR_FONT_SIZE_KEY));
   renderProblem();
   applyLanguages(null);
   setLanguage("python");
@@ -639,6 +649,23 @@ function bindEvents() {
     button.addEventListener("click", () =>
       setLanguage(button.dataset.language),
     );
+  }
+  for (const [button, step] of [
+    [nodes.editorFontSmaller, -1],
+    [nodes.editorFontLarger, 1],
+  ]) {
+    button.addEventListener("click", () => {
+      const index = EDITOR_FONT_SIZES.indexOf(editorFontSize()) + step;
+      const size = EDITOR_FONT_SIZES[index];
+      if (!size) return;
+      applyEditorFontSize(size);
+      // The default is stored as no preference, so a later change of default
+      // reaches whoever never moved off it.
+      writeStored(
+        EDITOR_FONT_SIZE_KEY,
+        size === DEFAULT_EDITOR_FONT_SIZE ? "" : size,
+      );
+    });
   }
   // The overlay does not scroll on its own; it follows the textarea.
   nodes.editor.addEventListener("scroll", () => {
@@ -2795,6 +2822,32 @@ function paintEditor() {
       (_, index) => index + 1,
     ).join("\n");
   }
+}
+
+/// Sets one custom property that the textarea, the highlight overlay and the
+/// gutter all read, rather than a font size on each: three writes could leave
+/// them disagreeing for a frame, or for good if one were missed, and the caret
+/// then sits apart from the glyphs it edits.
+function applyEditorFontSize(stored) {
+  const size = EDITOR_FONT_SIZES.includes(stored)
+    ? stored
+    : DEFAULT_EDITOR_FONT_SIZE;
+  nodes.editorStack.style.setProperty("--editor-font-size", `${size}rem`);
+  const index = EDITOR_FONT_SIZES.indexOf(size);
+  // aria-disabled rather than disabled: disabling the button just pressed
+  // drops keyboard focus to <body>, and the click handler already ignores a
+  // step past either end.
+  nodes.editorFontSmaller.setAttribute("aria-disabled", String(index === 0));
+  nodes.editorFontLarger.setAttribute(
+    "aria-disabled",
+    String(index === EDITOR_FONT_SIZES.length - 1),
+  );
+}
+
+function editorFontSize() {
+  return nodes.editorStack.style
+    .getPropertyValue("--editor-font-size")
+    .replace(/rem$/, "");
 }
 
 function currentCode() {

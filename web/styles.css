@@ -345,7 +345,8 @@ p {
 
 /* A tab the judge cannot run, dimmed rather than removed: the row stays the
    same five tabs everywhere, and the title says which one is out and why. */
-.language-button:disabled {
+.language-button:disabled,
+.font-size-button[aria-disabled="true"] {
   opacity: 0.6;
   cursor: not-allowed;
 }
@@ -456,6 +457,7 @@ p {
 .difficulty-row,
 .editor-toolbar,
 .language-tabs,
+.font-size-control,
 .report-header,
 .report-actions,
 .history-header {
@@ -640,6 +642,7 @@ p {
 .pill-button,
 .tab-button,
 .language-button,
+.font-size-button,
 .run-button {
   border: 1px solid var(--hairline);
   border-radius: 999px;
@@ -753,6 +756,7 @@ p {
 .pill-button,
 .tab-button,
 .language-button,
+.font-size-button,
 .run-button {
   padding: 0.4rem 0.75rem;
   cursor: pointer;
@@ -868,6 +872,12 @@ p {
 }
 
 .editor-stack {
+  /* Set from interview.js when the candidate picks a size. The gutter scales
+     with it, or a three-digit line number overflows it at the largest size,
+     but never drops below 3.25rem, or a four-digit one is clipped at the
+     smallest. */
+  --editor-font-size: 0.875rem;
+  --editor-gutter: max(3.25rem, calc(var(--editor-font-size) * 3.72));
   position: relative;
   flex: 1;
   min-height: 25rem;
@@ -879,12 +889,12 @@ p {
 #editor,
 #editor-highlight {
   position: absolute;
-  inset: 0 0 0 3.25rem;
+  inset: 0 0 0 var(--editor-gutter);
   margin: 0;
   border: 0;
   padding: 1rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.875rem;
+  font-size: var(--editor-font-size);
   line-height: 1.5;
   tab-size: 4;
   /* Not pre-wrap: the gutter numbers logical lines, so a wrapped line would
@@ -902,7 +912,7 @@ p {
 #editor-lines {
   position: absolute;
   inset: 0 auto 0 0;
-  width: 3.25rem;
+  width: var(--editor-gutter);
   margin: 0;
   padding: 1rem 0.5rem;
   overflow: hidden;
@@ -910,7 +920,7 @@ p {
   background: #181816;
   border-right: 1px solid var(--hairline);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.875rem;
+  font-size: var(--editor-font-size);
   line-height: 1.5;
   text-align: right;
   user-select: none;
