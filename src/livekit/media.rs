@@ -459,9 +459,10 @@ pub(super) async fn publish_output_audio(
 
 /// Root-mean-square level, in PCM16 units, above which a frame counts as the
 /// candidate speaking: about -40 dBFS, the top of a quiet room and below soft
-/// speech. Only used to hold a checkpoint back, so it errs toward calling
-/// sound speech: a noisy room waits longer, which the watch tick retries,
-/// where a soft speaker taken for silence would be interrupted.
+/// speech. Used to hold a checkpoint back, and a silence nudge while the socket
+/// has not transcribed the candidate, so it errs toward calling sound speech: a
+/// noisy room waits longer, which the watch tick retries, where a soft speaker
+/// taken for silence would be interrupted.
 const VOICE_RMS: f64 = 316.0;
 
 pub(super) fn frame_has_voice(frame: &AudioFrame<'_>) -> bool {

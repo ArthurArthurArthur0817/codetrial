@@ -254,6 +254,64 @@ fn take_restart_attempt(restarts: &mut usize, socket_age: Duration) -> bool {
     true
 }
 
+/// A checkpoint can be accepted yet restore a conversation that fails again.
+/// Once that happens, rebuild locally until output proves recovery worked.
+///
+/// `resumed` describes the socket now open and only a connect writes it: a
+/// resumed socket that answers once and then dies young is still a failed
+/// resumption, so completed output lifts the suppression without forgetting
+/// where the open socket came from.
+///
+/// The answer to a recovery briefing proves nothing either way. Every
+/// replacement asks for one, so counting it would let a run of sockets that
+/// each answer their briefing and die reset the budget forever. It is the
+/// first turn to end after the briefing rather than a reply tagged with the
+/// briefing's cause, because a tool call in that answer retags the
+/// continuation that completes it.
+#[derive(Default)]
+struct ResumeRecovery {
+    resumed: bool,
+    suppressed: bool,
+    briefing_reply_pending: bool,
+}
+
+impl ResumeRecovery {
+    /// Judged on every replacement, whether or not a handle exists to use.
+    fn allow_resume(&mut self, age: Duration) -> bool {
+        if age >= HEALTHY_GEMINI_SOCKET {
+            self.suppressed = false;
+        } else if self.resumed {
+            self.suppressed = true;
+        }
+        !self.suppressed
+    }
+
+    /// The replacement is up, and `briefed` says its briefing asked for a
+    /// reply.
+    fn connected(&mut self, resumed: bool, briefed: bool) {
+        self.resumed = resumed;
+        self.briefing_reply_pending = briefed;
+    }
+
+    fn note_event(
+        &mut self,
+        restarts: &mut usize,
+        state: &RuntimeState,
+        activity: &RuntimeActivity,
+        event: &GeminiEvent,
+    ) {
+        // Whichever way the briefing's turn ends, silent or cut off by the
+        // candidate, it is over, and the next reply is not its answer.
+        if session::ends_turn(event) && std::mem::take(&mut self.briefing_reply_pending) {
+            return;
+        }
+        if completed_live_reply(state, activity, event) {
+            *restarts = 0;
+            self.suppressed = false;
+        }
+    }
+}
+
 /// The agent's output has settled: nothing generating, and nothing left in the
 /// LiveKit playout queue. The floor alone is not enough, because it is stamped
 /// once when a turn completes and the queue drains on its own afterwards.
@@ -489,6 +547,9 @@ async fn replace_gemini_session(
         leave_room(room).await;
         return Ok(ControlFlow::Break(()));
     }
+
+    // Reading the handle also records closing-key failures for cold opens and
+    // reporting, even when the handle or the restart budget cannot be used.
     let handle = context.gemini.recovery_handle(interview.keys);
     let age = replaced_socket_age(context.gemini.age(), reply_timeout, context.activity);
     if !take_restart_attempt(&mut loops.restarts, age) {
@@ -498,6 +559,27 @@ async fn replace_gemini_session(
             loops.restarts, interview.boot.room_name
         );
         return end_without_interviewer(room, context, interview, loops).await;
+    }
+
+    // Judged before the handle is looked at: `Option::filter` skips its closure
+    // on `None`, which would leave suppression stale across a replacement that
+    // had no handle to offer.
+    let allow_resume = loops.resume_recovery.allow_resume(age);
+    let handle = handle.filter(|_| allow_resume);
+
+    // The cold-rebuild line tells the two causes of a 1011 run apart: a resumed
+    // conversation that keeps failing stops failing once it is rebuilt, while
+    // input that fails on any socket fails the rebuild too.
+    if loops.resume_recovery.suppressed {
+        eprintln!(
+            "{}; rebuilding from local state room={}",
+            if loops.resume_recovery.resumed {
+                "Gemini resumed session failed before recovery"
+            } else {
+                "Gemini cold rebuild also failed before recovery"
+            },
+            interview.boot.room_name
+        );
     }
 
     // Said before the attempt, not after it: the whole point is to cover the
@@ -511,11 +593,12 @@ async fn replace_gemini_session(
     // one being replaced ahead of its `GoAway` is still live and this is the
     // orderly hang-up. Ignored either way for that reason. A socket that
     // resumed and was offered nothing new still holds the checkpoint it
-    // inherited, whose age this process does not know.
-    let checkpoint_age = match (context.gemini.checkpoint_age(), &handle) {
-        (Some(age), _) => format!("{}s", age.as_secs()),
-        (None, Some(_)) => "inherited".to_string(),
-        (None, None) => "none".to_string(),
+    // inherited, whose age this process does not know. A checkpoint that is not
+    // offered is not the one the replacement starts from, so it is not named.
+    let checkpoint_age = match (&handle, context.gemini.checkpoint_age()) {
+        (None, _) => "none".to_string(),
+        (Some(_), Some(age)) => format!("{}s", age.as_secs()),
+        (Some(_), None) => "inherited".to_string(),
     };
     let _ = context.gemini.shutdown().await;
     session::drain_live_usage(room, context);
@@ -584,8 +667,12 @@ async fn replace_gemini_session(
     // how old the checkpoint it resumed from is, what was owed, and what the
     // local record holds that the checkpoint may predate.
     eprintln!(
-        "replacement: at={} resumed={resumed} checkpoint_age={checkpoint_age} owed={owed} ({debt}) {} room={}",
+        "replacement: at={} resumed={resumed} checkpoint_age={checkpoint_age} owed={owed} ({debt}) owed_chars={} editor_chars={} {} room={}",
         log_clock(context.state),
+        owed_prompt
+            .as_deref()
+            .map_or(0, |prompt| prompt.chars().count()),
+        context.state.code.chars().count(),
         prompt_fields(context.state, context.activity),
         interview.boot.room_name
     );
@@ -604,6 +691,7 @@ async fn replace_gemini_session(
         owed_prompt.as_deref(),
     )
     .await;
+    loops.resume_recovery.connected(resumed, spoke);
     if spoke {
         eprintln!(
             "{}",
@@ -733,7 +821,7 @@ async fn brief_replacement(
         eprintln!("Gemini session resumed; the interview continues where it left off");
     } else {
         eprintln!(
-            "Gemini session restart degraded; resumption was unavailable and the interviewer is rebuilding from local transcript, editor and interview state"
+            "Gemini session restart degraded; resumption was not used and the interviewer is rebuilding from local transcript, editor and interview state"
         );
     }
 
@@ -1204,6 +1292,7 @@ struct RoomLoop {
     /// How many sockets this interview has been through.
     restarts: usize,
     deferred_restart: DeferredRestart,
+    resume_recovery: ResumeRecovery,
 
     /// At most one idle-window review at a time, collected on the watch tick.
     /// A tick of latency on a note nobody is waiting for is not worth an arm
@@ -1717,11 +1806,12 @@ async fn on_gemini_event(
         return Ok(ControlFlow::Continue(()));
     };
 
-    // Completed output proves recovery worked; merely staying connected does
-    // not clear consecutive watchdog failures.
-    if completed_live_reply(context.state, context.activity, &event) {
-        loops.restarts = 0;
-    }
+    // Completed output proves recovery worked, unless it answered the recovery
+    // briefing; merely staying connected does not clear consecutive watchdog
+    // failures.
+    loops
+        .resume_recovery
+        .note_event(&mut loops.restarts, context.state, context.activity, &event);
 
     if let GeminiEvent::GoAway { time_left } = &event {
         eprintln!(
@@ -1937,6 +2027,7 @@ pub async fn run_room(
     let mut loops = RoomLoop {
         restarts,
         deferred_restart: DeferredRestart::default(),
+        resume_recovery: ResumeRecovery::default(),
         interim_review: InterimReview::default(),
         presence: CandidatePresence::default(),
     };
@@ -2034,13 +2125,15 @@ pub async fn run_room(
                     // need; propagating cost the interview.
                     let ended = frame.is_none();
 
-                    // Only a checkpoint reads it, and only under a compression
-                    // window; without one the per-frame level is not worth
+                    // Read by a checkpoint under a compression window, and by
+                    // the idle timers until the socket has transcribed the
+                    // candidate; otherwise the per-frame level is not worth
                     // computing.
-                    if turn.state.context_compression.is_some()
+                    if (turn.state.context_compression.is_some()
+                        || !turn.activity.transcribed_on_socket)
                         && frame.as_ref().is_some_and(media::frame_has_voice)
                     {
-                        turn.activity.candidate_voice_at = Some(Instant::now());
+                        turn.activity.note_candidate_voice(Instant::now());
                     }
                     if turn.state.paused {
                         discard_paused_audio(&mut media);

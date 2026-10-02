@@ -5158,3 +5158,117 @@ fn a_thinking_hold_is_not_an_interviewer_stall() {
         ReplyWatch::Recover
     );
 }
+
+/// A completed reply the room loop counts as output, ended by `event`.
+fn reply_event(recovery: &mut ResumeRecovery, restarts: &mut usize, event: &GeminiEvent) {
+    let mut activity = RuntimeActivity::new(Instant::now());
+    activity.note_output(Instant::now());
+    recovery.note_event(restarts, &RuntimeState::default(), &activity, event);
+}
+
+fn complete_reply(recovery: &mut ResumeRecovery, restarts: &mut usize) {
+    reply_event(recovery, restarts, &GeminiEvent::TurnComplete);
+}
+
+const YOUNG: Duration = Duration::from_secs(12);
+
+#[test]
+fn failed_resumption_rebuilds_until_recovery() {
+    let mut recovery = ResumeRecovery::default();
+    let mut restarts = 0;
+    assert!(recovery.allow_resume(Duration::ZERO));
+    recovery.connected(true, false);
+    assert!(!recovery.allow_resume(YOUNG));
+    recovery.connected(false, false);
+    assert!(!recovery.allow_resume(YOUNG));
+    recovery.connected(false, false);
+    complete_reply(&mut recovery, &mut restarts);
+    assert!(recovery.allow_resume(YOUNG));
+}
+
+#[test]
+fn healthy_socket_lifts_suppression() {
+    let mut recovery = ResumeRecovery::default();
+    recovery.connected(true, false);
+    assert!(!recovery.allow_resume(YOUNG));
+    recovery.connected(false, false);
+    assert!(recovery.allow_resume(HEALTHY_GEMINI_SOCKET));
+    recovery.connected(true, false);
+    assert!(recovery.allow_resume(HEALTHY_GEMINI_SOCKET));
+}
+
+#[test]
+fn resumed_socket_that_answers_then_dies_young_still_rebuilds() {
+    let mut recovery = ResumeRecovery::default();
+    let mut restarts = 0;
+    recovery.connected(true, false);
+    complete_reply(&mut recovery, &mut restarts);
+    assert!(!recovery.allow_resume(YOUNG));
+}
+
+#[test]
+fn refused_resumption_does_not_suppress_the_next_one() {
+    let mut recovery = ResumeRecovery::default();
+    assert!(recovery.allow_resume(Duration::ZERO));
+    recovery.connected(false, false);
+    assert!(recovery.allow_resume(YOUNG));
+}
+
+#[test]
+fn sockets_that_only_answer_their_briefing_still_end_the_interview() {
+    let mut recovery = ResumeRecovery::default();
+    let mut restarts = 0;
+    let mut attempts = 0;
+    while take_restart_attempt(&mut restarts, YOUNG) {
+        let resumed = recovery.allow_resume(YOUNG);
+        recovery.connected(resumed, true);
+        complete_reply(&mut recovery, &mut restarts);
+        attempts += 1;
+        assert!(attempts <= GEMINI_RESTART_LIMIT);
+    }
+    assert_eq!(attempts, GEMINI_RESTART_LIMIT);
+}
+
+#[test]
+fn only_output_beyond_the_briefing_proves_recovery() {
+    let mut recovery = ResumeRecovery::default();
+    let mut restarts = GEMINI_RESTART_LIMIT;
+    recovery.connected(true, false);
+    assert!(!recovery.allow_resume(YOUNG));
+    recovery.connected(false, true);
+
+    // A tool call in the briefing's answer ends nothing; the continuation's
+    // completion is still that answer, whatever cause the tool response gave
+    // it.
+    reply_event(
+        &mut recovery,
+        &mut restarts,
+        &GeminiEvent::ToolCall(Vec::new()),
+    );
+    complete_reply(&mut recovery, &mut restarts);
+    assert_eq!(restarts, GEMINI_RESTART_LIMIT);
+    assert!(recovery.suppressed);
+
+    complete_reply(&mut recovery, &mut restarts);
+    assert_eq!(restarts, 0);
+    assert!(!recovery.suppressed);
+}
+
+#[test]
+fn a_silent_or_interrupted_briefing_does_not_swallow_the_next_reply() {
+    for ending in [GeminiEvent::TurnComplete, GeminiEvent::Interrupted] {
+        let mut recovery = ResumeRecovery::default();
+        let mut restarts = GEMINI_RESTART_LIMIT;
+        recovery.connected(false, true);
+        recovery.note_event(
+            &mut restarts,
+            &RuntimeState::default(),
+            &RuntimeActivity::new(Instant::now()),
+            &ending,
+        );
+        assert_eq!(restarts, GEMINI_RESTART_LIMIT);
+
+        complete_reply(&mut recovery, &mut restarts);
+        assert_eq!(restarts, 0);
+    }
+}

@@ -15,7 +15,13 @@ moment, so the advisory is spent then rather than held for a turn boundary that
 Gemini will not send. The replacement resumes the same conversation when the
 server issued a handle; if the handle is unavailable or refused, the restart is
 logged as degraded and is grounded from the bounded local transcript tail,
-editor, round and evidence state instead.
+editor, round and evidence state instead. A resumed socket replaced
+before reaching the healthy, debt-free age is rebuilt locally on the next
+attempt, even if it answered once before failing. Resumption stays disabled
+through that failure run until completed output or a healthy, debt-free socket
+proves recovery; these cold opens consume the same restart budget. The reply to
+a recovery briefing is not that proof: every replacement asks for one, so a run
+of sockets that each answer their briefing and die still ends the interview.
 
 A candidate turn, required prompt (including the opening greeting), or tool
 continuation that produces no output for 45 seconds replaces the socket even
@@ -31,7 +37,10 @@ cut off mid-generation is owed too, and the replacement is told not to repeat
 what was already said. Optional editor reviews accept silence; queued audio and
 a paused interview do not trigger this watchdog. A generation that stops
 producing output for the same interval also recovers. Periodic nudges wait
-while a reply is owed rather than replacing its debt.
+while a reply is owed rather than replacing its debt. Until a socket has
+transcribed the candidate, the first one and every replacement alike, the idle
+timers also count the candidate's microphone level as speech, so a socket that
+is not hearing them does not take their talking for silence and nudge them.
 
 A close the interviewer asked for is not recovered either: it waits on the
 tool acknowledgement, and if that never comes, or starts and then stops, the
@@ -48,7 +57,8 @@ respond to a silence that goes on. It is logged as a deliberate silence, so a
 report of the interviewer going quiet can be told apart from a stalled socket.
 
 `GEMINI_RESTART_LIMIT` bounds a failing endpoint rather than a long interview.
-It allows 8 opens in a row. A completed turn with output clears the run, and so
+It allows 8 opens in a row. A completed turn with output clears the run, unless
+it answered a recovery briefing, and so
 does replacing a socket that lived past a minute and owed nothing. A socket
 replaced while it owed a reply never counts as healthy, however long it stayed
 connected and whether the watchdog, a `GoAway` or the server closed it, so
