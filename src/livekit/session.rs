@@ -304,7 +304,7 @@ fn record_live_usage(
 }
 
 /// A turn ending, whichever way it ends.
-fn ends_turn(event: &GeminiEvent) -> bool {
+pub(super) fn ends_turn(event: &GeminiEvent) -> bool {
     matches!(event, GeminiEvent::TurnComplete | GeminiEvent::Interrupted)
 }
 

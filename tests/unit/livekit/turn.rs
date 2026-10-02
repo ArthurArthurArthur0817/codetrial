@@ -1414,3 +1414,33 @@ fn audio_still_draining_spares_no_deadline_once_the_floor_is_the_candidates() {
     activity.note_candidate_finished(now, true);
     assert!(activity.reply_in_flight());
 }
+
+#[test]
+fn voice_holds_the_silence_nudge_until_the_socket_transcribes() {
+    let start = Instant::now();
+    let now = start + Duration::from_secs(300);
+    let mut state = RuntimeState::default();
+    let mut activity = RuntimeActivity::new(start);
+    activity.note_candidate_voice(now - Duration::from_secs(5));
+    assert!(activity.watch_prompt(&mut state, now).is_none());
+
+    // Once the socket has transcribed the candidate, the transcript is the
+    // evidence and a voice level alone, room noise included, holds nothing.
+    let mut activity = RuntimeActivity::new(start);
+    activity.transcribed_on_socket = true;
+    activity.note_candidate_voice(now - Duration::from_secs(5));
+    assert!(activity.watch_prompt(&mut state, now).is_some());
+}
+
+#[test]
+fn a_replacement_socket_has_to_transcribe_the_candidate_again() {
+    let start = Instant::now();
+    let mut activity = RuntimeActivity::new(start);
+    activity.note_candidate_finished(start, false);
+    activity.note_candidate_voice(start + Duration::from_secs(5));
+    assert_eq!(activity.last_user_speech, start);
+
+    activity.reset_context_observations(true);
+    activity.note_candidate_voice(start + Duration::from_secs(9));
+    assert_eq!(activity.last_user_speech, start + Duration::from_secs(9));
+}

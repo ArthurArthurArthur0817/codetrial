@@ -238,6 +238,10 @@ pub(super) struct RuntimeActivity {
     /// transcript is no guide here: it arrives after the speech it transcribes,
     /// and a checkpoint sent in that gap lands in the middle of an utterance.
     pub(super) candidate_voice_at: Option<Instant>,
+    /// Whether the open socket has transcribed the candidate yet. Until it
+    /// has, it may not be hearing them at all, as a socket on its way to a
+    /// 1011 does not, so their voice on the track stamps `last_user_speech`.
+    pub(super) transcribed_on_socket: bool,
 }
 
 /// How long the microphone has to stay quiet before a checkpoint may go out:
@@ -421,6 +425,19 @@ impl RuntimeActivity {
         }
         self.latest_prompt_tokens = None;
         self.context_refresh_pending = false;
+        self.transcribed_on_socket = false;
+    }
+
+    /// The candidate's microphone carried more than room noise. Until the
+    /// socket has transcribed them, this is also the idle timers' evidence of
+    /// speech: a candidate talking to a socket that cannot hear them would
+    /// otherwise be counted silent and nudged. Only until then, because room
+    /// noise above `VOICE_RMS` would hold every nudge back for good.
+    pub(super) fn note_candidate_voice(&mut self, now: Instant) {
+        self.candidate_voice_at = Some(now);
+        if !self.transcribed_on_socket {
+            self.last_user_speech = now;
+        }
     }
 
     #[cfg(test)]
@@ -481,6 +498,7 @@ impl RuntimeActivity {
             peak_prompt_tokens: 0,
             context_refresh_pending: false,
             candidate_voice_at: None,
+            transcribed_on_socket: false,
 
             // Seeded at `now` rather than in the past: the first minutes of an
             // interview are the greeting and the problem statement, and there
@@ -799,6 +817,7 @@ impl RuntimeActivity {
     /// back, so this is the only place that can tell it from a new answer.
     pub(super) fn note_candidate_finished(&mut self, now: Instant, audio_playing: bool) {
         self.last_user_speech = now;
+        self.transcribed_on_socket = true;
 
         // More speech gets its own native reply; asking as well would answer
         // twice, or over the candidate.

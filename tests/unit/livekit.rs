@@ -5158,3 +5158,174 @@ fn a_thinking_hold_is_not_an_interviewer_stall() {
         ReplyWatch::Recover
     );
 }
+
+/// A completed reply the room loop counts as output, ended by `event`.
+fn reply_event(
+    recovery: &mut ResumeRecovery,
+    state: &mut RuntimeState,
+    restarts: &mut usize,
+    event: &GeminiEvent,
+) {
+    let mut activity = RuntimeActivity::new(Instant::now());
+    activity.note_output(Instant::now());
+    recovery.note_event(restarts, state, &activity, event);
+}
+
+fn complete_reply(recovery: &mut ResumeRecovery, state: &mut RuntimeState, restarts: &mut usize) {
+    reply_event(recovery, state, restarts, &GeminiEvent::TurnComplete);
+}
+
+const YOUNG: Duration = Duration::from_secs(12);
+
+#[test]
+fn failed_resumption_rebuilds_until_recovery() {
+    let mut recovery = ResumeRecovery::default();
+    let mut state = RuntimeState::default();
+    let mut restarts = 0;
+    assert!(recovery.allow_resume(Duration::ZERO));
+    recovery.connected(true);
+    assert!(!recovery.allow_resume(YOUNG));
+    recovery.connected(false);
+    assert!(!recovery.allow_resume(YOUNG));
+    recovery.connected(false);
+    complete_reply(&mut recovery, &mut state, &mut restarts);
+    assert!(recovery.allow_resume(YOUNG));
+}
+
+#[test]
+fn healthy_socket_lifts_suppression() {
+    let mut recovery = ResumeRecovery::default();
+    recovery.connected(true);
+    assert!(!recovery.allow_resume(YOUNG));
+    recovery.connected(false);
+    assert!(recovery.allow_resume(HEALTHY_GEMINI_SOCKET));
+    recovery.connected(true);
+    assert!(recovery.allow_resume(HEALTHY_GEMINI_SOCKET));
+}
+
+#[test]
+fn resumed_socket_that_answers_then_dies_young_still_rebuilds() {
+    let mut recovery = ResumeRecovery::default();
+    let mut restarts = 0;
+    recovery.connected(true);
+    complete_reply(&mut recovery, &mut RuntimeState::default(), &mut restarts);
+    assert!(!recovery.allow_resume(YOUNG));
+}
+
+#[test]
+fn refused_resumption_does_not_suppress_the_next_one() {
+    let mut recovery = ResumeRecovery::default();
+    assert!(recovery.allow_resume(Duration::ZERO));
+    recovery.connected(false);
+    assert!(recovery.allow_resume(YOUNG));
+}
+
+#[test]
+fn sockets_that_only_answer_their_briefing_still_end_the_interview() {
+    let mut recovery = ResumeRecovery::default();
+    let mut state = RuntimeState::default();
+    let mut restarts = 0;
+    let mut attempts = 0;
+    while take_restart_attempt(&mut restarts, YOUNG) {
+        let resumed = recovery.allow_resume(YOUNG);
+        recovery.connected(resumed);
+        state.recovery_reply_pending = true;
+        complete_reply(&mut recovery, &mut state, &mut restarts);
+        attempts += 1;
+        assert!(attempts <= GEMINI_RESTART_LIMIT);
+    }
+    assert_eq!(attempts, GEMINI_RESTART_LIMIT);
+}
+
+#[test]
+fn only_output_beyond_the_briefing_proves_recovery() {
+    let mut recovery = ResumeRecovery::default();
+    let mut state = RuntimeState::default();
+    let mut restarts = GEMINI_RESTART_LIMIT;
+    recovery.connected(true);
+    assert!(!recovery.allow_resume(YOUNG));
+    recovery.connected(false);
+    state.recovery_reply_pending = true;
+
+    // A tool call in the briefing's answer ends nothing; the continuation's
+    // completion is still that answer, whatever cause the tool response gave
+    // it.
+    reply_event(
+        &mut recovery,
+        &mut state,
+        &mut restarts,
+        &GeminiEvent::ToolCall(Vec::new()),
+    );
+    complete_reply(&mut recovery, &mut state, &mut restarts);
+    assert_eq!(restarts, GEMINI_RESTART_LIMIT);
+    assert!(recovery.suppressed);
+
+    complete_reply(&mut recovery, &mut state, &mut restarts);
+    assert_eq!(restarts, 0);
+    assert!(!recovery.suppressed);
+}
+
+#[test]
+fn a_silent_or_interrupted_briefing_does_not_swallow_the_next_reply() {
+    for ending in [GeminiEvent::TurnComplete, GeminiEvent::Interrupted] {
+        let mut recovery = ResumeRecovery::default();
+        let mut state = RuntimeState {
+            recovery_reply_pending: true,
+            ..RuntimeState::default()
+        };
+        let mut restarts = GEMINI_RESTART_LIMIT;
+        recovery.note_event(
+            &mut restarts,
+            &mut state,
+            &RuntimeActivity::new(Instant::now()),
+            &ending,
+        );
+        assert_eq!(restarts, GEMINI_RESTART_LIMIT);
+
+        complete_reply(&mut recovery, &mut state, &mut restarts);
+        assert_eq!(restarts, 0);
+    }
+}
+
+#[test]
+fn a_briefing_held_for_an_unpause_or_a_hold_is_still_a_briefing() {
+    for held in [
+        RuntimeState {
+            needs_cold_brief: true,
+            ..RuntimeState::default()
+        },
+        RuntimeState {
+            owed_reply_on_resume: Some(None),
+            ..RuntimeState::default()
+        },
+    ] {
+        let mut state = held;
+        let mut recovery = ResumeRecovery::default();
+        let mut restarts = GEMINI_RESTART_LIMIT;
+
+        // What the unpause and the end of a hold call once the held debt has
+        // gone out with the reply it asks for.
+        state.clear_thinking_debt();
+        complete_reply(&mut recovery, &mut state, &mut restarts);
+        assert_eq!(restarts, GEMINI_RESTART_LIMIT);
+        complete_reply(&mut recovery, &mut state, &mut restarts);
+        assert_eq!(restarts, 0);
+    }
+
+    let mut state = RuntimeState {
+        thinking_unheard_reply: true,
+        ..RuntimeState::default()
+    };
+    state.clear_thinking_debt();
+    assert!(!state.recovery_reply_pending);
+}
+
+#[test]
+fn a_replacement_drops_the_briefing_its_predecessor_owed() {
+    let mut state = RuntimeState {
+        recovery_reply_pending: true,
+        ..RuntimeState::default()
+    };
+    clear_abandoned_socket_work(&mut state, &mut RuntimeActivity::new(Instant::now()));
+    assert!(!state.recovery_reply_pending);
+}
