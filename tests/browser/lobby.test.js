@@ -1050,19 +1050,83 @@ lobbyTest(
 );
 
 lobbyTest(
-  "changing difficulty clears the previous random-pick exclusion",
+  "a drawn problem survives a difficulty change that still includes it",
   async (page) => {
     await page.addInitScript(() => {
       Math.random = () => 0;
     });
-    const before = await lobby(page);
+    await lobby(page);
     await page.click("#random-problem");
-    assert.notEqual((await snapshot(page)).card, before.card);
-    await setLevel(page, "Hard", true);
-    await setLevel(page, "Hard", false);
-    assert.equal((await snapshot(page)).card, before.card);
+    const drawn = await snapshot(page);
+    const level = (await cardInfo(page, drawn.card)).level;
+
+    const others = ["Easy", "Medium", "Hard"].filter((name) => name !== level);
+    for (const other of others) {
+      await setLevel(page, other, true);
+      assert.equal(
+        (await snapshot(page)).card,
+        drawn.card,
+        `checking ${other} redrew a problem it did not hide`,
+      );
+    }
+    // Returning from the media preflight re-runs the recommendation, and the
+    // roll that drew this problem names a different one under the new filter.
+    await restore(page);
+    await awaitReady(page);
+    assert.equal(
+      (await snapshot(page)).card,
+      drawn.card,
+      "a kept problem moved when the page was restored",
+    );
+    await setLevel(page, others[0], false);
+    assert.equal(
+      (await snapshot(page)).card,
+      drawn.card,
+      `unchecking ${others[0]} redrew a problem it did not hide`,
+    );
+
+    await setLevel(page, level, false);
+    const redrawn = await snapshot(page);
+    assert.notEqual(redrawn.card, drawn.card, "a hidden problem stayed picked");
+    const info = await cardInfo(page, redrawn.card);
+    assert.equal(info.level, others[1]);
+    assert.equal(info.hidden, false);
   },
 );
+
+// Widening the filter keeps the card on screen, but it was drawn from the
+// reports in hand, so refreshed ones that pass it decide again. The usual order
+// widens before leaving for the interview; the other widens inside the reload,
+// while the reports in hand still belong to the page before the candidate left.
+for (const [when, widenFirst] of [
+  ["before the interview", true],
+  ["while the history reloads", false],
+]) {
+  lobbyTest(
+    `a drawn problem kept ${when} is redrawn from the history it comes back to`,
+    async (page) => {
+      const shown = (await lobby(page)).card;
+      const widen = async () => {
+        await setLevel(page, "Hard", true);
+        assert.equal((await snapshot(page)).card, shown);
+      };
+
+      if (widenFirst) await widen();
+      const release = holdHistory();
+      reports = [hired(shown)];
+      await restore(page);
+      if (!widenFirst) await widen();
+
+      release();
+      await awaitReady(page);
+      assert.notEqual(
+        (await snapshot(page)).card,
+        shown,
+        "a problem the refreshed history passed stayed recommended",
+      );
+    },
+  );
+}
 
 lobbyTest(
   "Random problem waits for history on load and browser restore",
