@@ -2983,7 +2983,12 @@ async fn handle_data_packet(
         }
     };
     let (generated, ()) = tokio::join!(
-        generate_report_bounded(interview.boot, &assessment.prompt, api_key),
+        generate_report_bounded(
+            interview.boot,
+            &assessment.prompt,
+            assessment.behavioral_round_opened(),
+            api_key,
+        ),
         farewell
     );
     context.media.audio = None;

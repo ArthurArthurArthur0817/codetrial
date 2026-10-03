@@ -846,6 +846,7 @@ fn evidence_reply_names_the_earlier_steps_still_open() {
         ..RuntimeState::default()
     };
     receive_test_run(&mut state);
+    state.behavioral_round_started = true;
     let mut record = |phase: &str, kind: &str, source: &str, summary: &str| {
         execute_tool_call(
             &mut state,

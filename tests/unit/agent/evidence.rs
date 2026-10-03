@@ -1815,7 +1815,10 @@ fn a_phase_evidenced_twice_is_covered_once() {
 /// A phase nobody reached is not a phase that was covered.
 #[test]
 fn a_phase_skipped_when_the_clock_ran_out_is_not_covered() {
-    let mut state = RuntimeState::default();
+    let mut state = RuntimeState {
+        behavioral_round_started: true,
+        ..RuntimeState::default()
+    };
     state
         .evidence_ledger
         .set_uncovered_coverage(["repeat", "situation"]);
@@ -1837,7 +1840,7 @@ fn a_phase_skipped_when_the_clock_ran_out_is_not_covered() {
             "source": "session_timing",
             "kind": "skipped",
             "confidence": 100,
-            "summary": "The interview ended before the behavioral round."
+            "summary": "The interview ended before Situation assessment."
         }),
     )
     .unwrap();

@@ -696,6 +696,7 @@ pub(crate) async fn generate_report_with_keys(
     model: &str,
     prompt: &str,
     problem: &crate::agent::Problem,
+    behavioral_round_opened: bool,
     scope: &str,
 ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
     generate_report_with_keys_at(
@@ -704,6 +705,7 @@ pub(crate) async fn generate_report_with_keys(
         REPORT_RETRY_BACKOFF,
         prompt,
         problem,
+        behavioral_round_opened,
         scope,
     )
     .await
@@ -718,6 +720,7 @@ async fn generate_report_with_keys_at(
     backoff: Duration,
     prompt: &str,
     problem: &crate::agent::Problem,
+    behavioral_round_opened: bool,
     scope: &str,
 ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
     let mut calls = ReportCalls {
@@ -727,7 +730,8 @@ async fn generate_report_with_keys_at(
         backoff,
         scope,
     };
-    let (report, salvaged) = report_attempts(prompt, problem, &mut calls).await?;
+    let (report, salvaged) =
+        report_attempts(prompt, problem, behavioral_round_opened, &mut calls).await?;
     if let Some(line) = salvaged {
         eprintln!("{}", keys.redact(&line));
     }
@@ -773,10 +777,14 @@ type ReportOutcome = Result<(Value, Option<String>), Box<dyn std::error::Error +
 async fn report_attempts(
     prompt: &str,
     problem: &crate::agent::Problem,
+    behavioral_round_opened: bool,
     transport: &mut impl ReportTransport,
 ) -> ReportOutcome {
     let mut request_prompt = prompt.to_string();
-    let mut attempts = ReportAttempts { held: None };
+    let mut attempts = ReportAttempts {
+        held: None,
+        behavioral_round_opened,
+    };
     for semantic_attempt in 0..=MAX_REPORT_REPAIRS {
         let output = match transport.call(&request_prompt).await {
             Ok(output) => output,
@@ -827,6 +835,7 @@ impl ReportCallBudget {
 /// better, rather than `INCOMPLETE` for a report an earlier attempt had.
 struct ReportAttempts {
     held: Option<Salvage>,
+    behavioral_round_opened: bool,
 }
 
 enum ReportStep {
@@ -845,10 +854,16 @@ impl ReportAttempts {
     ) -> ReportStep {
         let errors = match parse_report_text(output) {
             Err(errors) => errors,
-            Ok(raw) => match crate::agent::validate_report_candidate(&raw, problem) {
+            Ok(raw) => match crate::agent::validate_report_for_round(
+                &raw,
+                problem,
+                self.behavioral_round_opened,
+            ) {
                 Ok(report) => return ReportStep::Complete(report),
                 Err(errors) => {
-                    if let Some(salvage) = salvage_report(raw, semantic_attempt, problem) {
+                    if let Some(salvage) =
+                        salvage_report(raw, semantic_attempt, problem, self.behavioral_round_opened)
+                    {
                         self.held = Some(salvage);
                     }
                     errors
@@ -918,12 +933,19 @@ struct Salvage {
 /// A response whose only fault is a self-review check judging delivery or
 /// personality, with that check dropped. Anything else wrong with it, and it
 /// is not a salvage: the report it returns has passed the whole validation.
-fn salvage_report(raw: Value, attempt: usize, problem: &crate::agent::Problem) -> Option<Salvage> {
+fn salvage_report(
+    raw: Value,
+    attempt: usize,
+    problem: &crate::agent::Problem,
+    behavioral_round_opened: bool,
+) -> Option<Salvage> {
     let (sanitized, dropped) = crate::agent::sanitize_report_candidate(raw);
     if dropped == 0 {
         return None;
     }
-    let report = crate::agent::validate_report_candidate(&sanitized, problem).ok()?;
+    let report =
+        crate::agent::validate_report_for_round(&sanitized, problem, behavioral_round_opened)
+            .ok()?;
     Some(Salvage {
         report,
         dropped,

@@ -357,6 +357,7 @@ fn prompt_samples() -> Value {
             test_summary: &report_test_summary,
             practice_level: None,
             evidence: &working_report,
+            behavioral_round: BehavioralRound::Opened,
         }),
         "reportEmpty": report_prompt(ReportPromptInput {
             problem,
@@ -372,6 +373,7 @@ fn prompt_samples() -> Value {
             test_summary: "",
             practice_level: None,
             evidence: "",
+            behavioral_round: BehavioralRound::NeverOpened,
         }),
         "reportHalfElapsed": report_prompt(ReportPromptInput {
             problem,
@@ -387,6 +389,7 @@ fn prompt_samples() -> Value {
             test_summary: "",
             practice_level: None,
             evidence: "",
+            behavioral_round: BehavioralRound::NotConfigured,
         }),
 
         // Assembled by the real builder rather than written out here. A
@@ -422,6 +425,7 @@ fn prompt_samples() -> Value {
             test_summary: "Latest test run: 2/3 cases passed.",
             practice_level: None,
             evidence: "",
+            behavioral_round: BehavioralRound::Opened,
         }),
         "reportMultiline": report_prompt(ReportPromptInput {
             problem,
@@ -437,6 +441,7 @@ fn prompt_samples() -> Value {
             test_summary: "Latest test run (run #1, python): 2/3 cases passed.",
             practice_level: None,
             evidence: "",
+            behavioral_round: BehavioralRound::Opened,
         }),
     });
 
@@ -700,7 +705,7 @@ fn toggle_thinking(state: &mut RuntimeState, thinking: bool) -> DataEventResult 
 fn evaluation_reaction(case: &Value, state: &mut RuntimeState) -> String {
     let reaction = &case["reaction"];
     let code = reaction["code"].as_str().expect("reaction code is text");
-    if !code.is_empty() {
+    if !code.is_empty() && case["round"] != "started" {
         let result = apply_data_event(
             state,
             TOPIC_CODE_UPDATE,
@@ -759,6 +764,7 @@ fn evaluation_reaction(case: &Value, state: &mut RuntimeState) -> String {
             test_summary: "No trusted server-side test was available.",
             practice_level: None,
             evidence: "",
+            behavioral_round: BehavioralRound::of(state),
         })),
         other => panic!("unknown reaction kind {other}"),
     }

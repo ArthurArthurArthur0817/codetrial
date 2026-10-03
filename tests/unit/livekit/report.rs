@@ -101,15 +101,26 @@ fn the_rounds_a_report_calls_complete_are_the_ones_with_evidence() {
     // STAR needs the round to have started and all four phases banked.
     let mut star = coding_done.clone();
     for phase in ["situation", "task", "action", "result"] {
+        assert!(
+            record_framework_evidence(
+                &mut star,
+                &serde_json::json!({
+                    "phase": phase, "source": "candidate_speech", "kind": "observed",
+                    "confidence": 90, "summary": "Answered an untrusted behavioral question."
+                })
+            )
+            .is_err()
+        );
+    }
+    assert_eq!(rounds(&star)[1]["status"], "skipped");
+    star.behavioral_round_started = true;
+    for phase in ["situation", "task", "action", "result"] {
         bank(&mut star, phase, "observed");
     }
-    assert_eq!(
-        rounds(&star)[1]["status"],
-        "skipped",
-        "four phases without the round beginning is not a behavioral round"
-    );
-    star.behavioral_round_started = true;
     assert_eq!(rounds(&star)[1]["status"], "complete");
+    let mut historical = star.clone();
+    historical.behavioral_round_started = false;
+    assert_eq!(rounds(&historical)[1]["status"], "skipped");
 
     // Begun but not finished. Evidence for one STAR phase is not evidence for
     // the other three, and asking whether any banked phase is not Task answers
@@ -622,20 +633,13 @@ fn the_report_packet_bookends_the_evidence_with_the_liveness_pair() {
 #[test]
 fn complete_and_incomplete_reports_carry_agent_owned_framework_evidence() {
     let mut state = RuntimeState::default();
-    record_framework_evidence(
-        &mut state,
-        &serde_json::json!({
-            "phase":"result", "source":"session_timing", "kind":"skipped",
-            "confidence":100, "summary":"The cutoff prevented STAR assessment."
-        }),
-    )
-    .unwrap();
+    crate::agent::skip_unassessed_star(&mut state, "The cutoff prevented STAR assessment.");
     for report in [
         serde_json::json!({"decision":"HIRE"}),
         serde_json::json!({"incomplete":true}),
     ] {
         let report = report_with_integrity_events(report, &state, "time_up");
-        assert_eq!(report["frameworkEvidence"][0]["phase"], "result");
+        assert_eq!(report["frameworkEvidence"][0]["phase"], "situation");
         assert_eq!(report["frameworkEvidence"][0]["kind"], "skipped");
         assert_eq!(report["interviewLoop"], "coding_behavioral");
         assert_eq!(report["rounds"][0]["budgetMin"], 37);
@@ -833,6 +837,94 @@ async fn a_deadline_during_quota_exhaustion_waits_for_the_keys() {
         recovery_metadata(cooldown)["retryAfterSeconds"],
         crate::gemini::QUOTA_COOLDOWN.as_secs()
     );
+}
+
+/// The flag the report call validates against and the line the brief gives
+/// the reviewer both come from the frozen state, so a round the platform never
+/// opened is refused STAR content by one and told so by the other.
+#[test]
+fn the_report_is_told_where_the_behavioral_round_stood() {
+    let config = report_test_config();
+    let boot = bootstrap(&config, "interview-round", Some("two-sum"), 45);
+    for (state, opened, line) in [
+        (
+            RuntimeState::default(),
+            false,
+            "BEHAVIORAL ROUND: The platform never opened the behavioral round",
+        ),
+        (
+            RuntimeState {
+                behavioral_round_started: true,
+                ..RuntimeState::default()
+            },
+            true,
+            "BEHAVIORAL ROUND: The platform opened the behavioral round",
+        ),
+        (
+            RuntimeState {
+                interview_loop: crate::agent::InterviewLoop::CodingOnly,
+                ..RuntimeState::default()
+            },
+            false,
+            "BEHAVIORAL ROUND: This interview had no behavioral round",
+        ),
+    ] {
+        let mut live = state;
+        let frozen = freeze_assessment(&boot, &mut live, 12.0);
+        assert_eq!(frozen.behavioral_round_opened(), opened, "{line}");
+        assert!(frozen.prompt.contains(line), "{line}");
+        assert_eq!(
+            frozen.prompt.matches("BEHAVIORAL ROUND:").count(),
+            1,
+            "{line}"
+        );
+    }
+}
+
+/// The report sees where the platform opened the round, so an answer the
+/// interviewer asked for out of turn during coding does not read the same as
+/// the one the round asked for. An interviewer turn still being rewritten when
+/// the round opened belongs to the round, so the mark goes above it.
+#[test]
+fn the_report_transcript_marks_where_the_round_opened() {
+    let mark = crate::agent::BEHAVIORAL_ROUND_MARK;
+    let transcript = vec![
+        "Jim: Tell me about an outage.".to_string(),
+        "Candidate: We fixed it.".to_string(),
+        "Jim: Now tell me about a time you".to_string(),
+        "Candidate: A release I owned.".to_string(),
+    ];
+    let opened = RuntimeState {
+        transcript: transcript.clone(),
+        behavioral_round_started: true,
+        behavioral_round_transcript_start: 2,
+        ..RuntimeState::default()
+    };
+    let lines = crate::agent::report_transcript_lines(&opened);
+    assert_eq!(lines.len(), 5);
+    assert_eq!(lines[2], mark);
+    assert_eq!(lines[3], transcript[2]);
+
+    let in_flight = RuntimeState {
+        behavioral_round_transcript_start: 4,
+        behavioral_round_prior_turn: Some((2, "Jim: Now tell".to_string())),
+        ..opened.clone()
+    };
+    assert_eq!(crate::agent::report_transcript_lines(&in_flight)[2], mark);
+
+    let unopened = RuntimeState {
+        behavioral_round_started: false,
+        ..opened
+    };
+    assert_eq!(crate::agent::report_transcript_lines(&unopened), transcript);
+
+    let config = report_test_config();
+    let boot = bootstrap(&config, "interview-mark", Some("two-sum"), 45);
+    let prompt = report_prompt_text(&boot, &in_flight, 30.0);
+    assert!(prompt.contains(&format!(
+        "Candidate: We fixed it.\n{mark}\nJim: Now tell me"
+    )));
+    assert!(!report_prompt_text(&boot, &unopened, 30.0).contains(&format!("\n{mark}\n")));
 }
 
 #[test]

@@ -960,7 +960,7 @@ pub(crate) async fn generate_report_at(
     problem: &crate::agent::Problem,
     scope: &str,
 ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
-    generate_report_with_keys_at(keys, url, backoff, prompt, problem, scope).await
+    generate_report_with_keys_at(keys, url, backoff, prompt, problem, true, scope).await
 }
 
 pub(crate) fn valid_report() -> Value {
@@ -999,7 +999,11 @@ fn report_with_self_review(item: usize, checks: Value) -> String {
 
 /// One attempt of a fresh loop, as the `attempt`-th after the first.
 fn attempt_for(output: &str, attempt: usize, problem: &crate::agent::Problem) -> ReportStep {
-    ReportAttempts { held: None }.step("original", output, attempt, problem)
+    ReportAttempts {
+        held: None,
+        behavioral_round_opened: true,
+    }
+    .step("original", output, attempt, problem)
 }
 
 /// Every attempt answered with `output`, so the last one has no repair left.
@@ -1031,12 +1035,21 @@ impl ReportTransport for Scripted<'_> {
 
 /// The production loop over scripted responses.
 fn run_for(outputs: &[&str], problem: &crate::agent::Problem) -> ReportOutcome {
+    run_for_round(outputs, problem, true)
+}
+
+fn run_for_round(
+    outputs: &[&str],
+    problem: &crate::agent::Problem,
+    behavioral_round_opened: bool,
+) -> ReportOutcome {
     tokio::runtime::Builder::new_current_thread()
         .build()
         .unwrap()
         .block_on(report_attempts(
             "original",
             problem,
+            behavioral_round_opened,
             &mut Scripted(outputs.iter()),
         ))
 }
@@ -1074,6 +1087,70 @@ fn report_naming_the_published_problem_is_repaired() {
         panic!("a published title must trigger a repair");
     };
     assert!(repair.contains("$.summary: names the published problem"));
+}
+
+/// The interviewer can ask a behavioral question the platform never opened a
+/// round for. Its STAR plan items go back to the model rather than ship beside
+/// a round the card calls skipped, its STAR scores are cleared without a
+/// repair, and a repair written from the coding round alone is the report.
+#[test]
+fn star_content_in_a_round_that_never_opened_is_repaired() {
+    let star = valid_report().to_string();
+    let mut coding = valid_report();
+    coding["communicationFeedback"]["improvements"] =
+        json!(["Narrate the invariant", "Say what each test is for"]);
+    for (index, (phase, weakness)) in [
+        (2, ("Algorithm", "Narrate the invariant")),
+        (3, ("Test", "Say what each test is for")),
+    ] {
+        coding["improvementPlan"][index]["phase"] = json!(phase);
+        coding["improvementPlan"][index]["weakness"] = json!(weakness);
+    }
+    let coding = coding.to_string();
+    let star_cleared = |report: &Value| {
+        report["frameworkAssessment"]["phases"].as_array().unwrap()[6..]
+            .iter()
+            .all(|row| row["score"].is_null())
+    };
+
+    let (report, _) = run_for_round(&[&star], report_problem(), true)
+        .expect("an opened round keeps its STAR assessment");
+    assert_eq!(report["frameworkAssessment"]["phases"][9]["score"], 75);
+
+    // STAR scores alone cost no repair: the first answer is the report.
+    let (report, _) = run_for_round(&[&coding], report_problem(), false)
+        .expect("scores are settled by the server");
+    assert!(star_cleared(&report));
+
+    let repair = match (ReportAttempts {
+        held: None,
+        behavioral_round_opened: false,
+    })
+    .step("original", &star, 0, report_problem())
+    {
+        ReportStep::Repair(repair) => repair,
+        _ => panic!("a STAR plan item in an unopened round must trigger a repair"),
+    };
+    for path in ["$.improvementPlan[2].phase", "$.improvementPlan[3].phase"] {
+        assert!(repair.contains(path), "{path} missing from {repair}");
+    }
+    assert!(!repair.contains("$.frameworkAssessment"), "{repair}");
+    assert!(repair.contains("the behavioral round never opened"));
+
+    let (report, _) = run_for_round(&[&star, &coding], report_problem(), false)
+        .expect("the coding-round repair is accepted");
+    assert!(star_cleared(&report));
+    let error = run_for_round(
+        &[star.as_str(); MAX_REPORT_REPAIRS + 1],
+        report_problem(),
+        false,
+    )
+    .expect_err("a model that keeps the STAR plan items runs out of repairs");
+    assert!(
+        error
+            .to_string()
+            .contains("the behavioral round never opened")
+    );
 }
 
 /// While a repair is left, an unsafe check goes back to the model, which can
@@ -1121,7 +1198,7 @@ fn a_self_review_the_last_attempt_emptied_gets_a_replacement_safe_for_every_prob
     let mut raw = valid_report();
     raw["improvementPlan"][0]["selfReview"] = json!(["Your personality seemed introverted."]);
     for problem in crate::agent::PROBLEMS {
-        let salvage = salvage_report(raw.clone(), 0, problem)
+        let salvage = salvage_report(raw.clone(), 0, problem, true)
             .unwrap_or_else(|| panic!("rejected for {}", problem.id));
         assert_eq!(
             salvage.report["improvementPlan"][0]["selfReview"],
@@ -1217,7 +1294,7 @@ fn unsafe_checks_across_plan_items_are_all_dropped_and_counted() {
         json!(["Uses evidence", "Your body language was closed."]);
     report["improvementPlan"][3]["selfReview"] = json!(["Mind your accent."]);
 
-    let salvage = salvage_report(report, 0, report_problem())
+    let salvage = salvage_report(report, 0, report_problem(), true)
         .expect("every item is safe once its unsafe checks are gone");
     assert_eq!(salvage.dropped, 3);
     let lists = salvage.report["improvementPlan"]
@@ -1407,6 +1484,7 @@ async fn a_misrecognized_turn_neither_appears_in_nor_decides_the_report() {
         test_summary: "Latest test run (run #1, python): 7/7 cases passed.",
         practice_level: None,
         evidence: "",
+        behavioral_round: crate::agent::BehavioralRound::NeverOpened,
     });
     let key = std::env::var("CODETRIAL_ENV")
         .ok()
@@ -1427,6 +1505,7 @@ async fn a_misrecognized_turn_neither_appears_in_nor_decides_the_report() {
         &model,
         &prompt,
         problem,
+        false,
         "report-probe",
     )
     .await

@@ -94,13 +94,13 @@
     {
       "id": "we-without-personal-action",
       "coverage": ["weak-star-we"],
-      "reaction": {"kind":"report", "code":"def two_sum(nums, target): return []", "required":["personal Action", "only if the interviewer actually"], "forbidden":["Candidate personally fixed", "Candidate was confident"]},
+      "reaction": {"kind":"report", "code":"def two_sum(nums, target): return []", "required":["personal Action", "platform opened the behavioral round"], "forbidden":["Candidate personally fixed", "Candidate was confident"]},
       "transcript":"Interviewer: Tell me about an outage. Candidate: We had an outage and we fixed it quickly; the service recovered.",
       "evidence":[
         {"phase":"situation","source":"candidate_speech","kind":"observed","confidence":85,"summary":"Named an outage context."},
         {"phase":"result","source":"candidate_speech","kind":"observed","confidence":75,"summary":"Said the service recovered."}
       ],
-      "hintsUsed":0, "round":"none", "assessed":["Situation","Result"]
+      "hintsUsed":0, "round":"started", "assessed":["Situation","Result"]
     },
     {
       "id": "qualitative-result",
@@ -108,7 +108,7 @@
       "reaction": {"kind":"report", "code":"def two_sum(nums, target): return []", "required":["truthful qualitative behavioral result", "Never invent a number"], "forbidden":["must quantify"]},
       "transcript":"Candidate added a dry-run review; later migrations had a clear rollback owner and mistakes were caught before deployment.",
       "evidence":[{"phase":"result","source":"candidate_speech","kind":"observed","confidence":90,"summary":"Reported a concrete qualitative improvement without a metric."}],
-      "hintsUsed":0, "round":"none", "assessed":["Result"]
+      "hintsUsed":0, "round":"started", "assessed":["Result"]
     },
     {
       "id": "skipped-behavioral-round",
@@ -116,10 +116,10 @@
       "reaction": {"kind":"round_gate", "code":"", "required":["did not pass", "Do not start STAR"], "forbidden":["completion gate passed"]},
       "transcript":"Candidate was still implementing when the behavioral reserve began.",
       "evidence":[
-        {"phase":"situation","source":"session_timing","kind":"skipped","confidence":100,"summary":"Behavioral round was skipped by the coding gate."},
-        {"phase":"task","source":"session_timing","kind":"skipped","confidence":100,"summary":"Behavioral round was skipped by the coding gate."},
-        {"phase":"action","source":"session_timing","kind":"skipped","confidence":100,"summary":"Behavioral round was skipped by the coding gate."},
-        {"phase":"result","source":"session_timing","kind":"skipped","confidence":100,"summary":"Behavioral round was skipped by the coding gate."}
+        {"phase":"situation","source":"session_timing","kind":"skipped","confidence":100,"summary":"The session ended before assessment."},
+        {"phase":"task","source":"session_timing","kind":"skipped","confidence":100,"summary":"The session ended before assessment."},
+        {"phase":"action","source":"session_timing","kind":"skipped","confidence":100,"summary":"The session ended before assessment."},
+        {"phase":"result","source":"session_timing","kind":"skipped","confidence":100,"summary":"The session ended before assessment."}
       ],
       "hintsUsed":0, "round":"skipped", "assessed":[]
     }

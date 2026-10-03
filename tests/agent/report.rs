@@ -36,6 +36,63 @@ fn strict_report_validation_is_atomic_and_server_owns_hints() {
     assert!(incomplete.get("decision").is_none());
 }
 
+/// A STAR plan item is refused rather than cut out, since cutting it also cuts
+/// the feedback improvement it copies and a list can then fall below the two
+/// it must hold. A STAR score shrinks nothing, so the server nulls it and the
+/// report is accepted. Another fault is reported beside a refused item, not
+/// instead of it.
+#[test]
+fn a_round_that_never_opened_refuses_star_plan_items_and_clears_star_scores() {
+    let problem = get_problem(Some("two-sum"));
+    let star = valid_strict_report();
+    let opened =
+        validate_report_for_round(&star, problem, true).expect("an opened round keeps STAR");
+    assert_eq!(opened["frameworkAssessment"]["phases"][9]["score"], 75);
+    let errors = validate_report_for_round(&star, problem, false).unwrap_err();
+    assert_eq!(errors.len(), 2, "{errors:?}");
+    for path in ["$.improvementPlan[2].phase", "$.improvementPlan[3].phase"] {
+        assert!(
+            errors.iter().any(|error| error.starts_with(path)),
+            "{path} missing from {errors:?}"
+        );
+    }
+
+    // Written from the coding round, but with the out-of-turn answer still
+    // scored: accepted, with every STAR score cleared and the rest kept.
+    let mut coding = star.clone();
+    coding["communicationFeedback"]["improvements"] =
+        json!(["Narrate the invariant", "Say what each test is for"]);
+    for (index, phase, weakness) in [
+        (2, "Algorithm", "Narrate the invariant"),
+        (3, "Test", "Say what each test is for"),
+    ] {
+        coding["improvementPlan"][index]["phase"] = json!(phase);
+        coding["improvementPlan"][index]["weakness"] = json!(weakness);
+    }
+    let accepted = validate_report_for_round(&coding, problem, false)
+        .expect("STAR scores alone are settled, not refused");
+    let rows = accepted["frameworkAssessment"]["phases"]
+        .as_array()
+        .unwrap();
+    assert!(rows[..6].iter().all(|row| row["score"] == 75));
+    assert!(rows[6..].iter().all(|row| row["score"].is_null()));
+    assert!(rows[6..].iter().all(|row| row["weaknessTags"] == json!([])));
+
+    let mut both = star;
+    both["codingScore"] = json!(120);
+    let errors = validate_report_for_round(&both, problem, false).unwrap_err();
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.starts_with("$.codingScore"))
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.starts_with("$.improvementPlan[2].phase"))
+    );
+}
+
 #[test]
 fn published_problem_word_splitting_preserves_every_boundary() {
     assert_eq!(
@@ -219,7 +276,7 @@ fn log_hint_hands_out_one_rung_per_request_and_holds_the_last_for_an_approach() 
         ("repeat", "candidate_speech", "observed"),
         ("example", "candidate_speech", "inferred"),
         ("algorithm", "candidate_speech", "inferred"),
-        ("situation", "session_timing", "skipped"),
+        ("repeat", "session_timing", "skipped"),
     ] {
         record_framework_evidence(
             &mut state,

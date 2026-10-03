@@ -316,6 +316,80 @@ pub fn validate_report_candidate(
     Ok(report)
 }
 
+/// `validate_report_candidate`, which also refuses any STAR plan item when
+/// the platform never opened the behavioral round, and clears the STAR scores
+/// of the report it accepts.
+///
+/// The interviewer can ask a behavioral question without the platform's
+/// transition, so the transcript can hold an answer to a round the report
+/// card shows as skipped or not configured. A plan item is refused rather
+/// than cut out: it copies a feedback improvement, and removing both can
+/// leave a list below the two it must hold, so the repair loop rewrites them
+/// from the coding round instead. A score is settled here: a phase row holds
+/// only its phase and score, so nulling it shrinks nothing, and null is the
+/// only right answer for an unopened round. Refusing it would spend a repair,
+/// and a model that kept scoring a strong out-of-turn answer would run out of
+/// repairs and leave the candidate with no report at all.
+pub fn validate_report_for_round(
+    raw: &serde_json::Value,
+    problem: &Problem,
+    behavioral_round_opened: bool,
+) -> Result<serde_json::Value, Vec<String>> {
+    let report = validate_report_candidate(raw, problem);
+    if behavioral_round_opened {
+        return report;
+    }
+    let mut unopened = unopened_round_errors(raw);
+    match report {
+        Ok(mut report) if unopened.is_empty() => {
+            clear_star_scores(&mut report);
+            Ok(report)
+        }
+        Ok(_) => Err(unopened),
+        Err(mut errors) => {
+            errors.append(&mut unopened);
+            Err(errors)
+        }
+    }
+}
+
+fn unopened_round_errors(raw: &serde_json::Value) -> Vec<String> {
+    let items = raw
+        .get("improvementPlan")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten();
+    items
+        .enumerate()
+        .filter_map(|(index, item)| {
+            let phase = item.get("phase").and_then(serde_json::Value::as_str)?;
+            is_star(phase).then(|| {
+                format!(
+                    "$.improvementPlan[{index}].phase: the behavioral round never opened, so no improvement may address {phase}; replace this item and the feedback improvement it copies with one grounded in the coding round"
+                )
+            })
+        })
+        .collect()
+}
+
+fn clear_star_scores(report: &mut serde_json::Value) {
+    let rows = report
+        .get_mut("frameworkAssessment")
+        .and_then(|assessment| assessment.get_mut("phases"))
+        .and_then(serde_json::Value::as_array_mut)
+        .into_iter()
+        .flatten();
+    for row in rows {
+        if row
+            .get("phase")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(is_star)
+        {
+            row["score"] = serde_json::Value::Null;
+        }
+    }
+}
+
 /// What a self-review list emptied by the filter is given instead, so the
 /// plan item still has the one check the schema requires.
 pub(crate) const SELF_REVIEW_REPLACEMENT: &str = "Review this step against the interview evidence";
@@ -1048,6 +1122,10 @@ pub const MAX_SUMMARY_TEXT: usize = 1200;
 /// schema describes it, and a row longer than the schema admits is a report the
 /// model is blamed for.
 const MAX_WEAKNESS_TAGS: usize = 4;
+
+fn is_star(phase: &str) -> bool {
+    matches!(phase, "Situation" | "Task" | "Action" | "Result")
+}
 
 const IMPROVEMENT_PHASES: [&str; 10] = [
     "Repeat",
