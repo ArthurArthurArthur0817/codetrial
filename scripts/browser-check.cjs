@@ -17,17 +17,50 @@ const {
   listRoomParticipants,
   removeParticipant,
 } = require("./livekit-room-service.cjs");
+const { problemPages, judgeCaseCount } = require("./judge-case-counts.cjs");
+
+const PROBLEM_IDS = {
+  twoSum: "two-sum",
+  validParentheses: "valid-parentheses",
+  minStack: "min-stack",
+  treeIterator: "binary-search-tree-iterator",
+  mergeSortedArray: "merge-sorted-array",
+  limitDuplicates: "remove-duplicates-from-sorted-array-ii",
+  mergeLists: "merge-two-sorted-lists",
+  copyRandomList: "copy-list-with-random-pointer",
+  rotateList: "rotate-list",
+  invertTree: "invert-binary-tree",
+  buildTree: "construct-binary-tree-from-preorder-and-inorder-traversal",
+  connectTreeLevels: "populating-next-right-pointers-in-each-node-ii",
+  lowestCommonAncestor: "lowest-common-ancestor-of-a-binary-tree",
+  zigzagTraversal: "binary-tree-zigzag-level-order-traversal",
+  validateSearchTree: "validate-binary-search-tree",
+  cloneGraph: "clone-graph",
+  courseOrder: "course-schedule-ii",
+  trie: "implement-trie-prefix-tree",
+  wordDictionary: "design-add-and-search-words-data-structure",
+  combinationSum: "combination-sum",
+  permutations: "permutations",
+  generateParentheses: "generate-parentheses",
+  nQueens: "n-queens-ii",
+  wordSearch: "word-search",
+  sortedArrayToTree: "convert-sorted-array-to-binary-search-tree",
+};
+
+// Resolve every flow's judge before launching the browser or starting an interview.
+const scenarios = new Map(
+  Object.values(PROBLEM_IDS).map((problemId) => [
+    problemId,
+    { ...problemPages[problemId], caseCount: judgeCaseCount(problemId) },
+  ]),
+);
 
 // The browser loads scenario names, while the checks stay keyed by the stable
 // bank ids that identify their judges and candidate programs. Reading the
 // generated map makes that boundary explicit instead of letting a removed
 // problem file decide which scenario each flow happens to exercise.
-const problemPages = JSON.parse(
-  fs.readFileSync(`${__dirname}/../web/problem-pages.json`, "utf8"),
-);
-
 function scenario(problemId) {
-  const entry = problemPages[problemId];
+  const entry = scenarios.get(problemId);
   if (!entry) throw new Error(`no scenario page for ${problemId}`);
   return entry;
 }
@@ -415,7 +448,7 @@ function stopProcessGroup(child) {
 /// because the source was right and the order it ran in was not.
 async function checkWhiteboardInterview(page, pageErrors) {
   const before = pageErrors.length;
-  await page.goto(interviewUrl("two-sum", "whiteboard"), {
+  await page.goto(interviewUrl(PROBLEM_IDS.twoSum, "whiteboard"), {
     waitUntil: "domcontentloaded",
   });
 
@@ -922,7 +955,8 @@ async function isolateRustAgent(
       // instead of the agent output above.
       agentFailure.catch(() => {});
     }
-    async function runAndExpectPassing(expected, timeout = 30000) {
+    async function runAndExpectPassing(problemId, timeout = 30000) {
+      const expected = scenario(problemId).caseCount;
       await page.getByRole("button", { name: /Run tests/ }).click();
       await page
         .getByRole("button", { name: "Run tests" })
@@ -955,7 +989,7 @@ async function isolateRustAgent(
       // The browser launches with --use-fake-ui-for-media-stream, which is why
       // no other flow in this file grants permissions.
       await page.setViewportSize({ width: 1440, height: 900 });
-      await page.goto(interviewUrl("two-sum"), {
+      await page.goto(interviewUrl(PROBLEM_IDS.twoSum), {
         waitUntil: "domcontentloaded",
       });
       await clearMediaGate(page);
@@ -1097,19 +1131,22 @@ async function isolateRustAgent(
       await page.getByText("Choose a specific problem instead").click();
       await page.getByRole("checkbox", { name: "Easy" }).check();
       await page
-        .getByText(scenarioTitle("valid-parentheses"), { exact: true })
+        .getByText(scenarioTitle(PROBLEM_IDS.validParentheses), { exact: true })
         .waitFor();
       return;
     }
 
     if (mode === "offline") {
       await checkWhiteboardInterview(page, pageErrors);
-      await page.goto(interviewUrl("two-sum"), {
+      await page.goto(interviewUrl(PROBLEM_IDS.twoSum), {
         waitUntil: "domcontentloaded",
       });
       await clearMediaGate(page);
       await page
-        .getByRole("heading", { name: scenarioTitle("two-sum"), level: 1 })
+        .getByRole("heading", {
+          name: scenarioTitle(PROBLEM_IDS.twoSum),
+          level: 1,
+        })
         .waitFor();
       await page.getByText("Offline", { exact: true }).waitFor();
       await checkEditorNewlines(page);
@@ -1143,13 +1180,16 @@ int* matchDisputedCharge(int* nums, int numsSize, int target, int* returnSize) {
     return out;
 }
 `);
-        await runAndExpectPassing(5, 120000);
-        await page.goto(interviewUrl("min-stack"), {
+        await runAndExpectPassing(PROBLEM_IDS.twoSum, 120000);
+        await page.goto(interviewUrl(PROBLEM_IDS.minStack), {
           waitUntil: "domcontentloaded",
         });
         await clearMediaGate(page);
         await page
-          .getByRole("heading", { name: scenarioTitle("min-stack"), level: 1 })
+          .getByRole("heading", {
+            name: scenarioTitle(PROBLEM_IDS.minStack),
+            level: 1,
+          })
           .waitFor();
         await page.getByText("Offline", { exact: true }).waitFor();
         await page.getByRole("button", { name: "C++" }).click();
@@ -1172,14 +1212,14 @@ public:
     int getMin() { return minimums.back(); }
 };
 `);
-        await runAndExpectPassing(5, 120000);
-        await page.goto(interviewUrl("binary-search-tree-iterator"), {
+        await runAndExpectPassing(PROBLEM_IDS.minStack, 120000);
+        await page.goto(interviewUrl(PROBLEM_IDS.treeIterator), {
           waitUntil: "domcontentloaded",
         });
         await clearMediaGate(page);
         await page
           .getByRole("heading", {
-            name: scenarioTitle("binary-search-tree-iterator"),
+            name: scenarioTitle(PROBLEM_IDS.treeIterator),
             level: 1,
           })
           .waitFor();
@@ -1202,7 +1242,7 @@ public:
     public boolean hasNext() { return !stack.isEmpty(); }
 }
 `);
-        await runAndExpectPassing(5, 120000);
+        await runAndExpectPassing(PROBLEM_IDS.treeIterator, 120000);
         return;
       }
       if (compilerExplorerBaseUrl !== "__default__") {
@@ -1234,7 +1274,9 @@ function matchDisputedCharge() {
 `);
       await page.getByRole("button", { name: /Run tests/ }).click();
       await page.getByRole("button", { name: "Run tests" }).waitFor();
-      await page.getByText("Test results · 0/5").waitFor();
+      await page
+        .getByText(`Test results · 0/${scenario(PROBLEM_IDS.twoSum).caseCount}`)
+        .waitFor();
       await page.getByLabel("Code editor")
         .fill(`function matchDisputedCharge(nums, target) {
   const seen = new Map();
@@ -1246,7 +1288,7 @@ function matchDisputedCharge() {
   return [];
 }
 `);
-      await runAndExpectPassing(5);
+      await runAndExpectPassing(PROBLEM_IDS.twoSum);
       await page.getByRole("button", { name: "C++" }).click();
       await page.getByLabel("Code editor").fill(`class Solution {
 public:
@@ -1261,7 +1303,7 @@ public:
     }
 };
 `);
-      await runAndExpectPassing(5, 120000);
+      await runAndExpectPassing(PROBLEM_IDS.twoSum, 120000);
       await page.getByLabel("Code editor").fill(`class Solution {
 public:
     vector<int> matchDisputedCharge(vector<int>& nums, int target) {
@@ -1298,7 +1340,7 @@ int* matchDisputedCharge(int* nums, int numsSize, int target, int* returnSize) {
     return out;
 }
 `);
-      await runAndExpectPassing(5, 120000);
+      await runAndExpectPassing(PROBLEM_IDS.twoSum, 120000);
       await page.getByRole("button", { name: "Python" }).click();
       await page.getByLabel("Code editor").fill(`class Solution:
     def matchDisputedCharge(self, nums, target):
@@ -1310,18 +1352,18 @@ int* matchDisputedCharge(int* nums, int numsSize, int target, int* returnSize) {
             seen[value] = i
         return []
 `);
-      await runAndExpectPassing(5, 120000);
+      await runAndExpectPassing(PROBLEM_IDS.twoSum, 120000);
       await page.getByRole("button", { name: "Transcript" }).click();
       await page.locator("p").filter({ hasText: /^Jim$/ }).first().waitFor();
       await page.locator("p").filter({ hasText: /^You$/ }).first().waitFor();
 
-      await page.goto(interviewUrl("merge-sorted-array"), {
+      await page.goto(interviewUrl(PROBLEM_IDS.mergeSortedArray), {
         waitUntil: "domcontentloaded",
       });
       await clearMediaGate(page);
       await page
         .getByRole("heading", {
-          name: scenarioTitle("merge-sorted-array"),
+          name: scenarioTitle(PROBLEM_IDS.mergeSortedArray),
           level: 1,
         })
         .waitFor();
@@ -1341,15 +1383,15 @@ int* matchDisputedCharge(int* nums, int numsSize, int target, int* returnSize) {
   }
 }
 `);
-      await runAndExpectPassing(5);
+      await runAndExpectPassing(PROBLEM_IDS.mergeSortedArray);
 
-      await page.goto(interviewUrl("remove-duplicates-from-sorted-array-ii"), {
+      await page.goto(interviewUrl(PROBLEM_IDS.limitDuplicates), {
         waitUntil: "domcontentloaded",
       });
       await clearMediaGate(page);
       await page
         .getByRole("heading", {
-          name: scenarioTitle("remove-duplicates-from-sorted-array-ii"),
+          name: scenarioTitle(PROBLEM_IDS.limitDuplicates),
           level: 1,
         })
         .waitFor();
@@ -1368,7 +1410,11 @@ int* matchDisputedCharge(int* nums, int numsSize, int target, int* returnSize) {
 `);
       await page.getByRole("button", { name: /Run tests/ }).click();
       await page.getByRole("button", { name: "Run tests" }).waitFor();
-      await page.getByText("Test results · 0/5").waitFor();
+      await page
+        .getByText(
+          `Test results · 0/${scenario(PROBLEM_IDS.limitDuplicates).caseCount}`,
+        )
+        .waitFor();
       await page.getByLabel("Code editor")
         .fill(`function capRepeatsAtTwo(nums) {
   let write = 0;
@@ -1380,15 +1426,15 @@ int* matchDisputedCharge(int* nums, int numsSize, int target, int* returnSize) {
   return write;
 }
 `);
-      await runAndExpectPassing(5);
+      await runAndExpectPassing(PROBLEM_IDS.limitDuplicates);
 
-      await page.goto(interviewUrl("merge-two-sorted-lists"), {
+      await page.goto(interviewUrl(PROBLEM_IDS.mergeLists), {
         waitUntil: "domcontentloaded",
       });
       await clearMediaGate(page);
       await page
         .getByRole("heading", {
-          name: scenarioTitle("merge-two-sorted-lists"),
+          name: scenarioTitle(PROBLEM_IDS.mergeLists),
           level: 1,
         })
         .waitFor();
@@ -1412,15 +1458,15 @@ int* matchDisputedCharge(int* nums, int numsSize, int target, int* returnSize) {
   return dummy.next;
 }
 `);
-      await runAndExpectPassing(5);
+      await runAndExpectPassing(PROBLEM_IDS.mergeLists);
 
-      await page.goto(interviewUrl("copy-list-with-random-pointer"), {
+      await page.goto(interviewUrl(PROBLEM_IDS.copyRandomList), {
         waitUntil: "domcontentloaded",
       });
       await clearMediaGate(page);
       await page
         .getByRole("heading", {
-          name: scenarioTitle("copy-list-with-random-pointer"),
+          name: scenarioTitle(PROBLEM_IDS.copyRandomList),
           level: 1,
         })
         .waitFor();
@@ -1438,14 +1484,17 @@ int* matchDisputedCharge(int* nums, int numsSize, int target, int* returnSize) {
   return copies.get(head);
 }
 `);
-      await runAndExpectPassing(5);
+      await runAndExpectPassing(PROBLEM_IDS.copyRandomList);
 
-      await page.goto(interviewUrl("rotate-list"), {
+      await page.goto(interviewUrl(PROBLEM_IDS.rotateList), {
         waitUntil: "domcontentloaded",
       });
       await clearMediaGate(page);
       await page
-        .getByRole("heading", { name: scenarioTitle("rotate-list"), level: 1 })
+        .getByRole("heading", {
+          name: scenarioTitle(PROBLEM_IDS.rotateList),
+          level: 1,
+        })
         .waitFor();
       await page.getByText("Offline", { exact: true }).waitFor();
       await page.getByRole("button", { name: "JavaScript" }).click();
@@ -1468,15 +1517,15 @@ int* matchDisputedCharge(int* nums, int numsSize, int target, int* returnSize) {
   return next;
 }
 `);
-      await runAndExpectPassing(5);
+      await runAndExpectPassing(PROBLEM_IDS.rotateList);
 
-      await page.goto(interviewUrl("invert-binary-tree"), {
+      await page.goto(interviewUrl(PROBLEM_IDS.invertTree), {
         waitUntil: "domcontentloaded",
       });
       await clearMediaGate(page);
       await page
         .getByRole("heading", {
-          name: scenarioTitle("invert-binary-tree"),
+          name: scenarioTitle(PROBLEM_IDS.invertTree),
           level: 1,
         })
         .waitFor();
@@ -1490,20 +1539,15 @@ int* matchDisputedCharge(int* nums, int numsSize, int target, int* returnSize) {
   return root;
 }
 `);
-      await runAndExpectPassing(5);
+      await runAndExpectPassing(PROBLEM_IDS.invertTree);
 
-      await page.goto(
-        interviewUrl(
-          "construct-binary-tree-from-preorder-and-inorder-traversal",
-        ),
-        { waitUntil: "domcontentloaded" },
-      );
+      await page.goto(interviewUrl(PROBLEM_IDS.buildTree), {
+        waitUntil: "domcontentloaded",
+      });
       await clearMediaGate(page);
       await page
         .getByRole("heading", {
-          name: scenarioTitle(
-            "construct-binary-tree-from-preorder-and-inorder-traversal",
-          ),
+          name: scenarioTitle(PROBLEM_IDS.buildTree),
           level: 1,
         })
         .waitFor();
@@ -1525,16 +1569,15 @@ int* matchDisputedCharge(int* nums, int numsSize, int target, int* returnSize) {
   return build(0, inorder.length - 1);
 }
 `);
-      await runAndExpectPassing(5);
+      await runAndExpectPassing(PROBLEM_IDS.buildTree);
 
-      await page.goto(
-        interviewUrl("populating-next-right-pointers-in-each-node-ii"),
-        { waitUntil: "domcontentloaded" },
-      );
+      await page.goto(interviewUrl(PROBLEM_IDS.connectTreeLevels), {
+        waitUntil: "domcontentloaded",
+      });
       await clearMediaGate(page);
       await page
         .getByRole("heading", {
-          name: scenarioTitle("populating-next-right-pointers-in-each-node-ii"),
+          name: scenarioTitle(PROBLEM_IDS.connectTreeLevels),
           level: 1,
         })
         .waitFor();
@@ -1555,15 +1598,15 @@ int* matchDisputedCharge(int* nums, int numsSize, int target, int* returnSize) {
   return root;
 }
 `);
-      await runAndExpectPassing(5);
+      await runAndExpectPassing(PROBLEM_IDS.connectTreeLevels);
 
-      await page.goto(interviewUrl("binary-search-tree-iterator"), {
+      await page.goto(interviewUrl(PROBLEM_IDS.treeIterator), {
         waitUntil: "domcontentloaded",
       });
       await clearMediaGate(page);
       await page
         .getByRole("heading", {
-          name: scenarioTitle("binary-search-tree-iterator"),
+          name: scenarioTitle(PROBLEM_IDS.treeIterator),
           level: 1,
         })
         .waitFor();
@@ -1592,15 +1635,15 @@ OrderedCursor.prototype.hasNext = function() {
   return this.stack.length > 0;
 };
 `);
-      await runAndExpectPassing(5);
+      await runAndExpectPassing(PROBLEM_IDS.treeIterator);
 
-      await page.goto(interviewUrl("lowest-common-ancestor-of-a-binary-tree"), {
+      await page.goto(interviewUrl(PROBLEM_IDS.lowestCommonAncestor), {
         waitUntil: "domcontentloaded",
       });
       await clearMediaGate(page);
       await page
         .getByRole("heading", {
-          name: scenarioTitle("lowest-common-ancestor-of-a-binary-tree"),
+          name: scenarioTitle(PROBLEM_IDS.lowestCommonAncestor),
           level: 1,
         })
         .waitFor();
@@ -1615,16 +1658,15 @@ OrderedCursor.prototype.hasNext = function() {
   return left || right;
 }
 `);
-      await runAndExpectPassing(6);
+      await runAndExpectPassing(PROBLEM_IDS.lowestCommonAncestor);
 
-      await page.goto(
-        interviewUrl("binary-tree-zigzag-level-order-traversal"),
-        { waitUntil: "domcontentloaded" },
-      );
+      await page.goto(interviewUrl(PROBLEM_IDS.zigzagTraversal), {
+        waitUntil: "domcontentloaded",
+      });
       await clearMediaGate(page);
       await page
         .getByRole("heading", {
-          name: scenarioTitle("binary-tree-zigzag-level-order-traversal"),
+          name: scenarioTitle(PROBLEM_IDS.zigzagTraversal),
           level: 1,
         })
         .waitFor();
@@ -1652,15 +1694,15 @@ OrderedCursor.prototype.hasNext = function() {
   return rows;
 }
 `);
-      await runAndExpectPassing(5);
+      await runAndExpectPassing(PROBLEM_IDS.zigzagTraversal);
 
-      await page.goto(interviewUrl("validate-binary-search-tree"), {
+      await page.goto(interviewUrl(PROBLEM_IDS.validateSearchTree), {
         waitUntil: "domcontentloaded",
       });
       await clearMediaGate(page);
       await page
         .getByRole("heading", {
-          name: scenarioTitle("validate-binary-search-tree"),
+          name: scenarioTitle(PROBLEM_IDS.validateSearchTree),
           level: 1,
         })
         .waitFor();
@@ -1676,14 +1718,17 @@ OrderedCursor.prototype.hasNext = function() {
   return valid(root, -Infinity, Infinity);
 }
 `);
-      await runAndExpectPassing(7);
+      await runAndExpectPassing(PROBLEM_IDS.validateSearchTree);
 
-      await page.goto(interviewUrl("clone-graph"), {
+      await page.goto(interviewUrl(PROBLEM_IDS.cloneGraph), {
         waitUntil: "domcontentloaded",
       });
       await clearMediaGate(page);
       await page
-        .getByRole("heading", { name: scenarioTitle("clone-graph"), level: 1 })
+        .getByRole("heading", {
+          name: scenarioTitle(PROBLEM_IDS.cloneGraph),
+          level: 1,
+        })
         .waitFor();
       await page.getByText("Offline", { exact: true }).waitFor();
       await page.getByRole("button", { name: "JavaScript" }).click();
@@ -1701,15 +1746,15 @@ OrderedCursor.prototype.hasNext = function() {
   return clone(node);
 }
 `);
-      await runAndExpectPassing(5);
+      await runAndExpectPassing(PROBLEM_IDS.cloneGraph);
 
-      await page.goto(interviewUrl("course-schedule-ii"), {
+      await page.goto(interviewUrl(PROBLEM_IDS.courseOrder), {
         waitUntil: "domcontentloaded",
       });
       await clearMediaGate(page);
       await page
         .getByRole("heading", {
-          name: scenarioTitle("course-schedule-ii"),
+          name: scenarioTitle(PROBLEM_IDS.courseOrder),
           level: 1,
         })
         .waitFor();
@@ -1738,15 +1783,15 @@ OrderedCursor.prototype.hasNext = function() {
   return order.length === migrationCount ? order : [];
 }
 `);
-      await runAndExpectPassing(5);
+      await runAndExpectPassing(PROBLEM_IDS.courseOrder);
 
-      await page.goto(interviewUrl("implement-trie-prefix-tree"), {
+      await page.goto(interviewUrl(PROBLEM_IDS.trie), {
         waitUntil: "domcontentloaded",
       });
       await clearMediaGate(page);
       await page
         .getByRole("heading", {
-          name: scenarioTitle("implement-trie-prefix-tree"),
+          name: scenarioTitle(PROBLEM_IDS.trie),
           level: 1,
         })
         .waitFor();
@@ -1784,16 +1829,15 @@ CommandIndex.prototype.find = function(text) {
   return node;
 };
 `);
-      await runAndExpectPassing(5);
+      await runAndExpectPassing(PROBLEM_IDS.trie);
 
-      await page.goto(
-        interviewUrl("design-add-and-search-words-data-structure"),
-        { waitUntil: "domcontentloaded" },
-      );
+      await page.goto(interviewUrl(PROBLEM_IDS.wordDictionary), {
+        waitUntil: "domcontentloaded",
+      });
       await clearMediaGate(page);
       await page
         .getByRole("heading", {
-          name: scenarioTitle("design-add-and-search-words-data-structure"),
+          name: scenarioTitle(PROBLEM_IDS.wordDictionary),
           level: 1,
         })
         .waitFor();
@@ -1830,15 +1874,15 @@ PatternLexicon.prototype.search = function(word) {
   return dfs(this, 0);
 };
 `);
-      await runAndExpectPassing(5);
+      await runAndExpectPassing(PROBLEM_IDS.wordDictionary);
 
-      await page.goto(interviewUrl("combination-sum"), {
+      await page.goto(interviewUrl(PROBLEM_IDS.combinationSum), {
         waitUntil: "domcontentloaded",
       });
       await clearMediaGate(page);
       await page
         .getByRole("heading", {
-          name: scenarioTitle("combination-sum"),
+          name: scenarioTitle(PROBLEM_IDS.combinationSum),
           level: 1,
         })
         .waitFor();
@@ -1863,14 +1907,17 @@ PatternLexicon.prototype.search = function(word) {
   return results;
 }
 `);
-      await runAndExpectPassing(5);
+      await runAndExpectPassing(PROBLEM_IDS.combinationSum);
 
-      await page.goto(interviewUrl("permutations"), {
+      await page.goto(interviewUrl(PROBLEM_IDS.permutations), {
         waitUntil: "domcontentloaded",
       });
       await clearMediaGate(page);
       await page
-        .getByRole("heading", { name: scenarioTitle("permutations"), level: 1 })
+        .getByRole("heading", {
+          name: scenarioTitle(PROBLEM_IDS.permutations),
+          level: 1,
+        })
         .waitFor();
       await page.getByText("Offline", { exact: true }).waitFor();
       await page.getByRole("button", { name: "JavaScript" }).click();
@@ -1895,15 +1942,15 @@ PatternLexicon.prototype.search = function(word) {
   return results;
 }
 `);
-      await runAndExpectPassing(5);
+      await runAndExpectPassing(PROBLEM_IDS.permutations);
 
-      await page.goto(interviewUrl("generate-parentheses"), {
+      await page.goto(interviewUrl(PROBLEM_IDS.generateParentheses), {
         waitUntil: "domcontentloaded",
       });
       await clearMediaGate(page);
       await page
         .getByRole("heading", {
-          name: scenarioTitle("generate-parentheses"),
+          name: scenarioTitle(PROBLEM_IDS.generateParentheses),
           level: 1,
         })
         .waitFor();
@@ -1924,14 +1971,17 @@ PatternLexicon.prototype.search = function(word) {
   return results;
 }
 `);
-      await runAndExpectPassing(5);
+      await runAndExpectPassing(PROBLEM_IDS.generateParentheses);
 
-      await page.goto(interviewUrl("n-queens-ii"), {
+      await page.goto(interviewUrl(PROBLEM_IDS.nQueens), {
         waitUntil: "domcontentloaded",
       });
       await clearMediaGate(page);
       await page
-        .getByRole("heading", { name: scenarioTitle("n-queens-ii"), level: 1 })
+        .getByRole("heading", {
+          name: scenarioTitle(PROBLEM_IDS.nQueens),
+          level: 1,
+        })
         .waitFor();
       await page.getByText("Offline", { exact: true }).waitFor();
       await page.getByRole("button", { name: "JavaScript" }).click();
@@ -1960,14 +2010,17 @@ PatternLexicon.prototype.search = function(word) {
   return count;
 }
 `);
-      await runAndExpectPassing(5);
+      await runAndExpectPassing(PROBLEM_IDS.nQueens);
 
-      await page.goto(interviewUrl("word-search"), {
+      await page.goto(interviewUrl(PROBLEM_IDS.wordSearch), {
         waitUntil: "domcontentloaded",
       });
       await clearMediaGate(page);
       await page
-        .getByRole("heading", { name: scenarioTitle("word-search"), level: 1 })
+        .getByRole("heading", {
+          name: scenarioTitle(PROBLEM_IDS.wordSearch),
+          level: 1,
+        })
         .waitFor();
       await page.getByText("Offline", { exact: true }).waitFor();
       await page.getByRole("button", { name: "JavaScript" }).click();
@@ -1994,16 +2047,15 @@ PatternLexicon.prototype.search = function(word) {
   return false;
 }
 `);
-      await runAndExpectPassing(5);
+      await runAndExpectPassing(PROBLEM_IDS.wordSearch);
 
-      await page.goto(
-        interviewUrl("convert-sorted-array-to-binary-search-tree"),
-        { waitUntil: "domcontentloaded" },
-      );
+      await page.goto(interviewUrl(PROBLEM_IDS.sortedArrayToTree), {
+        waitUntil: "domcontentloaded",
+      });
       await clearMediaGate(page);
       await page
         .getByRole("heading", {
-          name: scenarioTitle("convert-sorted-array-to-binary-search-tree"),
+          name: scenarioTitle(PROBLEM_IDS.sortedArrayToTree),
           level: 1,
         })
         .waitFor();
@@ -2019,7 +2071,7 @@ PatternLexicon.prototype.search = function(word) {
   return build(0, nums.length - 1);
 }
 `);
-      await runAndExpectPassing(5);
+      await runAndExpectPassing(PROBLEM_IDS.sortedArrayToTree);
 
       await page.getByRole("button", { name: "End interview" }).click();
       await page
@@ -2072,7 +2124,7 @@ PatternLexicon.prototype.search = function(word) {
       }
     }
 
-    await page.goto(interviewUrl("two-sum"));
+    await page.goto(interviewUrl(PROBLEM_IDS.twoSum));
     await clearMediaGate(page);
     if (credentialed && !rustAgentIdentity) {
       roomName = await page
@@ -2133,7 +2185,10 @@ PatternLexicon.prototype.search = function(word) {
             );
         }
         const problemTitle = await page
-          .getByRole("heading", { name: scenarioTitle("two-sum"), level: 1 })
+          .getByRole("heading", {
+            name: scenarioTitle(PROBLEM_IDS.twoSum),
+            level: 1,
+          })
           .innerText();
         // Scoped to the pill. The captions element also renders the literal
         // word "Listening" as its placeholder, so an unscoped text match hits
