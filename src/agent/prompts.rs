@@ -1393,7 +1393,7 @@ fn behavioral_round_start(state: &RuntimeState) -> usize {
 /// The line the report transcript carries where the platform opened the
 /// behavioral round. It has no speaker, so a candidate who says the same words
 /// is still a `Candidate:` line.
-pub const BEHAVIORAL_ROUND_MARK: &str = "(the platform opened the behavioral round here)";
+pub(crate) const BEHAVIORAL_ROUND_MARK: &str = "(the platform opened the behavioral round here)";
 
 /// The transcript the report reads, with `BEHAVIORAL_ROUND_MARK` where the
 /// round began.
@@ -1404,7 +1404,7 @@ pub const BEHAVIORAL_ROUND_MARK: &str = "(the platform opened the behavioral rou
 /// STAR evidence for the first, which leaves the transcript the only place it
 /// survives. Marked where `behavioral_round_start` puts the round, so an
 /// interviewer turn still in flight at the transition falls inside it.
-pub fn report_transcript_lines(state: &RuntimeState) -> Vec<String> {
+pub(crate) fn report_transcript_lines(state: &RuntimeState) -> Vec<String> {
     let mut lines = state.transcript.clone();
     if state.behavioral_round_started {
         let start = behavioral_round_start(state).min(lines.len());

@@ -53,20 +53,22 @@ use integrity::integrity_hash;
 pub use integrity::{sanitize_integrity_event, sanitize_test_run};
 use problems::variant_for;
 pub use problems::{DEFAULT_PROBLEM_ID, PROBLEMS, find_problem, get_problem, topics_for};
+#[cfg(test)]
+pub(crate) use prompts::BEHAVIORAL_ROUND_MARK;
 pub use prompts::{
-    BEHAVIORAL_ROUND_MARK, BehavioralRound, InterimReviewInput, LanguageChoiceContext,
-    MAX_EXCERPT_LINE_CHARS, MAX_NUMBERED_BYTES, ReportPromptInput, SincePrevious, TestRecord,
-    behavioral_silence_nudge, behavioral_time_warning, build_instructions_for_plan,
-    changed_excerpt, cold_restart, compressed_context, format_test_run,
-    format_test_run_for_reaction, greeting, hint_ladder_used_text, hint_rung_text,
-    hint_rung_withheld_text, interim_review_prompt, interim_system_instruction, language_choice,
-    log_hint_text, numbered, numbered_from, owed_reply, proactive_review, read_editor_text,
-    released_follow_ups, report_prompt, report_system_instruction, report_transcript_lines, resume,
-    resumed_context, rolling_assessment, round_skipped, round_started, silence_nudge,
-    spoken_language, test_results_reaction, test_runner_unavailable_reaction,
-    test_setup_error_reaction, time_warning, unrecorded_earlier_phases, with_owed_reply, wrap_up,
+    BehavioralRound, InterimReviewInput, LanguageChoiceContext, MAX_EXCERPT_LINE_CHARS,
+    MAX_NUMBERED_BYTES, ReportPromptInput, SincePrevious, TestRecord, behavioral_silence_nudge,
+    behavioral_time_warning, build_instructions_for_plan, changed_excerpt, cold_restart,
+    compressed_context, format_test_run, format_test_run_for_reaction, greeting,
+    hint_ladder_used_text, hint_rung_text, hint_rung_withheld_text, interim_review_prompt,
+    interim_system_instruction, language_choice, log_hint_text, numbered, numbered_from,
+    owed_reply, proactive_review, read_editor_text, released_follow_ups, report_prompt,
+    report_system_instruction, resume, resumed_context, rolling_assessment, round_skipped,
+    round_started, silence_nudge, spoken_language, test_results_reaction,
+    test_runner_unavailable_reaction, test_setup_error_reaction, time_warning,
+    unrecorded_earlier_phases, with_owed_reply, wrap_up,
 };
-pub(crate) use prompts::{editor_tool_continuity, end_interview_refusal};
+pub(crate) use prompts::{editor_tool_continuity, end_interview_refusal, report_transcript_lines};
 pub(crate) use report::sanitize_report_candidate;
 pub use report::{
     MAX_SUMMARY_TEXT, fallback_report, final_report, names_published_problem,
