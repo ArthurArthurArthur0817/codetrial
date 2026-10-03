@@ -899,6 +899,13 @@ p {
   overflow: hidden;
 }
 
+/* The user-agent stylesheet gives <code> its own monospace family, which
+   beats the inherited stack and paints the overlay in a different font from
+   the textarea, so the text drifts from the caret line by line. */
+#editor-highlight code {
+  font: inherit;
+}
+
 #editor-lines {
   position: absolute;
   inset: 0 auto 0 0;

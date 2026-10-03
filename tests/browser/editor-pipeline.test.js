@@ -1,5 +1,5 @@
-// A browser-level pin for the bracket auto-close pipeline in web/editor.js
-// and web/interview.js.
+// A browser-level pin for the editor pipeline in web/editor.js and
+// web/interview.js: bracket auto-close, and the overlay that paints its text.
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 
@@ -150,6 +150,32 @@ test("Backspace right after an auto-closed pair removes both characters, in a re
       [],
       `Backspace on an empty pair threw in the browser: ${errors[0]}`,
     );
+  } finally {
+    await page.close();
+  }
+});
+
+test("the highlight overlay resolves the textarea's font metrics, in a real browser", async (t) => {
+  const ctx = await editorPage(t);
+  if (!ctx) return;
+  const { page } = ctx;
+  try {
+    // The overlay paints the glyphs the textarea positions. Any metric of the
+    // shared #editor, #editor-highlight rule that <code> resolves on its own
+    // moves the painted text away from the caret, a little more every line.
+    const [editor, overlay] = await page.evaluate(() =>
+      ["#editor", "#editor-highlight code"].map((selector) => {
+        const style = getComputedStyle(document.querySelector(selector));
+        return {
+          fontFamily: style.fontFamily,
+          fontSize: style.fontSize,
+          lineHeight: style.lineHeight,
+          fontWeight: style.fontWeight,
+          letterSpacing: style.letterSpacing,
+        };
+      }),
+    );
+    assert.deepEqual(overlay, editor);
   } finally {
     await page.close();
   }
