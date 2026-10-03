@@ -53,8 +53,8 @@ fn prompt_golden_digest_matches_versions() {
     // its hash is a string nothing checks. The pair is still asserted, because
     // the failure worth catching is a version bumped with the golden left
     // alone, which a digest comparison on its own reads as fine.
-    let recorded_versions = (18, 15);
-    let recorded_digest = "3436ab18cb05cdeb4c1f9ff075c63e2ee42a9d572715ef5b68c32338e31eae8d";
+    let recorded_versions = (19, 16);
+    let recorded_digest = "a7a987d6b8ba1cd400f828fe41024024e066f4a42357652d9dde0d16e8829ad6";
 
     assert_eq!(
         (LIVE_PROMPT_VERSION, REPORT_PROMPT_VERSION),
@@ -278,6 +278,7 @@ fn report_brief_states_the_hint_rung() {
         test_summary: "",
         practice_level: Some("intern"),
         evidence: "",
+        behavioral_round: BehavioralRound::Opened,
     });
     assert!(prompt.contains("candidate reached hint rung 2 of 3"));
     assert!(prompt.contains("1 hint was volunteered rather than requested"));
@@ -310,6 +311,7 @@ fn report_prompt_names_the_practice_level() {
         test_summary: "",
         practice_level: Some("intern"),
         evidence: "",
+        behavioral_round: BehavioralRound::Opened,
     };
     let selected = report_prompt(base);
     assert!(selected.contains("candidate practiced for intern"));
@@ -412,6 +414,7 @@ fn live_instructions_pose_the_variant_and_hold_no_source_or_walkthrough() {
         test_summary: "",
         practice_level: None,
         evidence: "",
+        behavioral_round: BehavioralRound::Opened,
     });
     assert!(report.contains("Reference notes on approaches"));
     assert!(report.contains("never name the published problem, its title, LeetCode"));
@@ -677,6 +680,7 @@ fn speech_evidence_waits_for_a_turn_the_report_can_read() {
         "phase": "situation", "source": "session_timing", "kind": "skipped",
         "confidence": 100, "summary": "The session ended first.",
     });
+    state.behavioral_round_started = true;
     record_framework_evidence(&mut state, &session_timing).expect("a skip is not speech");
 
     state
@@ -1141,17 +1145,17 @@ fn interview_contract_versions_are_one_closed_bundle() {
         "the bundle table has no row for {INTERVIEW_CONTRACT_BUNDLE_VERSION}"
     );
 
-    assert_eq!(INTERVIEW_CONTRACT_BUNDLE_VERSION, 26);
-    assert_eq!(LIVE_PROMPT_VERSION, 18);
-    assert_eq!(REPORT_PROMPT_VERSION, 15);
+    assert_eq!(INTERVIEW_CONTRACT_BUNDLE_VERSION, 27);
+    assert_eq!(LIVE_PROMPT_VERSION, 19);
+    assert_eq!(REPORT_PROMPT_VERSION, 16);
     assert_eq!(RUBRIC_VERSION, 1);
     assert_eq!(REPORT_SCHEMA_VERSION, 2);
     assert_eq!(
         interview_contract_json(),
         json!({
-            "bundleVersion": 26,
-            "livePromptVersion": 18,
-            "reportPromptVersion": 15,
+            "bundleVersion": 27,
+            "livePromptVersion": 19,
+            "reportPromptVersion": 16,
             "rubricVersion": 1,
             "reportSchemaVersion": 2,
         })

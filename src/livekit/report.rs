@@ -51,6 +51,12 @@ pub(super) struct FrozenAssessment {
     state: RuntimeState,
 }
 
+impl FrozenAssessment {
+    pub(super) fn behavioral_round_opened(&self) -> bool {
+        crate::agent::BehavioralRound::of(&self.state).opened()
+    }
+}
+
 pub(super) fn freeze_assessment(
     boot: &RuntimeBootstrap<'_>,
     state: &mut RuntimeState,
@@ -68,6 +74,7 @@ pub(super) fn freeze_assessment(
 pub(super) async fn generate_report_bounded(
     boot: &RuntimeBootstrap<'_>,
     prompt: &str,
+    behavioral_round_opened: bool,
     api_key: &GeminiKeys,
 ) -> GeneratedReport {
     tokio::time::timeout(
@@ -77,6 +84,7 @@ pub(super) async fn generate_report_bounded(
             boot.report_model,
             prompt,
             boot.problem,
+            behavioral_round_opened,
             boot.room_name,
         ),
     )
@@ -400,6 +408,7 @@ pub(super) async fn publish_with_recovery(
         candidate,
     } = recovery;
     let FrozenAssessment { prompt, mut state } = assessment;
+    let behavioral_round_opened = crate::agent::BehavioralRound::of(&state).opened();
     let mut room = LiveRecoveryRoom {
         room,
         candidate,
@@ -414,7 +423,7 @@ pub(super) async fn publish_with_recovery(
             keys,
         },
         generated,
-        generate_report_bounded(boot, &prompt, keys),
+        generate_report_bounded(boot, &prompt, behavioral_round_opened, keys),
         tokio::time::Instant::now,
         close_live,
     )
@@ -727,7 +736,7 @@ fn report_prompt_text(
             .prompt_view(crate::agent::ViewFor::Report)
             .join("\n")
     };
-    let transcript = transcript_for_report(&state.transcript);
+    let transcript = transcript_for_report(&crate::agent::report_transcript_lines(state));
     let test_summary = format_test_run(state.last_test_run.as_ref(), state.test_runs);
     report_prompt(ReportPromptInput {
         problem: boot.problem,
@@ -743,6 +752,7 @@ fn report_prompt_text(
         test_summary: &test_summary,
         practice_level: boot.profile.seniority.map(crate::agent::Seniority::as_str),
         evidence: &evidence,
+        behavioral_round: crate::agent::BehavioralRound::of(state),
     })
 }
 

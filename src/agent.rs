@@ -53,9 +53,11 @@ use integrity::integrity_hash;
 pub use integrity::{sanitize_integrity_event, sanitize_test_run};
 use problems::variant_for;
 pub use problems::{DEFAULT_PROBLEM_ID, PROBLEMS, find_problem, get_problem, topics_for};
+#[cfg(test)]
+pub(crate) use prompts::BEHAVIORAL_ROUND_MARK;
 pub use prompts::{
-    InterimReviewInput, LanguageChoiceContext, MAX_EXCERPT_LINE_CHARS, MAX_NUMBERED_BYTES,
-    ReportPromptInput, SincePrevious, TestRecord, behavioral_silence_nudge,
+    BehavioralRound, InterimReviewInput, LanguageChoiceContext, MAX_EXCERPT_LINE_CHARS,
+    MAX_NUMBERED_BYTES, ReportPromptInput, SincePrevious, TestRecord, behavioral_silence_nudge,
     behavioral_time_warning, build_instructions_for_plan, changed_excerpt, cold_restart,
     compressed_context, format_test_run, format_test_run_for_reaction, greeting,
     hint_ladder_used_text, hint_rung_text, hint_rung_withheld_text, interim_review_prompt,
@@ -66,11 +68,12 @@ pub use prompts::{
     test_runner_unavailable_reaction, test_setup_error_reaction, time_warning,
     unrecorded_earlier_phases, with_owed_reply, wrap_up,
 };
-pub(crate) use prompts::{editor_tool_continuity, end_interview_refusal};
+pub(crate) use prompts::{editor_tool_continuity, end_interview_refusal, report_transcript_lines};
 pub(crate) use report::sanitize_report_candidate;
 pub use report::{
     MAX_SUMMARY_TEXT, fallback_report, final_report, names_published_problem,
     report_response_schema, spelled_words, validate_report, validate_report_candidate,
+    validate_report_for_round,
 };
 
 // Only the tests read this, and a report the filter emptied is the one place it
@@ -165,9 +168,9 @@ pub const THINKING_CHECK_IN_S: u64 = 120;
 pub(crate) const THINKING_RELEASE_COOLDOWN: std::time::Duration =
     std::time::Duration::from_secs(10);
 
-pub const INTERVIEW_CONTRACT_BUNDLE_VERSION: u32 = 26;
-pub const LIVE_PROMPT_VERSION: u32 = 18;
-pub const REPORT_PROMPT_VERSION: u32 = 15;
+pub const INTERVIEW_CONTRACT_BUNDLE_VERSION: u32 = 27;
+pub const LIVE_PROMPT_VERSION: u32 = 19;
+pub const REPORT_PROMPT_VERSION: u32 = 16;
 pub const RUBRIC_VERSION: u32 = 1;
 pub const REPORT_SCHEMA_VERSION: u32 = 2;
 
@@ -1106,6 +1109,15 @@ pub enum FrameworkPhase {
     Result,
 }
 
+impl FrameworkPhase {
+    pub(crate) fn is_star(self) -> bool {
+        matches!(
+            self,
+            Self::Situation | Self::Task | Self::Action | Self::Result
+        )
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EvidenceSource {
     CandidateSpeech,
@@ -1545,6 +1557,14 @@ pub fn record_framework_evidence(
         return Err("session_timing is only valid for skipped evidence");
     }
 
+    // A model can invent a round-start event in its own speech. Only the
+    // platform transition opens STAR; platform-owned skips bypass this tool.
+    if phase.is_star() && !state.behavioral_round_started {
+        return Err(
+            "the behavioral round has not started; do not ask behavioral questions or record STAR evidence before the trusted round-start event, and return to the coding round",
+        );
+    }
+
     // Coding, Test and Optimizations are all about code, so none of them is
     // reached while the editor holds nothing the candidate wrote: a plan spoken
     // aloud is the Algorithm phase, and testing or improving it comes after
@@ -1684,7 +1704,14 @@ pub fn record_framework_evidence(
 /// Any row closes a step, a skip included, so the warning and the end never
 /// write two skips for one step. Skips never reach the ledger's coverage, the
 /// rule `record_framework_evidence` applies to them as well.
+///
+/// A coding-only interview has no STAR steps to close. Skipping them there
+/// would list a round it never had and, with the ledger full, evict a coding
+/// observation to make room.
 pub(crate) fn skip_unassessed_star(state: &mut RuntimeState, summary: &str) {
+    if state.interview_loop == InterviewLoop::CodingOnly {
+        return;
+    }
     let at_ms = state
         .started_at
         .elapsed()
