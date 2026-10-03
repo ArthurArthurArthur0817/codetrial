@@ -2,7 +2,7 @@
   "expiresInSeconds": 300,
   "retryAfterSeconds": 30,
   "quotaRetryAfterSeconds": 60,
-  "retryWaitSeconds": 140,
+  "retryWaitSeconds": 145,
   "closeGraceSeconds": 15,
   "retryStatuses": [
     "accepted",

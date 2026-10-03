@@ -1,7 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createReportRecovery } from "../../web/report-recovery.js";
+import {
+  createReportRecovery,
+  reportRecoveryLimits,
+} from "../../web/report-recovery.js";
 import { retryReportPayload, sanitizeReport, topics } from "../../web/lib.js";
+
+// Counted from the agent's answer, or from the click when no answer comes.
+const retryWaitMs = reportRecoveryLimits.retryWaitSeconds * 1000;
 
 function setup() {
   let now = 0;
@@ -63,7 +69,7 @@ test("report recovery spends one retry after cooldown and times it from acceptan
   advance(100_000);
   assert.equal(finalized(events).length, 0);
   assert.equal(recovery.notice(accepted), true);
-  advance(139_000);
+  advance(retryWaitMs - 1000);
   assert.equal(finalized(events).length, 0);
   advance(1000);
   assert.equal(events.filter((e) => e?.type === "retry_report").length, 1);
@@ -80,9 +86,9 @@ test("an accepted retry outlives the offer's own expiry", () => {
   recovery.notice(accepted);
   // A closing notice cannot cut short a generation the agent already began.
   assert.equal(recovery.notice(closed), false);
-  advance(100_000);
+  advance(retryWaitMs - 1000);
   assert.equal(finalized(events).length, 0);
-  advance(40_000);
+  advance(1000);
   assert.equal(finalized(events).length, 1);
 });
 
@@ -179,7 +185,7 @@ test("a retry whose answer is lost is bounded by its own wait, not the offer", (
   // The offer would have run out here; the agent may still be generating.
   advance(30_000);
   assert.equal(finalized(events).length, 0);
-  advance(109_000);
+  advance(retryWaitMs - 31_000);
   assert.equal(finalized(events).length, 0);
   advance(1000);
   assert.equal(finalized(events).length, 1);
