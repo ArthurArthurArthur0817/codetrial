@@ -289,6 +289,7 @@ fn prompt_samples() -> Value {
         "greeting": greeting(),
         "languageChoice": language_choice("C++", LanguageChoiceContext::Start),
         "languageSwitch": language_choice("Java", LanguageChoiceContext::SwitchWithCode),
+        "languageContinue": language_choice("C", LanguageChoiceContext::Continue),
         "silenceBehavioral": behavioral_silence_nudge(),
         "silenceEmpty": silence_nudge(&RuntimeState::default(), &empty, None),
         "silenceEarly": silence_nudge(&RuntimeState::default(), &early, None),

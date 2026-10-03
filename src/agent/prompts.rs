@@ -483,12 +483,16 @@ pub fn spoken_language(language: &str) -> Option<&'static str> {
 pub enum LanguageChoiceContext {
     Start,
     SwitchWithCode,
+    Continue,
 }
 
 pub fn language_choice(spoken: &str, context: LanguageChoiceContext) -> String {
     let next = match context {
         LanguageChoiceContext::Start => {
             "Then begin the interview by asking them to restate the inputs, outputs, constraints, and ambiguities in their own words."
+        }
+        LanguageChoiceContext::Continue => {
+            "Continue the current discussion with its existing context and progress. If they have not yet begun discussing the exercise, ask them to restate the inputs, outputs, constraints, and ambiguities in their own words. Do not restart the interview or ask them to repeat inputs, outputs, constraints, examples, or an approach already discussed."
         }
         LanguageChoiceContext::SwitchWithCode => {
             "They already have code in the editor, so acknowledge the switch without restarting the interview or asking them to restate work they already completed."

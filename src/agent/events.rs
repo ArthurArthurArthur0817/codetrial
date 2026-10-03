@@ -226,18 +226,22 @@ fn apply_code_update(
 
     let mut language_changed = None;
     if let Some(spoken) = switching {
-        state.language = spoken.0.to_string();
-        state.language_chosen = true;
-
         // Reading the buffer here instead asked Gemini not to make a candidate
         // "restate work they already completed" for a template they had not
         // touched, which skipped the restatement the whole REACTO opening is
         // built on for anyone who picked a language before speaking.
         let context = if state.code_edited {
             LanguageChoiceContext::SwitchWithCode
+        } else if state.language_chosen || super::has_recognized_candidate_turn(&state.transcript) {
+            // An earlier choice, or spoken discussion, is progress even before
+            // the first keystroke. A turn the recognizer returned in another
+            // script is not discussion.
+            LanguageChoiceContext::Continue
         } else {
             LanguageChoiceContext::Start
         };
+        state.language = spoken.0.to_string();
+        state.language_chosen = true;
         language_changed = Some(language_choice(spoken.1, context));
     }
 
