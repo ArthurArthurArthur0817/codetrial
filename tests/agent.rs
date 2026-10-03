@@ -692,6 +692,17 @@ fn run_tests(state: &mut RuntimeState, passed: i64, total: i64) -> DataEventResu
     apply_data_event(state, TOPIC_TEST_RESULTS, &packet, 100.0)
 }
 
+/// Publishes the editor buffer under `language`, as a keystroke or a tab click
+/// sends it.
+fn type_code(state: &mut RuntimeState, language: &str, code: &str) -> DataEventResult {
+    apply_data_event(
+        state,
+        TOPIC_CODE_UPDATE,
+        &json!({"language": language, "code": code}),
+        99.0,
+    )
+}
+
 /// Applies one control packet, as the page sends it.
 fn control(state: &mut RuntimeState, payload: Value) -> DataEventResult {
     apply_data_event(state, TOPIC_CONTROL, &payload, 0.0)
