@@ -10,8 +10,10 @@ use super::*;
 /// would refuse every interview after them for the life of the process.
 #[tokio::test]
 async fn a_panicking_interview_gives_its_capacity_back() {
-    let live = Arc::new(Mutex::new(HashSet::new()));
-    live.lock().unwrap().insert("interview-boom".to_string());
+    let live = Arc::new(Mutex::new(HashMap::new()));
+    live.lock()
+        .unwrap()
+        .insert("interview-boom".to_string(), true);
     let slot = Slot {
         live: Arc::clone(&live),
         room_name: "interview-boom".to_string(),
@@ -33,8 +35,10 @@ async fn a_panicking_interview_gives_its_capacity_back() {
 /// one gets one, and the refusal names the number they chose.
 #[tokio::test]
 async fn the_configured_cap_is_the_one_enforced() {
-    let live = Arc::new(Mutex::new(HashSet::new()));
-    live.lock().unwrap().insert("interview-first".to_string());
+    let live = Arc::new(Mutex::new(HashMap::new()));
+    live.lock()
+        .unwrap()
+        .insert("interview-first".to_string(), true);
     let dispatcher = LocalDispatcher {
         config: crate::config::load_from_pairs([
             ("LIVEKIT_URL", "wss://primary.example"),
@@ -56,18 +60,22 @@ async fn the_configured_cap_is_the_one_enforced() {
     };
 
     assert!(
-        !dispatcher.ensure_agent("interview-second", &provider),
+        dispatcher.ensure_agent("interview-second", &provider) == Err(DispatchRefusal::AtCapacity),
         "a second room must be refused at a cap of one"
     );
 
     // The room already running is still admitted, because a reload asks for the
     // same room and refusing it would break the page that is open.
-    assert!(dispatcher.ensure_agent("interview-first", &provider));
+    assert!(
+        dispatcher
+            .ensure_agent("interview-first", &provider)
+            .is_ok()
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_concurrent_burst_never_overbooks_and_released_capacity_returns() {
-    let live = Arc::new(Mutex::new(HashSet::new()));
+    let live = Arc::new(Mutex::new(HashMap::new()));
     let dispatcher = LocalDispatcher {
         config: crate::config::load_from_pairs([
             ("LIVEKIT_URL", "wss://primary.example"),
@@ -96,7 +104,9 @@ async fn a_concurrent_burst_never_overbooks_and_released_capacity_returns() {
             match dispatcher.reserve(&format!("interview-burst-{index}")) {
                 Reservation::New(slot) => Some(slot),
                 Reservation::Full => None,
-                Reservation::Existing => panic!("burst ids are unique"),
+                Reservation::Existing | Reservation::Finalizing => {
+                    panic!("burst ids are unique")
+                }
             }
         }));
     }
@@ -172,4 +182,45 @@ fn provider_credentials_replace_the_base_without_blanking_the_key() {
     assert_eq!(selected.livekit_url, inherited.livekit_url);
     assert_eq!(selected.livekit_api_key, inherited.livekit_api_key);
     assert_eq!(selected.livekit_api_secret, inherited.livekit_api_secret);
+}
+
+#[tokio::test]
+async fn a_room_finalizing_its_report_cannot_be_reused_for_a_new_interview() {
+    let live = Arc::new(Mutex::new(HashMap::new()));
+    let dispatcher = LocalDispatcher {
+        config: crate::config::load_from_pairs([
+            ("LIVEKIT_URL", "wss://primary.example"),
+            ("LIVEKIT_API_KEY", "primary-key"),
+            ("LIVEKIT_API_SECRET", "primary-secret"),
+            ("GOOGLE_API_KEY", "primary-google"),
+        ])
+        .unwrap(),
+        runtime: tokio::runtime::Handle::current(),
+        live: Arc::clone(&live),
+        max_concurrent: 2,
+    };
+    let Reservation::New(slot) = dispatcher.reserve("local-room") else {
+        panic!("fresh slot");
+    };
+    assert!(matches!(
+        dispatcher.reserve("local-room"),
+        Reservation::Existing
+    ));
+    slot.assessment_finished();
+    assert!(matches!(
+        dispatcher.reserve("local-room"),
+        Reservation::Finalizing
+    ));
+    assert_eq!(live.lock().unwrap().len(), 1);
+    // Other rooms can still use the unoccupied capacity.
+    let Reservation::New(other) = dispatcher.reserve("another-room") else {
+        panic!("spare slot");
+    };
+    drop(slot);
+    assert!(matches!(
+        dispatcher.reserve("local-room"),
+        Reservation::New(_)
+    ));
+    drop(other);
+    assert!(live.lock().unwrap().is_empty());
 }

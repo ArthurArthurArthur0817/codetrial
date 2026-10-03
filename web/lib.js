@@ -1782,3 +1782,7 @@ export function isYieldShortcut(event, editor) {
     target?.isContentEditable
   );
 }
+
+export function retryReportPayload() {
+  return { type: "retry_report" };
+}

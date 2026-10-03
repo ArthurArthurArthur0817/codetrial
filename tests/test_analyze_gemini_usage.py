@@ -297,6 +297,7 @@ class UsageTests(unittest.TestCase):
             "gemini report transport_failed room=a call=1 backoff_s=2 "
             "error=secret prompt_tokens=5\n",
             "gemini report transport_failed room=a call=2 backoff_s=4 error=x\n",
+            "gemini report retry_unavailable room=a call=2\n",
             "interim review skipped room=a: quota\n",
             "codetrial context_refresh room=a session=1 bytes=300\n",
             "codetrial context_refresh room=a session=1 bytes=200\n",

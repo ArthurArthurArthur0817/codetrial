@@ -1,8 +1,9 @@
 //! Building the report packet the browser receives when an interview ends.
 //!
-//! One region because it is one output. The interview loop freezes the prompt
-//! with `freeze_report_prompt`, runs `generate_report_bounded` beside the
-//! farewell, and hands what came back to `publish_report`; everything below
+//! One region because it is one output. The interview loop freezes the
+//! assessment with `freeze_assessment`, runs `generate_report_bounded` beside
+//! the farewell, and hands what came back to `publish_with_recovery`, which
+//! publishes it or offers one regeneration first; everything below
 //! is how the packet is assembled, and the pieces are separated so that a
 //! failure in one of them is a note in the report rather than no report at
 //! all.
@@ -29,7 +30,7 @@ pub(super) type GeneratedReport = Result<
 
 /// The report prompt, built and counted once the interview's assessment is
 /// over and before the farewell is spoken, so the call can run while it plays.
-pub(super) fn freeze_report_prompt(
+fn freeze_report_prompt(
     boot: &RuntimeBootstrap<'_>,
     state: &mut RuntimeState,
     elapsed_min: f64,
@@ -43,6 +44,23 @@ pub(super) fn freeze_report_prompt(
         &format!("{}\n\n{prompt}", report_system_instruction()),
     );
     prompt
+}
+
+pub(super) struct FrozenAssessment {
+    pub prompt: String,
+    state: RuntimeState,
+}
+
+pub(super) fn freeze_assessment(
+    boot: &RuntimeBootstrap<'_>,
+    state: &mut RuntimeState,
+    elapsed_min: f64,
+) -> FrozenAssessment {
+    let prompt = freeze_report_prompt(boot, state, elapsed_min);
+    FrozenAssessment {
+        prompt,
+        state: state.clone(),
+    }
 }
 
 /// The report call under `REPORT_TIMEOUT`. Borrows nothing of the interview
@@ -65,27 +83,435 @@ pub(super) async fn generate_report_bounded(
     .await
 }
 
-pub(super) async fn publish_report(
-    room: &Room,
-    boot: &RuntimeBootstrap<'_>,
-    state: &mut RuntimeState,
-    reason: &str,
-    api_key: &GeminiKeys,
+const REPORT_RECOVERY_WINDOW: std::time::Duration = std::time::Duration::from_secs(300);
+const REPORT_RETRY_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// How long the candidate waits before a regeneration may start, or `None`
+/// when the failure is not one waiting can fix. A deadline says nothing about
+/// the keys, so it asks the rotation itself: a retry offered while every key is
+/// still out on quota would fail before its first call and spend the one retry.
+fn regeneration_cooldown(
+    generated: &GeneratedReport,
+    keys: &GeminiKeys,
+) -> Option<std::time::Duration> {
+    let retry_after = match generated {
+        Err(_) => match report_readiness(keys) {
+            Readiness::Ready => Some(std::time::Duration::ZERO),
+            Readiness::Wait(delay) => Some(delay),
+            Readiness::Never => None,
+        },
+        Ok(Err(error)) => crate::gemini::report_regeneration_retry_after(error.as_ref()),
+        Ok(Ok(_)) => None,
+    };
+    retry_after.map(|delay| delay.max(REPORT_RETRY_COOLDOWN))
+}
+
+/// Whether the key rotation can make a report call now, and if not, whether
+/// waiting would help. Another interview sharing the keys can put them back on
+/// quota at any moment, so this is asked again when a retry arrives rather than
+/// trusted from when the offer went out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Readiness {
+    Ready,
+    Wait(std::time::Duration),
+    Never,
+}
+
+fn report_readiness(keys: &GeminiKeys) -> Readiness {
+    match keys.select_report() {
+        Ok(_) => Readiness::Ready,
+        Err(error) => match crate::gemini::report_regeneration_retry_after(&error) {
+            Some(delay) => Readiness::Wait(delay),
+            None => Readiness::Never,
+        },
+    }
+}
+
+fn recovery_request(
+    topic: Option<&str>,
+    sender: Option<&str>,
+    candidate: &str,
+    payload: &[u8],
+) -> bool {
+    super::interview_packet(topic, sender, candidate, payload).is_some_and(|(topic, payload)| {
+        topic == crate::runtime::TOPIC_CONTROL && payload["type"] == "retry_report"
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RecoveryEvent {
+    Retry,
+    /// The room itself is gone, so nothing published can arrive.
+    Left,
+    /// The candidate left, which a full LiveKit rejoin under the same identity
+    /// also looks like until `Back`.
+    Away,
+    Back,
+    Ignore,
+}
+
+/// How long a candidate who left may take to rejoin before the wait gives up.
+/// A full LiveKit rejoin after a network drop leaves and returns under the same
+/// identity, and treating the leave as final spent the one retry on a candidate
+/// who never went anywhere.
+const REJOIN_GRACE: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// The agent's answer to a retry, and its word that the window closed. Without
+/// them the page had to guess both from its own clock, which starts later than
+/// this one and stops for a reconnect this one never sees.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RecoveryNotice {
+    Accepted,
+    Early(std::time::Duration),
+    Closed,
+}
+
+/// A wait as the page is told it, rounded up, so a page that waits exactly
+/// this long is not early.
+fn whole_seconds(wait: std::time::Duration) -> u64 {
+    wait.as_millis().div_ceil(1000) as u64
+}
+
+fn recovery_notice(notice: RecoveryNotice) -> serde_json::Value {
+    match notice {
+        RecoveryNotice::Accepted => {
+            serde_json::json!({ "type": "report_retry", "status": "accepted" })
+        }
+        RecoveryNotice::Early(wait) => serde_json::json!({
+            "type": "report_retry",
+            "status": "early",
+
+            "retryAfterSeconds": whole_seconds(wait).max(1),
+        }),
+        RecoveryNotice::Closed => serde_json::json!({ "type": "report_retry", "status": "closed" }),
+    }
+}
+
+/// The room as recovery uses it: what arrives, and what goes back out. A
+/// separate seam from the room itself so the wait can be driven by a script.
+trait RecoveryRoom {
+    /// Whether the candidate is in the room now. Their departure is an event
+    /// the interview loop may already have consumed, and a wait for a retry
+    /// from nobody held the slot for the whole window.
+    fn candidate_present(&self) -> bool;
+    fn next(&mut self) -> impl std::future::Future<Output = RecoveryEvent> + Send;
+    fn notify(&mut self, notice: RecoveryNotice) -> impl std::future::Future<Output = ()> + Send;
+    fn publish(
+        &mut self,
+        packet: DataPacket,
+    ) -> impl std::future::Future<Output = Result<(), Box<dyn std::error::Error + Send + Sync>>> + Send;
+}
+
+struct LiveRecoveryRoom<'a> {
+    room: &'a Room,
+    candidate: &'a str,
+    events: &'a mut tokio::sync::mpsc::UnboundedReceiver<::livekit::RoomEvent>,
+}
+
+/// What one room event means to a recovery wait. `None` is the event stream
+/// ending, which only happens once the room is gone.
+fn recovery_event(event: Option<::livekit::RoomEvent>, candidate: &str) -> RecoveryEvent {
+    match event {
+        None | Some(::livekit::RoomEvent::Disconnected { .. }) => RecoveryEvent::Left,
+        Some(::livekit::RoomEvent::ParticipantDisconnected(p)) => {
+            candidate_only(&p.identity().0, candidate, RecoveryEvent::Away)
+        }
+        Some(::livekit::RoomEvent::ParticipantConnected(p)) => {
+            candidate_only(&p.identity().0, candidate, RecoveryEvent::Back)
+        }
+        Some(::livekit::RoomEvent::DataReceived {
+            topic,
+            payload,
+            participant,
+            ..
+        }) => {
+            let sender = participant.as_ref().map(|p| p.identity().0);
+            if recovery_request(topic.as_deref(), sender.as_deref(), candidate, &payload) {
+                RecoveryEvent::Retry
+            } else {
+                RecoveryEvent::Ignore
+            }
+        }
+        _ => RecoveryEvent::Ignore,
+    }
+}
+
+/// Only the candidate coming and going matters. Anyone else, an observer or
+/// the recording egress, says nothing about whether a retry can come.
+fn candidate_only(identity: &str, candidate: &str, event: RecoveryEvent) -> RecoveryEvent {
+    if identity == candidate {
+        event
+    } else {
+        RecoveryEvent::Ignore
+    }
+}
+
+impl RecoveryRoom for LiveRecoveryRoom<'_> {
+    fn candidate_present(&self) -> bool {
+        self.room
+            .remote_participants()
+            .values()
+            .any(|participant| participant.identity().0 == self.candidate)
+    }
+
+    async fn next(&mut self) -> RecoveryEvent {
+        recovery_event(self.events.recv().await, self.candidate)
+    }
+
+    async fn notify(&mut self, notice: RecoveryNotice) {
+        // A notice that cannot be sent leaves the page on its own fallback
+        // timers, which is no worse than before notices existed.
+        let sent = match browser_packet(crate::runtime::TOPIC_CONTROL, &recovery_notice(notice)) {
+            Ok(packet) => self.publish(packet).await,
+            Err(error) => Err(error.into()),
+        };
+        if let Err(error) = sent {
+            eprintln!("codetrial report_recovery_notice_failed notice={notice:?} error={error}");
+        }
+    }
+
+    async fn publish(
+        &mut self,
+        packet: DataPacket,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.room.local_participant().publish_data(packet).await?;
+        Ok(())
+    }
+}
+
+/// Sleeps until an absent candidate's rejoin grace runs out, or forever while
+/// they are present.
+async fn rejoin_expired(presence: &super::CandidatePresence) {
+    match presence.deadline(REJOIN_GRACE) {
+        Some(deadline) => {
+            tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
+        }
+        None => std::future::pending().await,
+    }
+}
+
+/// Follows the candidate's comings and goings, `Break` once the room itself is
+/// gone. A retry can only come from the candidate, so it shows them present.
+fn track_presence(
+    event: RecoveryEvent,
+    presence: &mut super::CandidatePresence,
+) -> std::ops::ControlFlow<()> {
+    match event {
+        RecoveryEvent::Left => return std::ops::ControlFlow::Break(()),
+
+        // The tokio clock, read as a std instant, so a paused test clock drives
+        // the grace the same way the real one does.
+        RecoveryEvent::Away => presence.left(tokio::time::Instant::now().into_std()),
+        RecoveryEvent::Back | RecoveryEvent::Retry => presence.returned(),
+        RecoveryEvent::Ignore => {}
+    }
+    std::ops::ControlFlow::Continue(())
+}
+
+async fn recover_report(
+    events: &mut impl RecoveryRoom,
+    generation: impl std::future::Future<Output = GeneratedReport>,
+    window: std::time::Duration,
+    cooldown: std::time::Duration,
+    started: tokio::time::Instant,
+    readiness: impl Fn() -> Readiness,
+) -> Option<GeneratedReport> {
+    let mut presence = super::CandidatePresence::default();
+    loop {
+        let event = tokio::select! {
+            biased;
+            _ = tokio::time::sleep_until(started + window) => {
+                events.notify(RecoveryNotice::Closed).await;
+                return None;
+            }
+            _ = rejoin_expired(&presence) => return None,
+            event = events.next() => event,
+        };
+        if track_presence(event, &mut presence).is_break() {
+            return None;
+        }
+        let RecoveryEvent::Retry = event else {
+            continue;
+        };
+        let waited = started.elapsed();
+        if waited < cooldown {
+            events
+                .notify(RecoveryNotice::Early(cooldown - waited))
+                .await;
+            continue;
+        }
+        match readiness() {
+            Readiness::Ready => {
+                events.notify(RecoveryNotice::Accepted).await;
+                break;
+            }
+            Readiness::Wait(delay) => events.notify(RecoveryNotice::Early(delay)).await,
+            Readiness::Never => {
+                events.notify(RecoveryNotice::Closed).await;
+                return None;
+            }
+        }
+    }
+
+    // The generation keeps running while the candidate is away within the
+    // grace, and what it returns waits for them to be back before it goes out.
+    tokio::pin!(generation);
+    let mut generated = None;
+    loop {
+        if presence.deadline(REJOIN_GRACE).is_none()
+            && let Some(result) = generated.take()
+        {
+            return Some(result);
+        }
+        tokio::select! {
+            _ = rejoin_expired(&presence) => return None,
+            event = events.next() => {
+                if track_presence(event, &mut presence).is_break() {
+                    return None;
+                }
+            }
+            result = &mut generation, if generated.is_none() => generated = Some(result),
+        }
+    }
+}
+
+pub(super) struct ReportRecovery<'a> {
+    pub boot: &'a RuntimeBootstrap<'a>,
+    pub assessment: FrozenAssessment,
+    pub reason: &'a str,
+    pub keys: &'a GeminiKeys,
+    pub candidate: &'a str,
+}
+
+/// Recovery runs a separate event loop: the ended interview must never pump
+/// new media into Gemini or interpret its deliberate shutdown as a reconnect.
+pub(super) async fn publish_with_recovery(
+    recovery: ReportRecovery<'_>,
     generated: GeneratedReport,
+    events: &mut tokio::sync::mpsc::UnboundedReceiver<::livekit::RoomEvent>,
+    room: &Room,
+    close_live: impl std::future::Future<Output = ()>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    room.local_participant()
-        .publish_data(report_packet(boot, state, reason, api_key, generated)?)
-        .await?;
+    let ReportRecovery {
+        boot,
+        assessment,
+        reason,
+        keys,
+        candidate,
+    } = recovery;
+    let FrozenAssessment { prompt, mut state } = assessment;
+    let mut room = LiveRecoveryRoom {
+        room,
+        candidate,
+        events,
+    };
+    run_recovery(
+        &mut room,
+        RecoveryReport {
+            boot,
+            state: &mut state,
+            reason,
+            keys,
+        },
+        generated,
+        generate_report_bounded(boot, &prompt, keys),
+        tokio::time::Instant::now,
+        close_live,
+    )
+    .await
+}
+
+/// What each published report is built from. The frozen state, never the live
+/// one, so a regenerated report carries the same evidence as the failure it
+/// replaces.
+struct RecoveryReport<'a> {
+    boot: &'a RuntimeBootstrap<'a>,
+    state: &'a mut RuntimeState,
+    reason: &'a str,
+    keys: &'a GeminiKeys,
+}
+
+/// `clock` names when the offer went out. The agent reads the real clock; a
+/// test reads one already past the cooldown rather than pausing time under a
+/// real HTTP exchange. `close_live` runs exactly once, on every path.
+async fn run_recovery(
+    room: &mut impl RecoveryRoom,
+    report: RecoveryReport<'_>,
+    generated: GeneratedReport,
+    regenerate: impl std::future::Future<Output = GeneratedReport>,
+    clock: fn() -> tokio::time::Instant,
+    close_live: impl std::future::Future<Output = ()>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let RecoveryReport {
+        boot,
+        state,
+        reason,
+        keys,
+    } = report;
+
+    // The Live session is closed once, after the report it would otherwise
+    // delay by up to its close timeout, and before a recovery wait that must
+    // not hold it open for minutes.
+    let Some(cooldown) =
+        regeneration_cooldown(&generated, keys).filter(|_| room.candidate_present())
+    else {
+        let published: Result<(), Box<dyn std::error::Error + Send + Sync>> = async {
+            room.publish(report_packet(boot, state, reason, keys, generated)?)
+                .await
+        }
+        .await;
+        close_live.await;
+        return published;
+    };
+    let mut provisional = report_value(boot, state, reason, keys, generated);
+    provisional["reportRecovery"] = recovery_metadata(cooldown);
+    let started = clock();
+    let published: Result<(), Box<dyn std::error::Error + Send + Sync>> =
+        async { room.publish(report_data_packet(provisional)?).await }.await;
+    close_live.await;
+    published?;
+    if let Some(generated) = recover_report(
+        room,
+        regenerate,
+        REPORT_RECOVERY_WINDOW,
+        cooldown,
+        started,
+        || report_readiness(keys),
+    )
+    .await
+    {
+        room.publish(report_packet(boot, state, reason, keys, generated)?)
+            .await?;
+    }
     Ok(())
+}
+
+fn recovery_metadata(cooldown: std::time::Duration) -> serde_json::Value {
+    serde_json::json!({
+        "expiresInSeconds": REPORT_RECOVERY_WINDOW.as_secs(),
+        "retryAfterSeconds": whole_seconds(cooldown),
+    })
 }
 
 fn report_packet(
     boot: &RuntimeBootstrap<'_>,
     state: &mut RuntimeState,
     reason: &str,
-    api_key: &GeminiKeys,
+    keys: &GeminiKeys,
     generated: GeneratedReport,
 ) -> Result<DataPacket, Box<dyn std::error::Error + Send + Sync>> {
+    Ok(report_data_packet(report_value(
+        boot, state, reason, keys, generated,
+    ))?)
+}
+
+fn report_value(
+    boot: &RuntimeBootstrap<'_>,
+    state: &mut RuntimeState,
+    reason: &str,
+    api_key: &GeminiKeys,
+    generated: GeneratedReport,
+) -> serde_json::Value {
     let mut report = match generated {
         Ok(Ok(raw)) => final_report(Some(&raw), state.hints_used, None, boot.problem),
         Ok(Err(error)) => final_report(
@@ -126,9 +552,7 @@ fn report_packet(
     };
     stamp_report_debrief(&mut report, boot, state);
     stamp_report_contract(&mut report);
-    Ok(report_data_packet(report_with_integrity_events(
-        report, state, reason,
-    ))?)
+    report_with_integrity_events(report, state, reason)
 }
 
 /// The teaching material that becomes useful only after an interview ends.

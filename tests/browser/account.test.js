@@ -186,7 +186,7 @@ test("the lobby offers one interview and carries no mode to the room", () => {
     interview,
     "JSON.stringify({ problemId: problem.page, durationMin, interviewId, interviewLoop, interviewProfile, ...(interviewGrounding",
   );
-  assertIncludesCompact(interview, "interviewLoop, report: state.report");
+  assertIncludesCompact(interview, "durationMin, interviewLoop, report, };");
 });
 
 test("interview loop is explicit, budgeted, gated, and carried into artifacts", () => {
@@ -335,6 +335,67 @@ test("report history writes local storage before account sync", async () => {
   assert.equal(posts.length, 1);
   assert.equal(posts[0].url, "/api/reports");
   assert.equal(posts[0].options.method, "POST");
+});
+
+test("a report saved again under its id replaces the earlier copy", async () => {
+  const storage = memoryStorage();
+  const fetcher = async () => response({ signedIn: false });
+  await saveReportHistory(
+    { id: "older", problemId: "two-sum", report: { decision: "HIRE" } },
+    { storage, fetcher },
+  );
+  for (const summary of ["provisional failure", "regenerated"]) {
+    await saveReportHistory(
+      {
+        id: "interview-report",
+        problemId: "two-sum",
+        report: { incomplete: summary !== "regenerated", summary },
+      },
+      { storage, fetcher },
+    );
+  }
+  for (const rows of [readLocalHistory(storage), readReviewHistory(storage)]) {
+    assert.deepEqual(
+      rows.map((row) => row.id),
+      ["interview-report", "older"],
+    );
+    assert.equal(rows[0].report.summary, "regenerated");
+  }
+});
+
+test("account saves of one report id land in the order they were made", async () => {
+  const posted = [];
+  let releaseFirst;
+  const firstSession = new Promise((resolve) => {
+    releaseFirst = () => resolve(response({ signedIn: true }));
+  });
+  let sessions = 0;
+  const fetcher = async (url, options) => {
+    if (url === "/api/session")
+      return ++sessions === 1 ? firstSession : response({ signedIn: true });
+    posted.push(JSON.parse(options.body).report.summary);
+    return response({ id: "same" });
+  };
+  const entry = (summary) => ({
+    id: "same",
+    problemId: "two-sum",
+    report: { incomplete: true, summary },
+  });
+  const provisional = saveReportHistory(entry("provisional"), {
+    storage: memoryStorage(),
+    fetcher,
+  });
+  const final = saveReportHistory(entry("final"), {
+    storage: memoryStorage(),
+    fetcher,
+  });
+  // The second save's own session check would answer at once; it still waits.
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(posted, []);
+  releaseFirst();
+  assert.deepEqual(await provisional, { local: "saved", account: "saved" });
+  assert.deepEqual(await final, { local: "saved", account: "saved" });
+  assert.deepEqual(posted, ["provisional", "final"]);
 });
 
 test("review inputs survive the full-report cap", async () => {

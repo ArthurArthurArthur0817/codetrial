@@ -110,8 +110,7 @@ pub(super) struct GeminiEventContext<'a> {
     pub(super) agent_state: &'a mut String,
     pub(super) activity: &'a mut RuntimeActivity,
     pub(super) turns: &'a mut SpeakerTurns,
-    candidate_identity: Option<&'a str>,
-    pub(super) candidate_audio: &'a mut Vec<u8>,
+    pub(super) media: &'a mut CandidateMedia,
 }
 
 impl GeminiEventContext<'_> {
@@ -565,7 +564,8 @@ async fn on_input_transcript(
     text: &str,
     interruptible: Interruptible,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    if let (Some(_), Some(identity)) = (transcript_text(text), context.candidate_identity) {
+    let candidate_identity = context.media.identity.clone();
+    if let (Some(_), Some(identity)) = (transcript_text(text), candidate_identity.as_deref()) {
         // The candidate is talking over audio Gemini finished producing a while
         // ago. Gemini will not call this an interruption, because as far as it
         // is concerned that turn ended when it stopped generating; only this
@@ -1361,7 +1361,7 @@ pub(super) async fn close_turns(
     room: &Room,
     context: &mut GeminiEventContext<'_>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let candidate_identity = context.candidate_identity.map(str::to_string);
+    let candidate_identity = context.media.identity.clone();
 
     let order = closing_order(
         context.turns.interviewer.transcript_line(),
@@ -1431,8 +1431,7 @@ impl TurnState {
             agent_state: &mut self.agent_state,
             activity: &mut self.activity,
             turns: &mut self.turns,
-            candidate_identity: media.identity.as_deref(),
-            candidate_audio: &mut media.audio_bytes,
+            media,
         }
     }
 }

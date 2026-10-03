@@ -7,7 +7,7 @@ use serde_json::Value;
 
 use crate::config::AgentConfig;
 
-const QUOTA_COOLDOWN: Duration = Duration::from_secs(60);
+pub(crate) const QUOTA_COOLDOWN: Duration = Duration::from_secs(60);
 
 // As long as the web pool trusts a refused LiveKit credential verdict. A
 // refusal that was about the project rather than the key, and so marked every
@@ -63,9 +63,10 @@ struct Cooldown {
     live: Option<Instant>,
     report: Option<Instant>,
 
-    // Read only to decide whether an exhausted Live rotation is worth waiting
-    // out. It never outlives `live`, so pruning and selection ignore it.
+    // Rejections cannot recover just by waiting. Each marker expires no later
+    // than its surface deadline, so pruning needs only those deadlines.
     live_rejected: Option<Instant>,
+    report_rejected: Option<Instant>,
 
     // Read only to say why a rotation ran dry, in the same way.
     billing: Option<Instant>,
@@ -146,7 +147,33 @@ impl GeminiKeys {
         self.select_for(ApiSurface::Report)
     }
 
+    /// A rotation whose every key is out on report quota, for callers outside
+    /// this module that decide from the rotation's answer.
+    #[cfg(test)]
+    pub(crate) fn report_quota_exhausted(keys: &[&str]) -> Self {
+        let rotation = Self::new(keys.iter().map(|key| key.to_string()).collect());
+        for key in keys {
+            rotation.failed(key, CredentialFailure::Quota, ApiSurface::Report);
+        }
+        rotation
+    }
+
+    #[cfg(test)]
+    pub(super) fn select_report_at(&self, now: Instant) -> Result<String, io::Error> {
+        // A simulated future must not expire another test's credentials.
+        self.select_for_at(ApiSurface::Report, now, false)
+    }
+
     fn select_for(&self, surface: ApiSurface) -> Result<String, io::Error> {
+        self.select_for_at(surface, Instant::now(), true)
+    }
+
+    fn select_for_at(
+        &self,
+        surface: ApiSurface,
+        now: Instant,
+        prune: bool,
+    ) -> Result<String, io::Error> {
         // Short of the shared map as well, which another interview's list
         // holding the same key string would otherwise write for it.
         if !self.has_backups() {
@@ -160,10 +187,11 @@ impl GeminiKeys {
             .get_or_init(Mutex::default)
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        let now = Instant::now();
-        cooldowns.retain(|_, cooldown| {
-            cooling_down(cooldown.live, now) || cooling_down(cooldown.report, now)
-        });
+        if prune {
+            cooldowns.retain(|_, cooldown| {
+                cooling_down(cooldown.live, now) || cooling_down(cooldown.report, now)
+            });
+        }
         let mut current = self
             .current
             .lock()
@@ -189,8 +217,8 @@ impl GeminiKeys {
                 })
             })
             .ok_or_else(|| {
-                // The earliest Live key to come back that was out on quota
-                // alone. A refused key would only be refused again.
+                // A quota deadline can recover either surface. A rejected
+                // credential must not masquerade as a temporary rate limit.
                 let retry_at = match surface {
                     ApiSurface::Live => self
                         .keys
@@ -199,7 +227,13 @@ impl GeminiKeys {
                         .filter(|cooldown| !cooling_down(cooldown.live_rejected, now))
                         .filter_map(|cooldown| cooldown.live)
                         .min(),
-                    ApiSurface::Report => None,
+                    ApiSurface::Report => self
+                        .keys
+                        .iter()
+                        .filter_map(|key| cooldowns.get(key))
+                        .filter(|cooldown| !cooling_down(cooldown.report_rejected, now))
+                        .filter_map(|cooldown| cooldown.report)
+                        .min(),
                 };
                 let billing = self.keys.iter().any(|key| {
                     cooldowns
@@ -233,6 +267,7 @@ impl GeminiKeys {
                 extend(&mut entry.live, rejected);
                 extend(&mut entry.report, rejected);
                 extend(&mut entry.live_rejected, rejected);
+                extend(&mut entry.report_rejected, rejected);
                 if failure == CredentialFailure::Billing {
                     extend(&mut entry.billing, rejected);
                 }
@@ -242,7 +277,10 @@ impl GeminiKeys {
                     extend(&mut entry.live, rejected);
                     extend(&mut entry.live_rejected, rejected);
                 }
-                ApiSurface::Report => extend(&mut entry.report, rejected),
+                ApiSurface::Report => {
+                    extend(&mut entry.report, rejected);
+                    extend(&mut entry.report_rejected, rejected);
+                }
             },
             CredentialFailure::Quota => extend(
                 match surface {
@@ -292,7 +330,7 @@ pub(super) fn exhausted_by_billing(error: &(dyn std::error::Error + 'static)) ->
     as_exhausted(error).is_some_and(|exhausted| exhausted.billing)
 }
 
-/// When an exhausted Live rotation has a key back from its quota cooldown.
+/// When an exhausted rotation has a key back from its quota cooldown.
 pub(crate) fn exhausted_until(error: &(dyn std::error::Error + 'static)) -> Option<Instant> {
     as_exhausted(error)?.retry_at
 }

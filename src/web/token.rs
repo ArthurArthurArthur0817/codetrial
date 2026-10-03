@@ -441,9 +441,9 @@ async fn dispatch_or_release_consent(
     let Some(dispatcher) = &state.dispatcher else {
         return None;
     };
-    if dispatcher.ensure_agent(room_name, provider) {
+    let Err(refusal) = dispatcher.ensure_agent(room_name, provider) else {
         return None;
-    }
+    };
     if let Some(interview) = interview {
         let accounts = accounts.clone();
         let interview = interview.clone();
@@ -459,11 +459,17 @@ async fn dispatch_or_release_consent(
     // Refusing is the honest failure. Handing out the token anyway would put
     // the candidate in an empty room reading "Waiting" with nothing, on screen
     // or in any log they can see, saying why.
+    let error = match refusal {
+        super::DispatchRefusal::AtCapacity => {
+            "The server is running as many interviews as it can right now. Try again in a few minutes."
+        }
+        super::DispatchRefusal::Finalizing => {
+            "This room is still finishing the previous interview's report. Try again in a few minutes."
+        }
+    };
     Some(json_response(
         StatusCode::SERVICE_UNAVAILABLE,
-        json!({
-            "error": "The server is running as many interviews as it can right now. Try again in a few minutes."
-        }),
+        json!({ "error": error }),
     ))
 }
 

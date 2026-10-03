@@ -1,0 +1,12 @@
+{
+  "expiresInSeconds": 300,
+  "retryAfterSeconds": 30,
+  "quotaRetryAfterSeconds": 60,
+  "retryWaitSeconds": 140,
+  "closeGraceSeconds": 15,
+  "retryStatuses": [
+    "accepted",
+    "early",
+    "closed"
+  ]
+}

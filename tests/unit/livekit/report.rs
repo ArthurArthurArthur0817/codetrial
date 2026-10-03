@@ -752,3 +752,650 @@ fn a_frozen_report_prompt_is_counted_and_a_missed_deadline_still_reports() {
         "{summary}"
     );
 }
+
+#[test]
+fn only_the_original_candidate_can_request_report_regeneration() {
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("../../fixtures/control.json")).unwrap();
+    let cases = fixture
+        .as_array()
+        .unwrap_or_else(|| fixture["cases"].as_array().unwrap());
+    let retry = cases
+        .iter()
+        .find(|case| case["payload"]["type"] == "retry_report")
+        .expect("generated retry fixture");
+    let payload = serde_json::to_vec(&retry["payload"]).unwrap();
+    assert!(recovery_request(
+        Some(crate::runtime::TOPIC_CONTROL),
+        Some("candidate-original"),
+        "candidate-original",
+        &payload
+    ));
+    for sender in [None, Some("candidate-other"), Some("interviewer-room")] {
+        assert!(!recovery_request(
+            Some(crate::runtime::TOPIC_CONTROL),
+            sender,
+            "candidate-original",
+            &payload
+        ));
+    }
+    assert!(!recovery_request(
+        Some(crate::runtime::TOPIC_CODE_UPDATE),
+        Some("candidate-original"),
+        "candidate-original",
+        &payload
+    ));
+    assert!(!recovery_request(
+        Some(crate::runtime::TOPIC_CONTROL),
+        Some("candidate-original"),
+        "candidate-original",
+        b"not JSON"
+    ));
+}
+
+#[tokio::test]
+async fn only_transient_failure_and_deadline_can_offer_regeneration() {
+    let keys = GeminiKeys::single("test");
+    assert!(regeneration_cooldown(&Ok(Ok(serde_json::json!({}))), &keys).is_none());
+    let schema_failure = Ok(Err(std::io::Error::new(
+        std::io::ErrorKind::InvalidData,
+        "schema failure",
+    )
+    .into()));
+    assert!(regeneration_cooldown(&schema_failure, &keys).is_none());
+    assert_eq!(
+        regeneration_cooldown(&Err(elapsed().await), &keys),
+        Some(REPORT_RETRY_COOLDOWN)
+    );
+}
+
+async fn elapsed() -> tokio::time::error::Elapsed {
+    tokio::time::timeout(std::time::Duration::ZERO, std::future::pending::<()>())
+        .await
+        .unwrap_err()
+}
+
+/// A deadline missed while every key sat out on quota: the 30-second offer
+/// would start the one regeneration before any key is back, and it would fail
+/// at selection without a single HTTP call.
+#[tokio::test]
+async fn a_deadline_during_quota_exhaustion_waits_for_the_keys() {
+    let keys =
+        GeminiKeys::report_quota_exhausted(&["deadline-quota-first", "deadline-quota-second"]);
+    assert!(keys.select_report().is_err());
+    let cooldown = regeneration_cooldown(&Err(elapsed().await), &keys).unwrap();
+
+    // Until the first key is back, which here is just under a whole cooldown,
+    // and the page is told the whole second it must wait.
+    assert!(cooldown > REPORT_RETRY_COOLDOWN, "{cooldown:?}");
+    assert!(cooldown <= crate::gemini::QUOTA_COOLDOWN, "{cooldown:?}");
+    assert_eq!(
+        recovery_metadata(cooldown)["retryAfterSeconds"],
+        crate::gemini::QUOTA_COOLDOWN.as_secs()
+    );
+}
+
+#[test]
+fn report_metadata_uses_the_frozen_assessment() {
+    let config = report_test_config();
+    let boot = bootstrap(&config, "interview-fixed", Some("two-sum"), 45);
+    let mut live = RuntimeState::default();
+    let mut frozen = freeze_assessment(&boot, &mut live, 12.0);
+    live.code = "post-interview edits".into();
+    live.hints_used = 5;
+    assert!(!frozen.prompt.contains("post-interview edits"));
+    assert_eq!(live.evidence_ledger.metrics.final_report_prompt_count, 1);
+    assert_eq!(
+        frozen
+            .state
+            .evidence_ledger
+            .metrics
+            .final_report_prompt_count,
+        1
+    );
+    live.integrity_events.push(serde_json::json!({"seq": 100}));
+    let packet = report_packet(
+        &boot,
+        &mut frozen.state,
+        "interview_complete",
+        &GeminiKeys::single("test"),
+        Ok(Err(std::io::Error::other("503").into())),
+    )
+    .unwrap();
+    let report: serde_json::Value = serde_json::from_slice(&packet.payload).unwrap();
+    assert!(report["integrityEvents"].as_array().unwrap().is_empty());
+    assert_ne!(
+        report["integrityEvents"],
+        report_with_integrity_events(serde_json::json!({}), &live, "interview_complete")["integrityEvents"]
+    );
+}
+
+struct RecoveryFixture(
+    tokio::sync::mpsc::UnboundedReceiver<RecoveryEvent>,
+    Vec<RecoveryNotice>,
+    Vec<serde_json::Value>,
+    bool,
+);
+
+impl RecoveryFixture {
+    fn new(events: tokio::sync::mpsc::UnboundedReceiver<RecoveryEvent>) -> Self {
+        Self(events, Vec::new(), Vec::new(), true)
+    }
+}
+
+impl RecoveryRoom for RecoveryFixture {
+    fn candidate_present(&self) -> bool {
+        self.3
+    }
+
+    async fn next(&mut self) -> RecoveryEvent {
+        self.0.recv().await.unwrap_or(RecoveryEvent::Left)
+    }
+
+    async fn notify(&mut self, notice: RecoveryNotice) {
+        self.1.push(notice);
+    }
+
+    async fn publish(
+        &mut self,
+        packet: DataPacket,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        assert_eq!(packet.topic.as_deref(), Some(TOPIC_REPORT));
+        self.2.push(serde_json::from_slice(&packet.payload)?);
+        Ok(())
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn recovery_wait_never_generates_before_a_valid_request() {
+    for (event, notices) in [
+        (RecoveryEvent::Left, vec![]),
+        (
+            RecoveryEvent::Retry,
+            vec![
+                RecoveryNotice::Early(REPORT_RETRY_COOLDOWN),
+                RecoveryNotice::Closed,
+            ],
+        ),
+        (RecoveryEvent::Ignore, vec![RecoveryNotice::Closed]),
+    ] {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        tx.send(event).unwrap();
+        let mut fixture = RecoveryFixture::new(rx);
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let generation = async {
+            calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(Ok(serde_json::json!({})))
+        };
+        let result = recover_report(
+            &mut fixture,
+            generation,
+            std::time::Duration::from_millis(2),
+            REPORT_RETRY_COOLDOWN,
+            tokio::time::Instant::now(),
+            || Readiness::Ready,
+        )
+        .await;
+        assert!(result.is_none());
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(fixture.1, notices);
+        // Held open, so expiry is what ended the wait rather than the channel.
+        drop(tx);
+    }
+}
+
+#[tokio::test]
+async fn recovery_generates_once_despite_duplicate_requests() {
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    tx.send(RecoveryEvent::Retry).unwrap();
+    tx.send(RecoveryEvent::Retry).unwrap();
+    let mut fixture = RecoveryFixture::new(rx);
+    let calls = std::sync::atomic::AtomicUsize::new(0);
+    let generation = async {
+        calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(Ok(serde_json::json!({"result": "complete"})))
+    };
+    let result = recover_report(
+        &mut fixture,
+        generation,
+        REPORT_RECOVERY_WINDOW,
+        std::time::Duration::ZERO,
+        tokio::time::Instant::now(),
+        || Readiness::Ready,
+    )
+    .await;
+    assert_eq!(result.unwrap().unwrap().unwrap()["result"], "complete");
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert_eq!(fixture.1, [RecoveryNotice::Accepted]);
+}
+
+#[tokio::test]
+async fn leaving_during_regeneration_cancels_the_call() {
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    tx.send(RecoveryEvent::Retry).unwrap();
+    tx.send(RecoveryEvent::Left).unwrap();
+    let mut fixture = RecoveryFixture::new(rx);
+    let result = recover_report(
+        &mut fixture,
+        std::future::pending(),
+        REPORT_RECOVERY_WINDOW,
+        std::time::Duration::ZERO,
+        tokio::time::Instant::now(),
+        || Readiness::Ready,
+    )
+    .await;
+    assert!(result.is_none());
+}
+
+/// An early request is answered with the time still to wait, and does not
+/// spend the regeneration: the same page asking again after it is accepted.
+#[tokio::test(start_paused = true)]
+async fn an_early_retry_is_told_how_long_to_wait_and_keeps_its_turn() {
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut fixture = RecoveryFixture::new(rx);
+    let started = tokio::time::Instant::now();
+    let requests = async {
+        tokio::time::sleep(std::time::Duration::from_millis(10_500)).await;
+        tx.send(RecoveryEvent::Retry).unwrap();
+        tokio::time::sleep(std::time::Duration::from_secs(20)).await;
+        tx.send(RecoveryEvent::Retry).unwrap();
+        tx
+    };
+    let (result, _tx) = tokio::join!(
+        recover_report(
+            &mut fixture,
+            async { Ok(Ok(serde_json::json!({"result": "complete"}))) },
+            REPORT_RECOVERY_WINDOW,
+            REPORT_RETRY_COOLDOWN,
+            started,
+            || Readiness::Ready,
+        ),
+        requests,
+    );
+    assert!(result.is_some());
+    let [RecoveryNotice::Early(wait), RecoveryNotice::Accepted] = fixture.1[..] else {
+        panic!("unexpected notices {:?}", fixture.1);
+    };
+    assert_eq!(wait, std::time::Duration::from_millis(19_500));
+    assert_eq!(
+        recovery_notice(RecoveryNotice::Early(wait))["retryAfterSeconds"],
+        20
+    );
+}
+
+/// The page's clock starts when the provisional report arrives, later than
+/// this one. A retry it still thinks is in time but that lands after expiry
+/// gets the closing notice rather than a spinner nobody will answer.
+#[tokio::test(start_paused = true)]
+async fn a_retry_after_expiry_is_not_accepted() {
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut fixture = RecoveryFixture::new(rx);
+    let started = tokio::time::Instant::now();
+    let late = async {
+        tokio::time::sleep(REPORT_RECOVERY_WINDOW + std::time::Duration::from_secs(1)).await;
+        let _ = tx.send(RecoveryEvent::Retry);
+        tx
+    };
+    let (result, _tx) = tokio::join!(
+        recover_report(
+            &mut fixture,
+            async { Ok(Ok(serde_json::json!({}))) },
+            REPORT_RECOVERY_WINDOW,
+            REPORT_RETRY_COOLDOWN,
+            started,
+            || Readiness::Ready,
+        ),
+        late,
+    );
+    assert!(result.is_none());
+    assert_eq!(fixture.1, [RecoveryNotice::Closed]);
+}
+
+#[test]
+fn recovery_notices_use_the_statuses_the_page_reads() {
+    let limits: serde_json::Value =
+        serde_json::from_str(include_str!("../../fixtures/report-recovery.json")).unwrap();
+    let statuses = limits["retryStatuses"].as_array().unwrap();
+    for notice in [
+        RecoveryNotice::Accepted,
+        RecoveryNotice::Early(std::time::Duration::from_millis(1)),
+        RecoveryNotice::Closed,
+    ] {
+        let value = recovery_notice(notice);
+        assert_eq!(value["type"], "report_retry");
+        assert!(statuses.contains(&value["status"]), "{value}");
+    }
+    assert_eq!(statuses.len(), 3);
+}
+
+#[test]
+fn recovery_offer_matches_browser_limits_and_generation_deadline() {
+    let limits: serde_json::Value =
+        serde_json::from_str(include_str!("../../fixtures/report-recovery.json")).unwrap();
+    let offer = recovery_metadata(REPORT_RETRY_COOLDOWN);
+    assert_eq!(offer["expiresInSeconds"], limits["expiresInSeconds"]);
+    assert_eq!(offer["retryAfterSeconds"], limits["retryAfterSeconds"]);
+    assert_eq!(
+        recovery_metadata(crate::gemini::QUOTA_COOLDOWN)["retryAfterSeconds"],
+        limits["quotaRetryAfterSeconds"]
+    );
+    assert!(limits["retryWaitSeconds"].as_u64().unwrap() > REPORT_TIMEOUT.as_secs() + 3);
+}
+
+#[tokio::test]
+async fn recovery_room_events_ignore_unrelated_activity_and_stop_on_disconnect() {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    tx.send(::livekit::RoomEvent::Reconnecting).unwrap();
+    tx.send(::livekit::RoomEvent::DataReceived {
+        payload: std::sync::Arc::new(br#"{"type":"retry_report"}"#.to_vec()),
+        topic: Some(crate::runtime::TOPIC_CONTROL.into()),
+        kind: ::livekit::DataPacketKind::Reliable,
+        participant: None,
+    })
+    .unwrap();
+    tx.send(::livekit::RoomEvent::Disconnected {
+        reason: ::livekit::DisconnectReason::ClientInitiated,
+    })
+    .unwrap();
+    let candidate = "candidate-original";
+    assert_eq!(
+        recovery_event(rx.recv().await, candidate),
+        RecoveryEvent::Ignore
+    );
+    assert_eq!(
+        recovery_event(rx.recv().await, candidate),
+        RecoveryEvent::Ignore
+    );
+    assert_eq!(
+        recovery_event(rx.recv().await, candidate),
+        RecoveryEvent::Left
+    );
+    drop(tx);
+    assert_eq!(
+        recovery_event(rx.recv().await, candidate),
+        RecoveryEvent::Left
+    );
+}
+
+fn past_cooldown() -> tokio::time::Instant {
+    tokio::time::Instant::now() - REPORT_RETRY_COOLDOWN
+}
+
+/// The recovery the issue asked for, end to end over HTTP: an interview whose
+/// report call ran out of retries on 503s is offered one regeneration, and the
+/// candidate's retry gets a complete report from the same frozen interview,
+/// with no new Live session and inside the ten-call ceiling.
+#[tokio::test]
+async fn a_report_lost_to_503s_is_regenerated_from_the_frozen_interview() {
+    let bodies = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let seen = std::sync::Arc::clone(&bodies);
+    let app = axum::Router::new().route(
+        "/",
+        axum::routing::post(move |body: String| {
+            let seen = std::sync::Arc::clone(&seen);
+            async move {
+                let mut seen = seen.lock().unwrap();
+                seen.push(body);
+
+                // Every call of the first generation fails, then the service
+                // comes back for the regeneration.
+                if seen.len() <= 5 {
+                    (
+                        axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                        axum::Json(serde_json::json!({"error": {"code": 503, "message": "overloaded"}})),
+                    )
+                } else {
+                    let text = crate::gemini::tests::valid_report().to_string();
+                    (
+                        axum::http::StatusCode::OK,
+                        axum::Json(serde_json::json!({"candidates": [{"content": {"parts": [{"text": text}]}}]})),
+                    )
+                }
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+    let config = report_test_config();
+    let boot = bootstrap(&config, "interview-fixed", Some("two-sum"), 45);
+    let mut live = RuntimeState::default();
+    let mut frozen = freeze_assessment(&boot, &mut live, 12.0);
+    let keys = GeminiKeys::single("recovery-e2e");
+    let generate = |prompt: &str| {
+        let (keys, url, problem) = (&keys, url.clone(), boot.problem);
+        let prompt = prompt.to_string();
+        async move {
+            tokio::time::timeout(
+                REPORT_TIMEOUT,
+                crate::gemini::tests::generate_report_at(
+                    keys,
+                    &url,
+                    std::time::Duration::ZERO,
+                    &prompt,
+                    problem,
+                    "interview-fixed",
+                ),
+            )
+            .await
+        }
+    };
+    let first = generate(&frozen.prompt).await;
+    let regenerate = generate(&frozen.prompt);
+
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    tx.send(RecoveryEvent::Retry).unwrap();
+    let mut room = RecoveryFixture::new(rx);
+    let closed = std::sync::atomic::AtomicBool::new(false);
+    run_recovery(
+        &mut room,
+        RecoveryReport {
+            boot: &boot,
+            state: &mut frozen.state,
+            reason: "interview_complete",
+            keys: &keys,
+        },
+        first,
+        regenerate,
+        past_cooldown,
+        async { closed.store(true, std::sync::atomic::Ordering::SeqCst) },
+    )
+    .await
+    .unwrap();
+    server.abort();
+    assert!(
+        closed.load(std::sync::atomic::Ordering::SeqCst),
+        "the Live session outlived the offer"
+    );
+
+    let [provisional, report] = &room.2[..] else {
+        panic!("expected two reports, got {:?}", room.2);
+    };
+    assert_eq!(provisional["incomplete"], true);
+    assert_eq!(
+        provisional["reportRecovery"]["retryAfterSeconds"],
+        REPORT_RETRY_COOLDOWN.as_secs()
+    );
+    assert!(report.get("reportRecovery").is_none());
+    assert_ne!(report["incomplete"], true, "{report}");
+    assert_eq!(report["codingScore"], 82);
+    assert_eq!(room.1, [RecoveryNotice::Accepted]);
+
+    let bodies = bodies.lock().unwrap();
+    assert_eq!(bodies.len(), 6);
+    assert!(bodies.len() <= 10);
+    assert!(bodies.iter().all(|body| body == &bodies[0]));
+    drop(tx);
+}
+
+/// A candidate who left before the interview ended cannot ask for a retry, and
+/// their departure was consumed by the interview loop: the final failure goes
+/// out at once instead of a five-minute wait in an empty room.
+#[tokio::test]
+async fn an_absent_candidate_gets_the_failure_without_a_recovery_window() {
+    let config = report_test_config();
+    let boot = bootstrap(&config, "interview-fixed", Some("two-sum"), 45);
+    let mut live = RuntimeState::default();
+    let mut frozen = freeze_assessment(&boot, &mut live, 12.0);
+    let keys = GeminiKeys::single("absent");
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut room = RecoveryFixture::new(rx);
+    room.3 = false;
+    let regenerated = std::sync::atomic::AtomicBool::new(false);
+    let closed = std::sync::atomic::AtomicBool::new(false);
+    run_recovery(
+        &mut room,
+        RecoveryReport {
+            boot: &boot,
+            state: &mut frozen.state,
+            reason: "time_up",
+            keys: &keys,
+        },
+        Err(elapsed().await),
+        async {
+            regenerated.store(true, std::sync::atomic::Ordering::SeqCst);
+            Ok(Ok(serde_json::json!({})))
+        },
+        tokio::time::Instant::now,
+        async { closed.store(true, std::sync::atomic::Ordering::SeqCst) },
+    )
+    .await
+    .unwrap();
+    assert!(
+        closed.load(std::sync::atomic::Ordering::SeqCst),
+        "the Live session stayed open"
+    );
+    let [report] = &room.2[..] else {
+        panic!("expected one report, got {:?}", room.2);
+    };
+    assert_eq!(report["incomplete"], true);
+    assert!(report.get("reportRecovery").is_none());
+    assert!(room.1.is_empty());
+    assert!(!regenerated.load(std::sync::atomic::Ordering::SeqCst));
+    drop(tx);
+}
+
+#[test]
+fn only_the_candidate_coming_and_going_moves_a_recovery_wait() {
+    for event in [RecoveryEvent::Away, RecoveryEvent::Back] {
+        assert_eq!(
+            candidate_only("candidate-original", "candidate-original", event),
+            event
+        );
+        assert_eq!(
+            candidate_only("observer-1", "candidate-original", event),
+            RecoveryEvent::Ignore
+        );
+    }
+}
+
+/// Drives a recovery wait from a script of events, each sent after its delay.
+async fn scripted_recovery(
+    script: Vec<(u64, RecoveryEvent)>,
+    generation: impl std::future::Future<Output = GeneratedReport>,
+    readiness: Readiness,
+) -> (Option<GeneratedReport>, Vec<RecoveryNotice>) {
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut fixture = RecoveryFixture::new(rx);
+    let sender = async move {
+        for (delay, event) in script {
+            tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+            let _ = tx.send(event);
+        }
+        tx
+    };
+    let (result, _tx) = tokio::join!(
+        recover_report(
+            &mut fixture,
+            generation,
+            REPORT_RECOVERY_WINDOW,
+            std::time::Duration::ZERO,
+            tokio::time::Instant::now(),
+            move || readiness,
+        ),
+        sender,
+    );
+    (result, fixture.1)
+}
+
+/// A full LiveKit rejoin looks like the candidate leaving and coming back. An
+/// accepted regeneration keeps running through it, and the report it returns
+/// while they are away waits for them instead of going into an empty room.
+#[tokio::test(start_paused = true)]
+async fn a_rejoin_within_the_grace_keeps_an_accepted_regeneration() {
+    let started = tokio::time::Instant::now();
+    let generation = async {
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        Ok(Ok(serde_json::json!({"result": "complete"})))
+    };
+    let (result, notices) = scripted_recovery(
+        vec![
+            (0, RecoveryEvent::Retry),
+            (1, RecoveryEvent::Away),
+            (19, RecoveryEvent::Back),
+        ],
+        generation,
+        Readiness::Ready,
+    )
+    .await;
+    assert_eq!(result.unwrap().unwrap().unwrap()["result"], "complete");
+    assert_eq!(notices, [RecoveryNotice::Accepted]);
+    assert!(started.elapsed() >= std::time::Duration::from_secs(20));
+}
+
+/// Gone past the grace is gone, before a retry or during the regeneration.
+#[tokio::test(start_paused = true)]
+async fn a_candidate_gone_past_the_grace_ends_the_wait() {
+    for script in [
+        vec![(0, RecoveryEvent::Away)],
+        vec![(0, RecoveryEvent::Retry), (1, RecoveryEvent::Away)],
+    ] {
+        let started = tokio::time::Instant::now();
+        let (result, _) = scripted_recovery(script, std::future::pending(), Readiness::Ready).await;
+        assert!(result.is_none());
+        let waited = started.elapsed();
+        assert!(waited >= REJOIN_GRACE, "{waited:?}");
+        assert!(
+            waited < REJOIN_GRACE + std::time::Duration::from_secs(2),
+            "{waited:?}"
+        );
+    }
+}
+
+/// The keys are asked again when a retry arrives: another interview can have
+/// put them back on quota since the offer went out. Accepting then would fail
+/// before the first call and spend the one retry.
+#[tokio::test(start_paused = true)]
+async fn a_retry_waits_for_keys_that_went_out_after_the_offer() {
+    let calls = std::sync::atomic::AtomicUsize::new(0);
+    let generation = async {
+        calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(Ok(serde_json::json!({})))
+    };
+    let wait = std::time::Duration::from_secs(42);
+    let (result, notices) = scripted_recovery(
+        vec![(0, RecoveryEvent::Retry)],
+        generation,
+        Readiness::Wait(wait),
+    )
+    .await;
+    assert!(result.is_none());
+    assert_eq!(
+        notices,
+        [RecoveryNotice::Early(wait), RecoveryNotice::Closed]
+    );
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+
+    // Keys that can never answer close the window rather than spend it.
+    let started = tokio::time::Instant::now();
+    let (result, notices) = scripted_recovery(
+        vec![(0, RecoveryEvent::Retry)],
+        std::future::pending(),
+        Readiness::Never,
+    )
+    .await;
+    assert!(result.is_none());
+    assert_eq!(notices, [RecoveryNotice::Closed]);
+    assert!(started.elapsed() < std::time::Duration::from_secs(1));
+}

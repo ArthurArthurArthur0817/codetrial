@@ -400,8 +400,8 @@
 
       <section id="ending-overlay" class="overlay" hidden>
         <div class="spinner"></div>
-        <p>Jim is writing up your evaluation...</p>
-        <p id="ending-detail">
+        <p id="ending-title">Jim is writing up your evaluation...</p>
+        <p id="ending-detail" role="status" aria-live="polite">
           Scoring your code and communication - this usually takes a few
           seconds.
         </p>
@@ -412,6 +412,9 @@
         <p id="ending-elapsed" class="ending-elapsed"></p>
         <button id="leave-room" class="pill-button" type="button" hidden>
           Taking too long? Leave the room
+        </button>
+        <button id="retry-report" class="pill-button" type="button" hidden>
+          Retry report
         </button>
         <button id="force-report" class="pill-button" type="button">
           Show offline summary
