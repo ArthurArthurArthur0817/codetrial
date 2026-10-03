@@ -528,13 +528,26 @@ impl AppState {
 /// then holds a token for one LiveKit project while the interviewer waits in
 /// another. There is one lookup, and this is its result.
 ///
-/// Returns `false` when no interviewer will come, so the caller can refuse
+/// Returns the refusal when no interviewer will come, so the caller can refuse
 /// instead of handing out a token for a room nobody will ever join.
 ///
 /// Implementations must be idempotent per room and must not block: this is
 /// called on the request path.
 pub trait RoomDispatcher: Send + Sync + 'static {
-    fn ensure_agent(&self, room_name: &str, provider: &crate::config::Provider) -> bool;
+    fn ensure_agent(
+        &self,
+        room_name: &str,
+        provider: &crate::config::Provider,
+    ) -> Result<(), DispatchRefusal>;
+}
+
+/// Why no interviewer will come. The two answer the candidate differently: a
+/// full server frees up as any interview ends, a finalizing room only when its
+/// own report is out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DispatchRefusal {
+    AtCapacity,
+    Finalizing,
 }
 
 pub fn web_service(config: WebServerConfig) -> IntoMakeServiceWithConnectInfo<Router, SocketAddr> {

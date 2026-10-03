@@ -1,7 +1,7 @@
 # Functions the mutation gate cannot judge, because `cargo test` cannot reach
 # them. Matched against the mutant names that `cargo mutants --list` prints.
 #
-# EXCLUSIONS: 60
+# EXCLUSIONS: 62
 #
 # That number is checked by `scripts/test.sh`, so adding an entry means editing
 # this line too. The point is not the count, it is that the list only ever grows
@@ -148,12 +148,19 @@
 # `parse_and_validate_report`, which is tested; the wait in between is the part
 # that needs the network.
 #
-# `publish_report` is the two lines around `report_packet`: it takes `&Room` and
-# publishes what that returns, so `Ok(())` looks the same from outside as
-# publishing, exactly as `publish_interviewer_state` above does. It belonged
-# here as soon as `report_packet` did and was missed because both lived in
-# `livekit.rs`, where `report_packet`'s own entry already covered the pair;
-# splitting `src/livekit/report.rs` out scored the wrapper on its own.
+# `publish_with_recovery` and `LiveRecoveryRoom` are the report's way into a
+# live `&Room`: the first builds the room and the report call and hands both to
+# `run_recovery`, the second reads the room's events and roster and publishes
+# packets on it, so `Ok(())`, `()`, `true` or `false` look the same from
+# outside as the real thing, exactly as `publish_interviewer_state` above does.
+# Everything they carry is decided and tested beside them: `run_recovery` and
+# `recover_report` against a scripted room, `recovery_event`, `candidate_only`,
+# `recovery_request` and `recovery_notice` directly. Two of `recovery_event`'s
+# arms are named on their own for the same reason: deleting the arm for a
+# participant leaving or joining or a packet arriving only shows on an event
+# that carries a `RemoteParticipant`, which nothing outside the SDK can
+# construct. Their decisions are `candidate_only` and `recovery_request`, and
+# the arms for the room itself closing stay judged.
 #
 # The media helpers are the same shape one layer down. `handle_media_event`
 # and `attach_audio` take a LiveKit participant, `next_audio_frame` and
@@ -308,7 +315,9 @@ exclude_re = [
     "publish_transcript",
     "generate_report",
     "report_packet",
-    "publish_report",
+    "publish_with_recovery",
+    "LiveRecoveryRoom",
+    "delete match arm Some\\(::livekit::RoomEvent::(ParticipantDisconnected|ParticipantConnected|DataReceived)\\b.* in recovery_event",
     "replace_gemini_session",
     "open_cold_session",
     "open_live_session_at",

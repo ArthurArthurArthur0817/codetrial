@@ -5,11 +5,11 @@
 //! an interview, long after the binary finished deciding what it is. Here it
 //! also gets tests that do not need a process.
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use crate::config::{AgentConfig, Provider};
-use crate::web::RoomDispatcher;
+use crate::web::{DispatchRefusal, RoomDispatcher};
 
 /// Runs the interviewer for rooms this process just named, in this process.
 ///
@@ -23,22 +23,29 @@ pub struct LocalDispatcher {
     /// that arrives with the room, from the same lookup that minted the token.
     pub config: AgentConfig,
     pub runtime: tokio::runtime::Handle,
-    pub live: Arc<Mutex<HashSet<String>>>,
+
+    // True while assessing; false while finalizing the report. Both hold
+    // capacity.
+    pub live: Arc<Mutex<HashMap<String, bool>>>,
     /// From `config::max_concurrent_interviews`, so the ceiling an operator set
     /// is the ceiling this enforces.
     pub max_concurrent: usize,
 }
 
 impl RoomDispatcher for LocalDispatcher {
-    fn ensure_agent(&self, room_name: &str, provider: &Provider) -> bool {
+    fn ensure_agent(&self, room_name: &str, provider: &Provider) -> Result<(), DispatchRefusal> {
         let slot = match self.reserve(room_name) {
-            Reservation::Existing => return true,
+            Reservation::Existing => return Ok(()),
             Reservation::Full => {
                 eprintln!(
                     "codetrial dispatch_refused room={room_name} reason=at_capacity limit={}",
                     self.max_concurrent
                 );
-                return false;
+                return Err(DispatchRefusal::AtCapacity);
+            }
+            Reservation::Finalizing => {
+                eprintln!("codetrial dispatch_refused room={room_name} reason=finalizing");
+                return Err(DispatchRefusal::Finalizing);
             }
             Reservation::New(slot) => slot,
         };
@@ -48,17 +55,18 @@ impl RoomDispatcher for LocalDispatcher {
         // outlives the response by the length of the interview.
         self.runtime.spawn(async move {
             eprintln!("codetrial dispatch room={}", slot.room_name);
-            if let Err(error) = crate::livekit::run_room(
+            if let Err(error) = crate::livekit::run_room_with_slot(
                 &config,
                 &slot.room_name,
                 crate::web::current_epoch_seconds(),
+                Some(&slot),
             )
             .await
             {
                 eprintln!("codetrial agent_failed room={}: {error}", slot.room_name);
             }
         });
-        true
+        Ok(())
     }
 }
 
@@ -66,6 +74,7 @@ enum Reservation {
     Existing,
     New(Slot),
     Full,
+    Finalizing,
 }
 
 impl LocalDispatcher {
@@ -74,13 +83,20 @@ impl LocalDispatcher {
 
         // A reload mints a token for the same fixed room in local mode, and two
         // agents in one room evict each other.
-        if live.contains(room_name) {
-            return Reservation::Existing;
+        if let Some(assessing) = live.get(room_name) {
+            // A fixed local room cannot start a new interview while its old
+            // agent is finalizing. Reusing it would mint a token for an agent
+            // that only accepts the original candidate's report retry.
+            return if *assessing {
+                Reservation::Existing
+            } else {
+                Reservation::Finalizing
+            };
         }
         if live.len() >= self.max_concurrent {
             return Reservation::Full;
         }
-        live.insert(room_name.to_string());
+        live.insert(room_name.to_string(), true);
         Reservation::New(Slot {
             live: Arc::clone(&self.live),
             room_name: room_name.to_string(),
@@ -91,8 +107,21 @@ impl LocalDispatcher {
 /// One interview's claim on this process's capacity, held for as long as the
 /// task that owns it.
 pub struct Slot {
-    pub live: Arc<Mutex<HashSet<String>>>,
+    pub live: Arc<Mutex<HashMap<String, bool>>>,
     pub room_name: String,
+}
+
+impl Slot {
+    pub(crate) fn assessment_finished(&self) {
+        if let Some(assessing) = self
+            .live
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .get_mut(&self.room_name)
+        {
+            *assessing = false;
+        }
+    }
 }
 
 impl Drop for Slot {

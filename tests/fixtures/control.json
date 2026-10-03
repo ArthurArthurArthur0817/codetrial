@@ -2,6 +2,12 @@
   "topic": "control",
   "cases": [
     {
+      "name": "retry report",
+      "payload": {
+        "type": "retry_report"
+      }
+    },
+    {
       "name": "thinking start",
       "payload": {
         "type": "thinking",

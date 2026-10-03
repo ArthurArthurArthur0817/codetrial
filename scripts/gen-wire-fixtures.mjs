@@ -20,6 +20,9 @@ import { fileURLToPath } from "node:url";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const FIXTURES = join(ROOT, "tests", "fixtures");
 
+const { reportRecoveryLimits } = await import(
+  join(ROOT, "web", "report-recovery.js")
+);
 const lib = await import(join(ROOT, "web", "lib.js"));
 const { ALL_LANGUAGES } = await import(
   join(ROOT, "web", "compiler-explorer.js")
@@ -58,6 +61,7 @@ function codeUpdateCases(languages) {
 
 function controlCases() {
   return [
+    { name: "retry report", payload: lib.retryReportPayload() },
     { name: "thinking start", payload: lib.thinkingPayload(true) },
     { name: "thinking end", payload: lib.thinkingPayload(false) },
     { name: "yield turn", payload: lib.yieldTurnPayload() },
@@ -374,6 +378,7 @@ async function integrityChain() {
 // to recognize.
 const languages = ALL_LANGUAGES;
 const files = {
+  "report-recovery.json": reportRecoveryLimits,
   "code-update.json": {
     topic: lib.topics.code,
     cases: codeUpdateCases(languages),

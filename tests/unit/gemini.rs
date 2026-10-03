@@ -244,8 +244,27 @@ async fn report_transport_fixture(
     prefix: &str,
     statuses: Vec<u16>,
     single_key: bool,
+    budget: ReportCallBudget,
+    backoff: Duration,
+) -> TransportFixture {
+    report_transport_fixture_with_body(
+        prefix,
+        statuses,
+        single_key,
+        budget,
+        backoff,
+        json!({"error":{"message":"do not expose upstream credentials"}}),
+    )
+    .await
+}
+
+async fn report_transport_fixture_with_body(
+    prefix: &str,
+    statuses: Vec<u16>,
+    single_key: bool,
     mut budget: ReportCallBudget,
     backoff: Duration,
+    error_body: Value,
 ) -> TransportFixture {
     let config = live_config(&[(
         "GOOGLE_API_KEYS",
@@ -263,6 +282,7 @@ async fn report_transport_fixture(
         axum::routing::post(move |headers: axum::http::HeaderMap| {
             let seen = Arc::clone(&seen);
             let statuses = statuses.clone();
+            let error_body = error_body.clone();
             async move {
                 let mut seen = seen.lock().unwrap();
                 let status = statuses[seen.len()];
@@ -272,7 +292,7 @@ async fn report_transport_fixture(
                     axum::Json(if status == 200 {
                         json!({"candidates":[{"content":{"parts":[{"text":"report"}]}}]})
                     } else {
-                        json!({"error":{"message":"do not expose upstream credentials"}})
+                        error_body
                     }),
                 )
             }
@@ -929,7 +949,21 @@ fn report_requests_are_session_local_and_never_reuse_personalized_output() {
 
 type ReportResult = Result<Value, Box<dyn std::error::Error + Send + Sync>>;
 
-fn valid_report() -> Value {
+/// The whole report path against a local server, for other modules' tests.
+/// Lives here so the endpoint and backoff overrides stay out of the crate's
+/// own API.
+pub(crate) async fn generate_report_at(
+    keys: &GeminiKeys,
+    url: &str,
+    backoff: Duration,
+    prompt: &str,
+    problem: &crate::agent::Problem,
+    scope: &str,
+) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
+    generate_report_with_keys_at(keys, url, backoff, prompt, problem, scope).await
+}
+
+pub(crate) fn valid_report() -> Value {
     let improvements = [
         ("Algorithm", "Explain complexity"),
         ("Test", "Test boundaries"),
@@ -3103,4 +3137,261 @@ fn an_interruption_precedes_candidate_speech_in_the_same_frame() {
         expected.push(GeminiEvent::InputTranscript("wait, actually".into()));
         assert_eq!(events, expected);
     }
+}
+
+#[tokio::test]
+async fn exhausted_transient_reports_can_be_regenerated_but_permanent_failures_cannot() {
+    for (statuses, allowed) in [
+        (vec![503; MAX_REPORT_HTTP_ATTEMPTS], true),
+        (vec![429; MAX_REPORT_HTTP_ATTEMPTS], true),
+        (vec![400], false),
+        (vec![401], false),
+        (vec![402], false),
+    ] {
+        let (result, _, _) = report_transport_fixture(
+            "regeneration",
+            statuses,
+            true,
+            ReportCallBudget::new(),
+            Duration::ZERO,
+        )
+        .await;
+        assert_eq!(
+            report_regeneration_retry_after(result.unwrap_err().as_ref()).is_some(),
+            allowed
+        );
+    }
+}
+
+/// The wait an exhausted rotation offers is until its first key is back: just
+/// under a whole cooldown when the keys went out moments ago, and never more.
+/// `since` is taken before the keys went out, so the wait plus the time since
+/// covers a whole cooldown however slowly the test ran.
+fn assert_quota_wait(delay: Option<Duration>, since: std::time::Instant) {
+    let delay = delay.expect("a quota-exhausted rotation offers a regeneration");
+    assert!(delay <= credentials::QUOTA_COOLDOWN, "{delay:?}");
+    assert!(
+        delay + since.elapsed() >= credentials::QUOTA_COOLDOWN,
+        "{delay:?}"
+    );
+}
+
+#[tokio::test]
+async fn quota_regeneration_waits_until_the_whole_key_rotation_can_make_a_call() {
+    let since = std::time::Instant::now();
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let prefix = "quota-regeneration-ready";
+    let (failed, seen, _) = report_failover_fixture(prefix, vec![429, 429], false).await;
+    assert_eq!(seen.len(), 2);
+    let delay = report_regeneration_retry_after(failed.unwrap_err().as_ref()).unwrap();
+    let config = live_config(&[(
+        "GOOGLE_API_KEYS",
+        &format!("{prefix}-first,{prefix}-second"),
+    )]);
+    let keys = GeminiKeys::from_config(&config);
+    assert!(keys.select_report().is_err());
+    let selected = keys
+        .select_report_at(std::time::Instant::now() + delay)
+        .expect("retry must wait until a key returns");
+    assert_quota_wait(Some(delay), since);
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let observed = Arc::clone(&calls);
+    let app = axum::Router::new().route(
+        "/",
+        axum::routing::post(move || {
+            let observed = Arc::clone(&observed);
+            async move {
+                observed.fetch_add(1, Ordering::SeqCst);
+                axum::Json(json!({"candidates":[{"content":{"parts":[{"text":"report"}]}}]}))
+            }
+        }),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    assert_eq!(
+        generate_report_once(&selected, &url, "same frozen prompt", "quota-regeneration")
+            .await
+            .unwrap(),
+        "report"
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    server.abort();
+}
+
+#[tokio::test]
+async fn quota_body_failures_offer_the_same_recovery_as_http_429() {
+    let since = std::time::Instant::now();
+    for status in [400, 403] {
+        let (result, seen, _) = report_transport_fixture_with_body(
+            &format!("quota-body-{status}"),
+            vec![status; MAX_REPORT_HTTP_ATTEMPTS],
+            true,
+            ReportCallBudget::new(),
+            Duration::ZERO,
+            json!({"error":{"status":"RESOURCE_EXHAUSTED"}}),
+        )
+        .await;
+        assert_eq!(seen.len(), MAX_REPORT_HTTP_ATTEMPTS);
+        assert_quota_wait(
+            report_regeneration_retry_after(result.unwrap_err().as_ref()),
+            since,
+        );
+    }
+}
+
+#[tokio::test]
+async fn report_recovery_follows_quota_availability_not_the_last_key_failure() {
+    for (statuses, allowed) in [
+        (vec![429, 401], true),
+        (vec![401, 429], true),
+        (vec![429, 402], true),
+        (vec![401, 403], false),
+        (vec![402, 402], false),
+    ] {
+        let prefix = format!("recovery-mixed-{}-{}", statuses[0], statuses[1]);
+        let (result, seen, _) = report_failover_fixture(&prefix, statuses, false).await;
+        assert_eq!(seen.len(), 2);
+        assert_eq!(
+            report_regeneration_retry_after(result.unwrap_err().as_ref()).is_some(),
+            allowed
+        );
+
+        // A second interview encounters the same shared rotation at entry,
+        // before any request. It must get the same recovery eligibility.
+        let (result, seen, _) = report_failover_fixture(&prefix, vec![], false).await;
+        assert!(seen.is_empty());
+        assert_eq!(
+            report_regeneration_retry_after(result.unwrap_err().as_ref()).is_some(),
+            allowed
+        );
+    }
+}
+
+#[tokio::test]
+async fn concurrent_quota_exhaustion_keeps_its_delay_after_a_report_503() {
+    let since = std::time::Instant::now();
+    let config = live_config(&[(
+        "GOOGLE_API_KEYS",
+        "concurrent-report-first,concurrent-report-second",
+    )]);
+    let keys = Arc::new(GeminiKeys::from_config(&config));
+    let shared = Arc::clone(&keys);
+    let app = axum::Router::new().route(
+        "/",
+        axum::routing::post(move || {
+            let shared = Arc::clone(&shared);
+            async move {
+                for key in ["concurrent-report-first", "concurrent-report-second"] {
+                    shared.failed(key, CredentialFailure::Quota, ApiSurface::Report);
+                }
+                (
+                    axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                    axum::Json(json!({})),
+                )
+            }
+        }),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    let mut budget = ReportCallBudget::new();
+    let error = generate_report_transport(
+        &keys,
+        &url,
+        "frozen prompt",
+        &mut budget,
+        Duration::ZERO,
+        "concurrent-quota",
+    )
+    .await
+    .unwrap_err();
+    assert_quota_wait(report_regeneration_retry_after(error.as_ref()), since);
+    assert_eq!(budget.remaining, MAX_REPORT_HTTP_ATTEMPTS - 1);
+    server.abort();
+}
+
+#[tokio::test]
+async fn exhaustion_during_backoff_keeps_the_original_failure_and_recovery_delay() {
+    let since = std::time::Instant::now();
+    for (failure, expected) in [
+        (CredentialFailure::Quota, true),
+        (CredentialFailure::Invalid, false),
+    ] {
+        let prefix = format!("backoff-preserves-{failure:?}");
+        let config = live_config(&[(
+            "GOOGLE_API_KEYS",
+            &format!("{prefix}-first,{prefix}-second"),
+        )]);
+        let keys = GeminiKeys::from_config(&config);
+        let original = "Gemini HTTP 503 Service Unavailable";
+        let next = report_key_after_backoff(
+            &keys,
+            Duration::from_millis(20),
+            original.into(),
+            "backoff-room",
+            1,
+        );
+        tokio::pin!(next);
+        std::future::poll_fn(|cx| {
+            assert!(std::future::Future::poll(next.as_mut(), cx).is_pending());
+            std::task::Poll::Ready(())
+        })
+        .await;
+        for suffix in ["first", "second"] {
+            keys.failed(&format!("{prefix}-{suffix}"), failure, ApiSurface::Report);
+        }
+        let error = next.await.unwrap_err();
+        assert_eq!(error.to_string(), original);
+        let delay = report_regeneration_retry_after(error.as_ref());
+        if expected {
+            assert_quota_wait(delay, since);
+        } else {
+            assert_eq!(delay, None);
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_healthy_backup_can_regenerate_after_the_last_call_rejects_a_key() {
+    let prefix = "healthy-backup-regeneration";
+    let (result, seen, remaining) =
+        report_failover_fixture(prefix, vec![503, 503, 503, 503, 401], false).await;
+    assert_eq!(seen.len(), MAX_REPORT_HTTP_ATTEMPTS);
+    assert_eq!(remaining, 0);
+    assert_eq!(
+        report_regeneration_retry_after(result.unwrap_err().as_ref()),
+        Some(Duration::ZERO)
+    );
+    let (result, seen, _) = report_failover_fixture(prefix, vec![200], false).await;
+    assert_eq!(result.unwrap(), "report");
+    assert_eq!(seen, [format!("{prefix}-second")]);
+}
+
+/// A quota failure on the last call waits only as long as the rotation needs:
+/// a backup that selects now is usable now, so nothing beyond the regeneration
+/// floor, while a sole key is never ruled out and has to sit out the cooldown.
+#[tokio::test]
+async fn a_quota_failure_waits_only_when_no_other_key_can_answer() {
+    let (result, seen, remaining) =
+        report_failover_fixture("quota-last-call", vec![503, 503, 503, 503, 429], false).await;
+    assert_eq!(seen.len(), MAX_REPORT_HTTP_ATTEMPTS);
+    assert_eq!(remaining, 0);
+    assert_eq!(
+        report_regeneration_retry_after(result.unwrap_err().as_ref()),
+        Some(Duration::ZERO)
+    );
+
+    let (result, seen, _) =
+        report_failover_fixture("quota-sole-key", vec![429; MAX_REPORT_HTTP_ATTEMPTS], true).await;
+    assert_eq!(seen.len(), MAX_REPORT_HTTP_ATTEMPTS);
+    assert_eq!(
+        report_regeneration_retry_after(result.unwrap_err().as_ref()),
+        Some(credentials::QUOTA_COOLDOWN)
+    );
 }

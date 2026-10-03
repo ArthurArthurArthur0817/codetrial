@@ -108,7 +108,7 @@ use session::{
     send_wrap_up_and_wait, set_agent_state,
 };
 
-use report::{freeze_report_prompt, generate_report_bounded, publish_report};
+use report::{freeze_assessment, generate_report_bounded};
 use rooms::{evict_duplicate_agent, isolate_local_agent};
 
 // Re-exported rather than merely used: `web::setup` calls this to check the
@@ -192,8 +192,14 @@ impl CandidatePresence {
 
     /// Present, or absent for less than the grace, both mean carry on.
     fn gave_up(&self, now: Instant) -> bool {
-        self.left_at
-            .is_some_and(|left| now.duration_since(left) >= CANDIDATE_ABSENCE_LIMIT)
+        self.deadline(CANDIDATE_ABSENCE_LIMIT)
+            .is_some_and(|deadline| now >= deadline)
+    }
+
+    /// When a grace of `limit` runs out, if the candidate is away. The report
+    /// recovery wait holds the same rule with a shorter limit.
+    fn deadline(&self, limit: Duration) -> Option<Instant> {
+        self.left_at.map(|left| left + limit)
     }
 }
 
@@ -1143,7 +1149,7 @@ fn take_interim_review_window(state: &mut RuntimeState, boot: &RuntimeBootstrap<
 /// caller's, carried only by `boot`.
 struct OpenSession<'a> {
     room: Room,
-    events: tokio::sync::mpsc::UnboundedReceiver<RoomEvent>,
+    events: tokio::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<RoomEvent>>,
     agent_identity: String,
     candidate_identity: String,
     boot: RuntimeBootstrap<'a>,
@@ -1185,6 +1191,7 @@ async fn open_session<'a>(
         eprintln!("no candidate joined room={room_name}; leaving it");
         return Ok(None);
     };
+    let events = tokio::sync::Mutex::new(events);
     let boot = candidate_bootstrap(config, room_name, Some(&candidate_metadata));
     eprintln!(
         "starting interview: room={} problem={} duration={}min",
@@ -1213,6 +1220,9 @@ async fn open_session<'a>(
                 keys,
                 boot: &boot,
                 started_at: setup_began,
+                candidate_identity: &candidate_identity,
+                events: &events,
+                slot: None,
             };
             crate::gemini::first_open_within(
                 crate::gemini::FIRST_OPEN_LIMIT,
@@ -1968,6 +1978,15 @@ pub async fn run_room(
     room_name: &str,
     now_seconds: u64,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    run_room_with_slot(config, room_name, now_seconds, None).await
+}
+
+pub(crate) async fn run_room_with_slot(
+    config: &AgentConfig,
+    room_name: &str,
+    now_seconds: u64,
+    slot: Option<&crate::dispatch::Slot>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Names this run on every usage line. Milliseconds rather than the
     // dispatch's seconds, so a room retried within the same second is not
     // summed with the run before it.
@@ -1979,7 +1998,7 @@ pub async fn run_room(
     let keys = Arc::new(GeminiKeys::from_config(config));
     let Some(OpenSession {
         room,
-        mut events,
+        events,
         agent_identity,
         candidate_identity,
         boot,
@@ -2019,6 +2038,9 @@ pub async fn run_room(
         keys: &keys,
         boot: &boot,
         started_at,
+        candidate_identity: &candidate_identity,
+        events: &events,
+        slot,
     };
     let ids = RoomIdentities {
         room_name,
@@ -2063,7 +2085,7 @@ pub async fn run_room(
                         turn.context(&mut output_audio, &mut gemini, &mut media);
                     on_watch_tick(&room, &mut context, &mut loops, interview).await?
                 }
-                event = events.recv() => {
+                event = async { events.lock().await.recv().await } => {
                     let Some(event) = event else {
                         eprintln!(
                             "LiveKit event stream ended for room={room_name}; ending with no report, \
@@ -2507,6 +2529,9 @@ struct InterviewContext<'a> {
     keys: &'a Arc<GeminiKeys>,
     boot: &'a RuntimeBootstrap<'a>,
     started_at: Instant,
+    candidate_identity: &'a str,
+    events: &'a tokio::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<RoomEvent>>,
+    slot: Option<&'a crate::dispatch::Slot>,
 }
 
 /// The interview's starting state, from the plan the token was minted for.
@@ -2624,7 +2649,7 @@ async fn settle_hold(
     if result.thinking_changed == Some(true) {
         if let Err(error) = begin_button_hold(
             context.gemini,
-            context.candidate_audio,
+            &mut context.media.audio_bytes,
             context.activity,
             at,
             grace,
@@ -2663,7 +2688,7 @@ async fn settle_hold(
     }
     let finalize_prompt = reply.clone();
     let finalize = async {
-        flush_audio(context.gemini, context.candidate_audio).await?;
+        flush_audio(context.gemini, &mut context.media.audio_bytes).await?;
         if context.turns_candidate_open()
             && let Some(prompt) = reply.as_deref()
         {
@@ -2910,6 +2935,9 @@ async fn handle_data_packet(
     let Some(reason) = result.finish_interview else {
         return Ok(ControlFlow::Continue(()));
     };
+    if let Some(slot) = interview.slot {
+        slot.assessment_finished();
+    }
     session::flush_thinking_notice(room, context.state).await;
 
     // The assessment ends here, before the goodbye: the reducer has closed the
@@ -2920,18 +2948,20 @@ async fn handle_data_packet(
     // can add is the skips a started behavioral round leaves to it, and the
     // report scores those steps as unassessed with or without them.
     //
-    // Not `?`, and neither is anything else between here and `publish_report`.
-    // The turns go out as a LiveKit text stream and the report as a data
-    // packet, so the one failing says nothing about the other, and a final
-    // segment the panel never saw is cosmetic where a missing report is not.
+    // Not `?`, and neither is anything else between here and
+    // `publish_with_recovery`. The turns go out as a LiveKit text stream and
+    // the report as a data packet, so the one failing says nothing about the
+    // other, and a final segment the panel never saw is cosmetic where a
+    // missing report is not.
     if let Err(error) = close_turns(room, context).await {
         eprintln!("closing the last turns failed ({error}); writing the report anyway");
     }
-    let prompt = freeze_report_prompt(
+    let assessment = freeze_assessment(
         interview.boot,
         context.state,
         interview.started_at.elapsed().as_secs_f64() / 60.0,
     );
+    let mut recovery_events = interview.events.lock().await;
     let api_key = &**interview.keys;
     let farewell = async {
         // The goodbye is the only part of the ending that needs the Live
@@ -2953,24 +2983,32 @@ async fn handle_data_packet(
         }
     };
     let (generated, ()) = tokio::join!(
-        generate_report_bounded(interview.boot, &prompt, api_key),
+        generate_report_bounded(interview.boot, &assessment.prompt, api_key),
         farewell
     );
-    publish_report(
-        room,
-        interview.boot,
-        context.state,
-        &reason,
-        api_key,
+    context.media.audio = None;
+    context.media.video = None;
+    context.media.audio_bytes.clear();
+    let close_live = async {
+        if let Err(error) = context.gemini.shutdown().await {
+            eprintln!("Gemini close failed ({error}); leaving anyway");
+        }
+    };
+    report::publish_with_recovery(
+        report::ReportRecovery {
+            boot: interview.boot,
+            assessment,
+            reason: &reason,
+            keys: api_key,
+            candidate: interview.candidate_identity,
+        },
         generated,
+        &mut recovery_events,
+        room,
+        close_live,
     )
     .await?;
 
-    // The report is out; a close that fails now changes nothing but whether the
-    // agent leaves, and it has to.
-    if let Err(error) = context.gemini.shutdown().await {
-        eprintln!("Gemini close failed ({error}); leaving anyway");
-    }
     // Give the report packet a moment to leave before the agent goes.
     tokio::time::sleep(Duration::from_millis(250)).await;
     leave_room(room).await;

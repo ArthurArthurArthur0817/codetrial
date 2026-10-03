@@ -506,8 +506,8 @@ fn an_unexplained_refusal_stays_on_its_own_surface() {
     assert_eq!(keys.select().unwrap(), "report-refused-a");
 }
 
-/// An exhausted Live rotation is worth waiting for only while some key is out
-/// on quota alone; a Report rotation never waits.
+/// Live waits for a quota key; Report exposes that deadline for the candidate
+/// to request recovery. A rejection on one surface must not poison the other.
 #[test]
 fn an_exhausted_rotation_names_its_first_quota_key_back() {
     let keys = GeminiKeys::new(vec!["exhausted-wait-a".into(), "exhausted-wait-b".into()]);
@@ -528,13 +528,28 @@ fn an_exhausted_rotation_names_its_first_quota_key_back() {
         CredentialFailure::Quota,
         ApiSurface::Report,
     );
-    assert_eq!(exhausted_until(&keys.select_report().unwrap_err()), None);
+    let report_back = COOLDOWNS.get().unwrap().lock().unwrap()["exhausted-wait-b"].report;
+    assert_eq!(
+        exhausted_until(&keys.select_report().unwrap_err()),
+        report_back
+    );
+
     keys.failed(
         "exhausted-wait-b",
         CredentialFailure::Refused,
         ApiSurface::Live,
     );
     assert_eq!(exhausted_until(&keys.select().unwrap_err()), None);
+    assert_eq!(
+        exhausted_until(&keys.select_report().unwrap_err()),
+        report_back
+    );
+    keys.failed(
+        "exhausted-wait-b",
+        CredentialFailure::Refused,
+        ApiSurface::Report,
+    );
+    assert_eq!(exhausted_until(&keys.select_report().unwrap_err()), None);
 }
 
 /// Slow quota rejections from enough keys outlast the first key's cooldown.

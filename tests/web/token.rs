@@ -946,6 +946,39 @@ async fn a_room_that_cannot_be_staffed_is_refused_rather_than_sold() {
     remove_database(db_path).await;
 }
 
+/// A room still finishing its last report is not a full server, and saying it
+/// was sent operators hunting for capacity that was there all along.
+#[tokio::test]
+async fn a_room_still_finishing_a_report_says_so() {
+    let (mut config, cookie, db_path) = signed_in_web_config("dispatch-finalizing");
+    config.production = true;
+    config.fixed_room_name = None;
+    let dispatcher = std::sync::Arc::<RecordingDispatcher>::default();
+    dispatcher
+        .finalizing
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+    let (base, server) =
+        spawn_web_server_with_dispatcher(config, std::sync::Arc::clone(&dispatcher)).await;
+
+    let response = http_client()
+        .post(format!("{base}/api/token"))
+        .header("cookie", &cookie)
+        .json(&json!({"problemId":"two-sum","durationMin":45}))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), 503);
+    let body: Value = response.json().await.unwrap();
+    let error = body["error"].as_str().unwrap();
+    assert!(error.contains("finishing"), "{body}");
+    assert!(!error.contains("as many interviews"), "{body}");
+    assert!(body.get("token").is_none(), "a refused room has no token");
+
+    server.shutdown().await;
+    remove_database(db_path).await;
+}
+
 #[tokio::test]
 async fn token_api_rejects_oversize_body() {
     let (config, cookie, db_path) = signed_in_web_config("oversize");

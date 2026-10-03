@@ -24,9 +24,9 @@ use codetrial::token::{
     livekit_token,
 };
 use codetrial::web::{
-    MAX_BODY_BYTES, MAX_REPORT_BYTES, READ_RATE_LIMIT, REPLAY_RATE_LIMIT, RoomDispatcher,
-    TOKEN_RATE_LIMIT, TokenConfig, WebServerConfig, initialize_account_database, login_config,
-    static_file_meta, token_response,
+    DispatchRefusal, MAX_BODY_BYTES, MAX_REPORT_BYTES, READ_RATE_LIMIT, REPLAY_RATE_LIMIT,
+    RoomDispatcher, TOKEN_RATE_LIMIT, TokenConfig, WebServerConfig, initialize_account_database,
+    login_config, static_file_meta, token_response,
 };
 
 #[path = "common/http.rs"]
@@ -322,18 +322,27 @@ struct RecordingDispatcher {
     staffed: std::sync::Mutex<Vec<(String, String)>>,
     /// Set to refuse, standing in for a process already at capacity.
     at_capacity: std::sync::atomic::AtomicBool,
+    /// Set to refuse, standing in for a fixed room still finishing a report.
+    finalizing: std::sync::atomic::AtomicBool,
 }
 
 impl RoomDispatcher for RecordingDispatcher {
-    fn ensure_agent(&self, room_name: &str, provider: &codetrial::config::Provider) -> bool {
+    fn ensure_agent(
+        &self,
+        room_name: &str,
+        provider: &codetrial::config::Provider,
+    ) -> Result<(), DispatchRefusal> {
         if self.at_capacity.load(std::sync::atomic::Ordering::Relaxed) {
-            return false;
+            return Err(DispatchRefusal::AtCapacity);
+        }
+        if self.finalizing.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(DispatchRefusal::Finalizing);
         }
         self.staffed
             .lock()
             .unwrap()
             .push((room_name.to_string(), provider.url.clone()));
-        true
+        Ok(())
     }
 }
 

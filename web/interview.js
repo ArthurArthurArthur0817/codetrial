@@ -1,3 +1,4 @@
+import { createReportRecovery } from "./report-recovery.js";
 import { loadJudge, loadProblem } from "./problem-data.js";
 import { downloadMarkdown, reportFilename } from "./download.js";
 import { consumeSharedFocus } from "./problem-picker.js";
@@ -42,6 +43,7 @@ import {
   FRAMEWORKS,
   frameworkChecklist,
   endInterviewPayload,
+  retryReportPayload,
   escapeHtml,
   formatTime,
   integrityEventPayload,
@@ -372,6 +374,8 @@ const nodes = {
   resultsToggle: document.querySelector("#results-toggle"),
   resultsChevron: document.querySelector("#results-chevron"),
   ending: document.querySelector("#ending-overlay"),
+  endingTitle: document.querySelector("#ending-title"),
+  retryReport: document.querySelector("#retry-report"),
   forceReport: document.querySelector("#force-report"),
   leaveRoom: document.querySelector("#leave-room"),
   endingDetail: document.querySelector("#ending-detail"),
@@ -551,6 +555,7 @@ function bindEvents() {
   document.addEventListener("keydown", onTurnKey);
   nodes.end.addEventListener("click", () => endInterview("candidate_ended"));
   nodes.withdrawConsent.addEventListener("click", withdrawRecordingConsent);
+  nodes.retryReport.addEventListener("click", () => reportRecovery.retry());
   nodes.forceReport.addEventListener("click", showReport);
   nodes.leaveRoom.addEventListener("click", leaveRoom);
   nodes.run.addEventListener("click", runTests);
@@ -1195,6 +1200,7 @@ async function connectLiveKit(connection, preflight, presenting = false) {
     // lists an interviewer, and a dead room left in place can go on listing
     // the one it lost, so the candidate who ended the interview was left
     // waiting on an overlay for a report that could not arrive.
+    if (state.phase === "report_recovery") reportRecovery.finish();
     state.room = null;
     setBanner(
       "connection",
@@ -1356,6 +1362,97 @@ function stopLocalMedia() {
   state.integrityTrackStates.clear();
 }
 
+const reportRecovery = createReportRecovery({
+  send: () => {
+    void publish(topics.control, retryReportPayload())?.catch(() =>
+      reportRecovery.finish(),
+    );
+  },
+  offer: (ready, cooldown) => {
+    state.phase = "report_recovery";
+    if (!ready) stopEndingEscape();
+    globalThis.clearTimeout(frameworkHintTimer);
+    nodes.frameworkHint.hidden = true;
+    stopAvatar();
+    stopLocalMedia();
+    clearTimeout(codePublishTimer);
+    codePublishTimer = null;
+    pendingLanguagePublish = null;
+    nodes.editor.disabled = true;
+    nodes.ending.hidden = false;
+    nodes.endingTitle.textContent = "Evaluation temporarily unavailable";
+    nodes.ending.querySelector(".spinner").hidden = true;
+    nodes.forceReport.hidden = true;
+    nodes.leaveRoom.hidden = false;
+    nodes.leaveRoom.textContent = "Save incomplete report and leave";
+    nodes.retryReport.hidden = false;
+    nodes.retryReport.disabled = !ready;
+    nodes.endingDetail.textContent = ready
+      ? "Evaluation failed temporarily. Retry the report using your completed interview, or leave safely."
+      : `Evaluation failed temporarily. Report retry will be available in ${cooldown} seconds.`;
+    startEndingClock();
+  },
+  waiting: () => {
+    nodes.endingTitle.textContent = "Retrying your evaluation";
+    nodes.ending.querySelector(".spinner").hidden = false;
+    nodes.retryReport.hidden = true;
+    nodes.endingDetail.textContent =
+      "Retrying your report from the completed interview...";
+    startEndingClock();
+  },
+  // Saved through the same path whether the room is still up or not: the
+  // terminal disconnect and the page exit both land here, and a report that
+  // waited for a room to render through was a report that was never saved.
+  finalize: (raw) => {
+    void receiveReport(
+      state.room,
+      new TextEncoder().encode(JSON.stringify(raw)),
+    );
+  },
+  keep: (raw) => {
+    void saveHistory(sanitizeReport(raw));
+  },
+});
+
+/// Why an agent-ended interview ended. Two agent-side routes reach a report in
+/// phase "live", and the deadline tells them apart: the agent ends a session of
+/// its own after the duration plus a grace, which a tab suspended past the
+/// deadline reaches before its own tick does. Calling that one
+/// "interviewer_ended" put a decision Jim never made into the replay.
+///
+/// The agent's own word for it, where the report carries one. Falling back on
+/// this page's countdown is a guess, and the wrong one whenever a suspended tab
+/// drifted past its deadline before the interviewer closed a finished session;
+/// kept only for a report from an older agent.
+function agentEndReason(report) {
+  return (
+    report.endReason ||
+    (Date.now() >= state.endsAt ? "time_up" : "interviewer_ended")
+  );
+}
+
+// What recovery rewrites on the ending overlay, as the page shipped it.
+const endingOverlay = {
+  title: nodes.endingTitle.textContent,
+  leave: nodes.leaveRoom.textContent,
+};
+
+/// Recovery's title, hidden spinner and "Save incomplete report and leave"
+/// label outlived it, so a report that then failed to render showed a retry
+/// still in progress and a button that, out of recovery, saves nothing.
+function restoreEndingOverlay() {
+  nodes.endingTitle.textContent = endingOverlay.title;
+  nodes.ending.querySelector(".spinner").hidden = false;
+  nodes.leaveRoom.textContent = endingOverlay.leave;
+  nodes.retryReport.hidden = true;
+}
+
+function finalizeRecoveryOnPageHide() {
+  if (state.phase === "report_recovery") reportRecovery.finish();
+}
+
+window.addEventListener("pagehide", finalizeRecoveryOnPageHide);
+
 async function receiveReport(room, payload) {
   // The wait ended when this packet arrived, whatever becomes of it below.
   stopEndingEscape();
@@ -1363,9 +1460,28 @@ async function receiveReport(room, payload) {
   let renderAttempted = false;
   let endRecorded = false;
   try {
-    state.report = sanitizeReport(
-      JSON.parse(new TextDecoder().decode(payload)),
-    );
+    const raw = JSON.parse(new TextDecoder().decode(payload));
+    if (state.phase === "report") return;
+    // `?.` because the parse may answer null, which the sanitizer below turns
+    // into an incomplete report rather than a throw.
+    if (raw?.incomplete && raw?.reportRecovery) {
+      const live = state.phase === "live";
+      if (reportRecovery.start(raw)) {
+        // Only once the offer is taken: one that is refused falls through to
+        // the ordinary path below, which writes this frame itself.
+        if (live) {
+          recordReplay("lifecycle", {
+            state: "ended",
+            reason: agentEndReason(sanitizeReport(raw)),
+          });
+        }
+        return;
+      }
+      if (state.phase === "report_recovery") return;
+    }
+    reportRecovery.stop();
+    restoreEndingOverlay();
+    state.report = sanitizeReport(raw);
     if (state.report.incomplete) {
       setBanner("session", providerUiState("incomplete_report").message);
     }
@@ -1376,19 +1492,10 @@ async function receiveReport(room, payload) {
     // is really the goodbye. Written only when this page did not already write
     // it: a browser-driven end is still in phase "ending" when the report lands.
     if (state.phase === "live") {
-      // Two agent-side routes land here, and the deadline tells them apart: the
-      // agent ends a session of its own after the duration plus a grace, which
-      // a tab suspended past the deadline reaches before its own tick does.
-      // Calling that one "interviewer_ended" put a decision Jim never made into
-      // the replay.
-      // The agent's own word for it, where the report carries one. Falling
-      // back on this page's countdown is a guess, and the wrong one whenever a
-      // suspended tab drifted past its deadline before the interviewer closed
-      // a finished session; kept only for a report from an older agent.
-      const reason =
-        state.report.endReason ||
-        (Date.now() >= state.endsAt ? "time_up" : "interviewer_ended");
-      recordReplay("lifecycle", { state: "ended", reason });
+      recordReplay("lifecycle", {
+        state: "ended",
+        reason: agentEndReason(state.report),
+      });
       endRecorded = true;
     }
     recordReplay("lifecycle", {
@@ -1406,11 +1513,13 @@ async function receiveReport(room, payload) {
     renderAttempted = true;
     renderReport();
     rendered = true;
-    void room.disconnect().catch(() => {});
+    void room?.disconnect().catch(() => {});
     state.room = null;
     state.connected = false;
     renderReportSaveStatus(await saving);
   } catch (error) {
+    reportRecovery.stop();
+    restoreEndingOverlay();
     // A report on screen is a report delivered. What throws past that point is
     // the save status, and taking the report back over it would cost the
     // candidate the thing that did arrive.
@@ -1425,7 +1534,7 @@ async function receiveReport(room, payload) {
     // shown, until the candidate pressed something.
     stopAvatar();
     stopLocalMedia();
-    void room.disconnect().catch(() => {});
+    void room?.disconnect().catch(() => {});
     state.room = null;
     state.connected = false;
     // The interviewer closed this one itself, and the `ended` row for it sits
@@ -1596,6 +1705,7 @@ function applyLanguages(spec) {
 }
 
 function setLanguage(language) {
+  if (state.phase === "report_recovery" || state.phase === "report") return;
   if (!languages.includes(language)) return;
   void prepareLanguage(language).catch(() => {});
   if (editorInitialized) {
@@ -1805,7 +1915,9 @@ function showFrameworkHint() {
 function receiveControl(bytes) {
   try {
     const message = JSON.parse(new TextDecoder().decode(bytes));
-    if (
+    if (message.type === "report_retry") {
+      reportRecovery.notice(message);
+    } else if (
       message.type === "thinking_state" &&
       typeof message.thinking === "boolean"
     ) {
@@ -2423,6 +2535,10 @@ function stopEndingClock() {
 }
 
 function leaveRoom() {
+  if (state.phase === "report_recovery") {
+    reportRecovery.finish();
+    return;
+  }
   stopEndingClock();
   void state.room?.disconnect?.();
   stopAvatar();
@@ -2545,12 +2661,16 @@ function renderReportSaveStatus(result) {
   nodes.report.querySelector("#done").disabled = false;
 }
 
-function saveHistory() {
+function saveHistory(report = state.report) {
   // The interview id travels with the report so the replay page can put the
   // two beside each other. Reports are keyed by their own id and recordings by
   // theirs, and without this the only thing relating them is the clock.
+  //
+  // One id per interview, so an outcome saved over a provisional failure
+  // replaces it in both stores instead of filing a second attempt.
+  state.reportId ||= randomId();
   const entry = {
-    id: randomId(),
+    id: state.reportId,
     date: new Date().toISOString(),
     interviewId: state.interviewId,
     problemId: problem.page,
@@ -2559,7 +2679,7 @@ function saveHistory() {
     language: state.language,
     durationMin,
     interviewLoop,
-    report: state.report,
+    report,
   };
   return saveReportHistory(entry);
 }
@@ -2657,6 +2777,20 @@ function updateAgentState() {
   const participants = roomParticipants();
   const agent = roomInterviewer(participants, state.agentIdentity);
   state.interviewerPresent = Boolean(agent);
+  if (!agent && state.phase === "report_recovery") {
+    if (!deliveryGrace) {
+      deliveryGrace = setTimeout(() => {
+        deliveryGrace = 0;
+        if (
+          state.phase === "report_recovery" &&
+          !roomInterviewer(roomParticipants(), state.agentIdentity)
+        ) {
+          reportRecovery.finish();
+        }
+      }, REPORT_DELIVERY_GRACE_MS);
+    }
+    return;
+  }
   if (!agent) {
     setAgentStateLabel("Waiting", false);
     // "Waiting" is honest but useless on its own: it looks identical whether
@@ -2804,5 +2938,6 @@ function currentCode() {
 /// The one way the editor reaches the agent: the buffer and its language. The
 /// agent holds its own copy of the starters it measures written code against.
 function publishCode(at, code = currentCode(), language = state.language) {
+  if (state.phase === "report_recovery" || state.phase === "report") return;
   publish(topics.code, codeUpdatePayload(code, language, at));
 }

@@ -191,16 +191,18 @@ fn static_interview_script_keeps_transcript_and_report_contract() {
     // The report card and markdown export are asserted behaviorally in
     // tests/browser/render.test.js. What only Rust can check is that the
     // browser still routes a report through the sanitizer before rendering it.
-    assert_eq!(
-        call_arguments(report, "sanitizeReport("),
-        ["JSON.parse(new TextDecoder().decode(payload))"]
-    );
+    assert_eq!(call_arguments(report, "sanitizeReport("), ["raw"]);
     let report = compact(report);
+
+    // The first call above is the provisional branch, which returns early; the
+    // report that is rendered goes through its own.
+    assert!(report.contains(&compact("state.report = sanitizeReport(raw);")));
+    assert!(report.contains("constraw=JSON.parse(newTextDecoder().decode(payload))"));
     for snippet in [
         "setLocalAudioEnabled(false)",
         "saveHistory()",
         "renderReport()",
-        "room.disconnect()",
+        "room?.disconnect()",
         "state.room = null",
     ] {
         assert!(

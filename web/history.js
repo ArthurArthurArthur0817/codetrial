@@ -244,8 +244,27 @@ export async function saveReportHistory(
   { fetcher = fetch, storage } = {},
 ) {
   const local = saveLocalReport(entry, storage);
-  const account = await saveAccountReport(entry, fetcher);
+  const account = await inOrder(entry?.id, () =>
+    saveAccountReport(entry, fetcher),
+  );
   return { local, account };
+}
+
+// Account saves of one report id, in the order they were asked for. A report
+// saved again under its id -- an outcome over the provisional failure it
+// replaces -- otherwise raced the first save's session check, and whichever
+// POST landed last was the copy the account kept.
+const accountSaves = new Map();
+
+function inOrder(id, save) {
+  if (id == null) return save();
+  const next = (accountSaves.get(id) ?? Promise.resolve()).then(save, save);
+  accountSaves.set(id, next);
+  const forget = () => {
+    if (accountSaves.get(id) === next) accountSaves.delete(id);
+  };
+  next.then(forget, forget);
+  return next;
 }
 
 /// `account` is what the page knows: whether the history it is showing came
@@ -352,9 +371,15 @@ function saveLocalReport(entry, storage) {
     // Reading it can rebuild it, and that write is the 164 KB one: spending the
     // remaining quota on it here refused the save of a report the device had
     // room for, and the candidate was told it was gone.
+    // A save under an id already held replaces that row: an interview's final
+    // outcome is saved over the provisional failure it kept while the report
+    // could still be regenerated.
+    const others = previous.filter(
+      (row) => entry?.id == null || row?.id !== entry.id,
+    );
     storage.setItem(
       historyKey,
-      JSON.stringify([entry, ...previous].slice(0, 20)),
+      JSON.stringify([entry, ...others].slice(0, 20)),
     );
     // The short history is what the lobby draws this report from, so a review
     // store that refuses the write costs the reopen twenty attempts from now,

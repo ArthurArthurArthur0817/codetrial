@@ -946,6 +946,30 @@ fn cited_source_ids_are_bounded_the_way_the_browser_bounds_them() {
     );
 }
 
+/// A report retry is answered only by the recovery wait after an interview
+/// ends. Reaching the live reducer, it must be nothing: not an end, not a
+/// reply, and not evidence, or a stale button could steer an interview.
+#[test]
+fn a_report_retry_during_a_live_interview_changes_nothing() {
+    let (topic, cases) = wire_fixture(include_str!("../fixtures/control.json"));
+    let mut state = RuntimeState {
+        code: "return 1".into(),
+        ..RuntimeState::default()
+    };
+    let before = format!("{state:?}");
+    let result = apply_data_event(
+        &mut state,
+        &topic,
+        wire_case(&cases, "retry report"),
+        TEST_REACTION_COOLDOWN_S,
+    );
+    assert_eq!(result, DataEventResult::default());
+    // Counted as received, as every packet is, and nothing else.
+    assert_eq!(state.evidence_ledger.metrics.raw_events_received, 1);
+    state.evidence_ledger.metrics.raw_events_received = 0;
+    assert_eq!(format!("{state:?}"), before);
+}
+
 #[test]
 fn browser_thinking_controls_keep_evidence_live_and_yield_the_floor() {
     let (topic, cases) = wire_fixture(include_str!("../fixtures/control.json"));

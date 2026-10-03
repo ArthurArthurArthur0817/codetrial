@@ -83,12 +83,41 @@ Candidate video, off by default, therefore sends one frame in five seconds and
 asks for the low media resolution; the camera is there for presence, and the
 code reaches the model as text.
 
-Final reporting has its own hard budget of six Gemini HTTP calls: initial
-generation plus one semantic repair, each generation allowing its first call and
-at most two transient retries. The counter is consumed immediately before the
-network request, so no future loop change can exceed the budget by accident.
-Authentication failures, bad models, malformed responses, and other permanent
-failures get no transport retry.
+Final reporting has a shared hard budget of five Gemini HTTP calls across
+initial generation, up to two semantic repairs, and transient retries. The
+counter is consumed immediately before the network request. Authentication
+failures, bad models, malformed responses, and other permanent failures get no
+transport retry.
+
+After transient transport exhaustion or the overall report deadline, the
+connected candidate may request one regeneration after a 30-second cooldown,
+or for quota exhaustion until the first configured key leaves its cooldown, at
+most 60 seconds; a sole key waits the whole 60, and a usable backup only the 30.
+A missed deadline asks the key rotation the same question, and so does an
+accepted request, so keys another interview sent back to quota during the wait
+answer `early` rather than spend the regeneration on a call that cannot start. It
+reuses the frozen assessment, has its own five-call pool and 125-second
+deadline, and therefore bounds final reporting at ten HTTP calls per interview.
+Successful or salvaged reports cannot be regenerated. A rejected credential
+never qualifies on its own; an available or quota-limited backup may still
+offer recovery, regardless of which credential failed last. An already
+exhausted quota rotation also qualifies, including when another interview
+exhausted it. The offer expires after five minutes and the agent leaving ends
+it. A candidate who leaves has 30 seconds to rejoin under the same identity,
+which is how a full LiveKit reconnect looks, and a regeneration under way keeps
+running through it and is published once they are back; a candidate already
+gone when the interview ends gets the failure at once with no window. The
+Live session is closed after the report is published, or right after the
+provisional report when a window opens. While the offer is open the agent
+answers each request on the control topic, `report_retry` with status
+`accepted` or `early` (with the seconds still to wait, which does not spend the
+regeneration), and announces `closed` at expiry or when no key can ever answer;
+a duplicate request during
+regeneration gets no answer. The browser waits at most 140 seconds from its
+request or the acceptance, whichever came last, so neither a reconnect nor a
+lost answer cuts off a regeneration still in progress. A transient
+burst followed by a schema failure offers no regeneration: the terminal failure
+determines eligibility. Reloads and process restarts cannot recover the inputs.
 
 Quiet-pause interim reviews use that same report model and quota. A review is
 eligible after 8 seconds of candidate quiet and 150 seconds from interview start,
@@ -106,9 +135,16 @@ limit: the final report still receives the complete transcript and editor state.
 
 The server admits at most `CODETRIAL_MAX_CONCURRENT_INTERVIEWS` live local
 agents, 16 by default. A reload of an already-live room reuses its slot;
-completion and panic release it. Provider projects are rotated and their LiveKit
-connection-minute quota is refreshed in the background, and known-exhausted
-projects are skipped.
+completion and panic release it. A report recovery window keeps its slot and
+LiveKit connection until expiry or 30 seconds after candidate departure, at most
+five minutes plus a 125-second regeneration and a 30-second rejoin. Provider outages can therefore fill the slots
+with completed interviews awaiting recovery; admission still refuses excess
+starts rather than exceeding this bound. A fixed local room refuses a new
+start while its existing agent is finalizing or awaiting report recovery, as
+`dispatch_refused ... reason=finalizing` rather than `at_capacity`; it cannot
+reuse that agent as an interviewer for another candidate. Provider projects are
+rotated and their LiveKit connection-minute quota is refreshed in the
+background, and known-exhausted projects are skipped.
 
 The token endpoint allows 30 starts per 60-second bucket. Signed-in buckets are
 keyed by account and anonymous buckets by client address, so anonymous traffic
@@ -126,7 +162,14 @@ and nothing else. Never candidate prompts, transcript, code, profile, job
 description or resume grounding, provider output, repair output, framework
 evidence, or personalized feedback. Report requests are built from the current
 session and each retry uses that same session's immutable prompt, so there is no
-cross-session response cache.
+cross-session response cache. A failed report may keep its frozen prompt and
+assessment in the same agent's process memory for the five-minute recovery
+window and one bounded regeneration. They are discarded on final outcome,
+expiry, disconnection or process exit, never persisted or reused by another
+session. The provisional failure report itself is not an input: the browser
+saves it on arrival like any report, and the final outcome replaces it under
+the same report id, so a tab lost during the window keeps the failure rather
+than nothing.
 
 ## What the candidate sees
 
@@ -143,10 +186,15 @@ never presents canned feedback as an agent evaluation.
 
 ## Operating it
 
-Watch `codetrial dispatch_refused ... reason=at_capacity`, `livekit quota:`
-transitions, token HTTP 429 with `Retry-After`, `gemini report
-transport_failed call=... retry=...`, `codetrial live_usage ... outcome=billing`,
-and the bounded incomplete-report categories.
+Watch `codetrial dispatch_refused ... reason=at_capacity` and
+`reason=finalizing`, `livekit quota:` transitions, token HTTP 429 with
+`Retry-After`, `gemini report transport_failed call=... retry=...`, `gemini
+report retry_unavailable` (a key rotation lost during backoff, without another
+HTTP call), `codetrial report_recovery_notice_failed`, `codetrial live_usage
+... outcome=billing`, and the bounded incomplete-report categories. Each
+recovery window also keeps the agent and the candidate connected to LiveKit for
+up to about seven minutes after the interview, which counts against
+connection-minute quota like interview time.
 
 Raise concurrency only after checking provider minutes, Gemini limits, CPU and
 audio capacity, and the token burst policy. The deterministic dispatcher,
