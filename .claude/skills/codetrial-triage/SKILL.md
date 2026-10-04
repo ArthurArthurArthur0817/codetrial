@@ -210,7 +210,8 @@ titles or the same broad symptom are insufficient to establish duplication.
   fix followed by a failure on a newer version may be a regression; verify the
   version and fix before recommending closure as a duplicate.
 - **Not actionable yet**: nobody could act on the report as written. That means
-  an empty or one-line body, the bug form's template text left in, prose in a
+  an empty body or one too short to carry the facts the next decision needs
+  (a precise one-line typo report is fine), the bug form's template text left in, prose in a
   language other than English, a feature that names no affected user and no
   observable outcome, or two unrelated problems in one thread. The fix is an
   edit to this issue, not a new one. Closing #48 and #74 and asking for a fresh

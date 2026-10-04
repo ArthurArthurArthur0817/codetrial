@@ -78,7 +78,7 @@ def gaps: (.body // "") as $b
         | "empty_section"),
       (select(.title | test("^\\s*(\\[[^\\]]+\\]|[A-Za-z]+(\\([^)]*\\))?:)\\s"))
         | "title_prefix"),
-      (select((.title | cjk > 0) or (($b | cjk) > ($b | latin)))
+      (select((.title | cjk > latin) or (($b | cjk) > ($b | latin)))
         | "not_english"),
       (select(.issueType.name == "Bug"
           and ($said | test("codetrial [0-9.]+ \\([0-9a-f]{7,40}\\)|\\b(?=[0-9a-f]*[0-9])(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\\b") | not))
