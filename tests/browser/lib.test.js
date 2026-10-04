@@ -3,6 +3,7 @@
 // substring-matching web/interview.js from Rust.
 
 import { test } from "node:test";
+import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import {
   assertIncludesCompact,
@@ -30,6 +31,7 @@ import {
   INTEGRITY_DETAIL_MAX,
   MAX_INTEGRITY_ROWS,
   integrityEventPayload,
+  interviewerReconnectMessage,
   normalize,
   orPlaceholder,
   providerUiState,
@@ -3324,4 +3326,74 @@ test("an accepted report prevents a later End click from changing replay provena
     { state },
   );
   assert.equal(state.phase, "live");
+});
+
+test("interviewer reconnect reasons use bounded wording and optional estimates", () => {
+  const generic = providerUiState("interviewer_reconnecting").message;
+  for (const message of [
+    {},
+    { reason: "unknown", waitSeconds: 42 },
+    { reason: "secret provider body" },
+    { reason: "toString" },
+    { reason: "__proto__" },
+  ]) {
+    assert.equal(interviewerReconnectMessage(message), generic);
+  }
+  assert.match(
+    interviewerReconnectMessage({ reason: "quota", waitSeconds: 42 }),
+    /rate limited.*about 42 seconds/,
+  );
+  assert.match(
+    interviewerReconnectMessage({ reason: "retrying", waitSeconds: 2 }),
+    /could not be reached.*about 2 seconds/,
+  );
+  assert.match(
+    interviewerReconnectMessage({ reason: "quota", waitSeconds: 1 }),
+    /about 1 second\./,
+  );
+  assert.match(
+    interviewerReconnectMessage({ reason: "quota", waitSeconds: 119 }),
+    /about 119 seconds\./,
+  );
+  assert.match(
+    interviewerReconnectMessage({ reason: "quota", waitSeconds: 3601 }),
+    /about 61 minutes\./,
+  );
+  // The attempt after the wait carries the reason and no estimate.
+  const attempting = interviewerReconnectMessage({ reason: "retrying" });
+  assert.match(attempting, /could not be reached/);
+  assert.doesNotMatch(attempting, /seconds?\b/);
+  assert.notEqual(attempting, generic);
+  for (const waitSeconds of [
+    undefined,
+    null,
+    "42",
+    -1,
+    0,
+    1.5,
+    Infinity,
+    Number.MAX_VALUE,
+  ]) {
+    assert.doesNotMatch(
+      interviewerReconnectMessage({ reason: "quota", waitSeconds }),
+      /seconds/,
+    );
+  }
+});
+
+// Each side was tested against a hand-written copy of the other, so a reason
+// renamed in either place passed both and showed the generic banner.
+test("every reconnect reason the agent can send has its own wording", () => {
+  const source = readFileSync(
+    new URL("../../src/livekit.rs", import.meta.url),
+    "utf8",
+  );
+  const reasons = [
+    ...source.matchAll(/^const RECONNECT_[A-Z_]+: &str = "([a-z_]+)";$/gm),
+  ].map((match) => match[1]);
+  assert.ok(reasons.length >= 2, `found ${reasons}`);
+  const generic = providerUiState("interviewer_reconnecting").message;
+  for (const reason of reasons) {
+    assert.notEqual(interviewerReconnectMessage({ reason }), generic, reason);
+  }
 });

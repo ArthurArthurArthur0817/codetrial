@@ -141,6 +141,15 @@ const HEALTHY_GEMINI_SOCKET: Duration = Duration::from_secs(60);
 /// dozen seconds such an outage actually lasts, and it costs nothing on the
 /// timeout path, where the attempt already took fifteen.
 const COLD_OPEN_BACKOFF: Duration = Duration::from_secs(2);
+/// How long a replacement waits on one reconnect notice before retrying
+/// without it. The notice explains the gap; a room that is going down must not
+/// widen it.
+const RECONNECT_NOTICE_LIMIT: Duration = Duration::from_secs(1);
+/// The reasons a reconnect notice may give. `web/lib.js` words each one, and a
+/// browser test reads these lines, so a reason renamed on one side fails there
+/// instead of quietly falling back to the generic banner.
+const RECONNECT_QUOTA: &str = "quota";
+const RECONNECT_RETRYING: &str = "retrying";
 const LIVEKIT_AGENT_STATE: &str = "lk.agent.state";
 const AGENT_STATE_LISTENING: &str = "listening";
 const AGENT_STATE_SPEAKING: &str = "speaking";
@@ -438,26 +447,55 @@ fn runtime_activity(config: &AgentConfig, started_at: Instant, session_id: u64) 
 async fn open_cold_session(
     interview: InterviewContext<'_>,
     restarts: &mut usize,
+    room: Option<&Room>,
 ) -> Result<GeminiLiveSession, Box<dyn std::error::Error + Send + Sync>> {
-    retry_cold_open(interview.keys, restarts, || {
-        live_session_with_keys(interview.keys, interview.boot, None)
-    })
+    retry_cold_open(
+        interview.keys,
+        restarts,
+        || live_session_with_keys(interview.keys, interview.boot, None),
+        async |notice| {
+            let Some(room) = room else { return };
+            match tokio::time::timeout(
+                RECONNECT_NOTICE_LIMIT,
+                publish_interviewer_state(room, &notice),
+            )
+            .await
+            {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => eprintln!("publishing reconnect wait failed ({error})"),
+                Err(_) => eprintln!("publishing reconnect wait timed out; retrying without it"),
+            }
+        },
+    )
     .await
 }
 
 /// The loop of `open_cold_session`, with the opener passed in so tests can
 /// point it at a local socket.
-async fn retry_cold_open<F, Fut>(
+async fn retry_cold_open<F, Fut, N, NFut>(
     keys: &GeminiKeys,
     restarts: &mut usize,
     mut open: F,
+    mut notify: N,
 ) -> Result<GeminiLiveSession, Box<dyn std::error::Error + Send + Sync>>
 where
+    N: FnMut(serde_json::Value) -> NFut,
+    NFut: Future<Output = ()>,
     F: FnMut() -> Fut,
     Fut: Future<Output = Result<GeminiLiveSession, Box<dyn std::error::Error + Send + Sync>>>,
 {
+    // Announced alongside the attempt it describes rather than ahead of it, so
+    // a slow room does not delay the retry; still finished before the loop
+    // returns, so it cannot land after the notice that clears the banner.
+    let mut attempt_notice = None;
     loop {
-        match open().await {
+        let announce = attempt_notice.take().map(&mut notify);
+        let (opened, ()) = tokio::join!(open(), async {
+            if let Some(announce) = announce {
+                announce.await;
+            }
+        });
+        let (reason, until) = match opened {
             Ok(session) => return Ok(session),
 
             // Every key is out on quota. A sole key would ride out the same
@@ -469,21 +507,59 @@ where
                 let until = crate::gemini::exhausted_until(error.as_ref())
                     .unwrap_or_else(std::time::Instant::now);
                 eprintln!("Gemini keys are all cooling down ({error}); waiting for the first back");
-                tokio::time::sleep_until(until.into()).await;
+                (RECONNECT_QUOTA, until.into())
             }
+
+            // A sole key's 429 lands here rather than above: one key out on
+            // quota is not yet an exhausted rotation.
             Err(error)
                 if crate::gemini::retry_live_open(error.as_ref(), keys.has_backups())
                     && take_restart_attempt(restarts, Duration::ZERO) =>
             {
                 eprintln!("Gemini could not be reached ({error}); retrying cold session");
-                tokio::time::sleep(COLD_OPEN_BACKOFF).await;
+                let reason = if crate::gemini::is_quota_failure(error.as_ref()) {
+                    RECONNECT_QUOTA
+                } else {
+                    RECONNECT_RETRYING
+                };
+                (reason, tokio::time::Instant::now() + COLD_OPEN_BACKOFF)
             }
             Err(error) => {
                 eprintln!("Gemini could not be reached ({error}); stopping cold session attempts");
                 return Err(error);
             }
+        };
+
+        // Due from before the notice, so a slow publish is spent inside the
+        // wait the page was told about rather than added to it. A key already
+        // back has no wait worth announcing.
+        let wait = until.saturating_duration_since(tokio::time::Instant::now());
+        if !wait.is_zero() {
+            notify(reconnect_wait(reason, Some(wait))).await;
         }
+        tokio::time::sleep_until(until).await;
+
+        // The estimate has run out, but the attempt it led to can take a
+        // connect and a setup timeout, so the page drops the number rather than
+        // show it for half a minute.
+        attempt_notice = Some(reconnect_wait(reason, None));
     }
+}
+
+/// The bare notice; `reconnect_wait` adds why a replacement is waiting.
+fn interviewer_state(reconnecting: bool) -> serde_json::Value {
+    serde_json::json!({ "type": "interviewer_state", "reconnecting": reconnecting })
+}
+
+/// The notice a replacement shows while it waits on `reason`. `None` is the
+/// attempt itself, whose length no one knows.
+fn reconnect_wait(reason: &str, wait: Option<Duration>) -> serde_json::Value {
+    let mut notice = interviewer_state(true);
+    notice["reason"] = reason.into();
+    if let Some(wait) = wait {
+        notice["waitSeconds"] = report::whole_seconds(wait).into();
+    }
+    notice
 }
 
 /// How an interview's Live session ended, as its summary line spells it.
@@ -592,7 +668,7 @@ async fn replace_gemini_session(
     // gap, and the gap starts here. Connect and setup are bounded at fifteen
     // seconds each, and for that long the candidate is talking to a socket that
     // is gone.
-    publish_interviewer_state(room, true).await?;
+    publish_interviewer_state(room, &interviewer_state(true)).await?;
 
     // Closes the writer half and the reader task. A socket that is already gone
     // errors on the close, and that error says nothing the caller can act on;
@@ -632,7 +708,7 @@ async fn replace_gemini_session(
     let resumed = resumed_session.is_some();
     let session = match resumed_session {
         Some(session) => Ok(session),
-        None => open_cold_session(interview, &mut loops.restarts).await,
+        None => open_cold_session(interview, &mut loops.restarts, Some(room)).await,
     };
     let session = match session {
         Ok(session) => session,
@@ -685,7 +761,7 @@ async fn replace_gemini_session(
     );
     close_turns(room, context).await?;
     set_agent_state(room, context.agent_state, AGENT_STATE_LISTENING).await?;
-    publish_interviewer_state(room, false).await?;
+    publish_interviewer_state(room, &interviewer_state(false)).await?;
     let spoke = brief_replacement(
         context.gemini,
         context.state,
@@ -724,7 +800,7 @@ async fn end_without_interviewer(
     // A replacement that gave up after announcing itself would leave the
     // reconnecting notice up over the report. Not `?`: the report matters more
     // than the notice.
-    if let Err(error) = publish_interviewer_state(room, false).await {
+    if let Err(error) = publish_interviewer_state(room, &interviewer_state(false)).await {
         eprintln!("clearing the reconnecting notice failed ({error}); writing the report anyway");
     }
     if context.state.ended {
@@ -1226,7 +1302,7 @@ async fn open_session<'a>(
             };
             crate::gemini::first_open_within(
                 crate::gemini::FIRST_OPEN_LIMIT,
-                open_cold_session(interview, &mut restarts),
+                open_cold_session(interview, &mut restarts, None),
             )
             .await
         },
@@ -2419,13 +2495,10 @@ async fn leave_room(room: &Room) {
 /// as the interviewer ignoring them.
 async fn publish_interviewer_state(
     room: &Room,
-    reconnecting: bool,
+    notice: &serde_json::Value,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     room.local_participant()
-        .publish_data(browser_packet(
-            TOPIC_CONTROL,
-            &serde_json::json!({ "type": "interviewer_state", "reconnecting": reconnecting }),
-        )?)
+        .publish_data(browser_packet(TOPIC_CONTROL, notice)?)
         .await?;
     Ok(())
 }

@@ -377,7 +377,7 @@ enum RecoveryNotice {
 
 /// A wait as the page is told it, rounded up, so a page that waits exactly
 /// this long is not early.
-fn whole_seconds(wait: std::time::Duration) -> u64 {
+pub(super) fn whole_seconds(wait: std::time::Duration) -> u64 {
     wait.as_millis().div_ceil(1000) as u64
 }
 

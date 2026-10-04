@@ -231,6 +231,34 @@ fn both_ways_a_live_socket_opens_count_its_instruction() {
     }
 }
 
+/// Only a replacement tells the page why it waits: at startup the page is in
+/// its own connecting state, and a reconnect notice would contradict it. The
+/// retry loop is tested with its notifier passed in, so only the call sites
+/// decide this, and they are distinguishable only in a room that really
+/// connected.
+#[test]
+fn only_a_replacement_publishes_its_reconnect_wait() {
+    let source = include_str!("../../src/livekit.rs");
+    for (opener, room) in [
+        ("async fn open_session", "None"),
+        ("async fn replace_gemini_session", "Some(room)"),
+    ] {
+        let body = source
+            .split(opener)
+            .nth(1)
+            .unwrap_or_else(|| panic!("{opener} is still defined here"));
+        let body = body.split("\n}\n").next().unwrap_or_default();
+        let call = body
+            .lines()
+            .find(|line| line.contains("open_cold_session("))
+            .unwrap_or_else(|| panic!("{opener} still opens a cold session"));
+        assert!(
+            call.contains(&format!(", {room})")),
+            "{opener} must pass {room} to open_cold_session: {call}"
+        );
+    }
+}
+
 /// The interview starts once, when the candidate joined.
 ///
 /// Stamping a second `Instant::now()` after the room and the Gemini session
@@ -1625,9 +1653,25 @@ async fn first_cold_open_retries_a_503_on_the_selected_key() {
             }
         });
         let mut restarts = 0;
-        let session = retry_cold_open(&keys, &mut restarts, || {
-            crate::gemini::live_session_with_keys_at(&url, &keys, &boot, None)
-        })
+        let mut notices = Vec::new();
+        let mut sent = Vec::new();
+        let session = retry_cold_open(
+            &keys,
+            &mut restarts,
+            || crate::gemini::live_session_with_keys_at(&url, &keys, &boot, None),
+            |notice| {
+                // A room slow to take the estimate must not stretch the wait it
+                // announced.
+                let stall = if notice.get("waitSeconds").is_some() {
+                    COLD_OPEN_BACKOFF / 2
+                } else {
+                    Duration::ZERO
+                };
+                notices.push(notice);
+                sent.push(Instant::now());
+                tokio::time::sleep(stall)
+            },
+        )
         .await
         .unwrap();
         let _ = session.close().await;
@@ -1638,7 +1682,91 @@ async fn first_cold_open_retries_a_503_on_the_selected_key() {
             "{value}"
         );
         assert_eq!(restarts, 1, "{value}");
+
+        // What the loop reports, not what reaches a page: the first open passes
+        // no room, so in production these go nowhere until a replacement.
+        assert_eq!(
+            notices,
+            vec![
+                reconnect_wait("retrying", Some(COLD_OPEN_BACKOFF)),
+                reconnect_wait("retrying", None),
+            ]
+        );
+        let waited = sent[1] - sent[0];
+        assert!(
+            waited < COLD_OPEN_BACKOFF + COLD_OPEN_BACKOFF / 4,
+            "the announced {COLD_OPEN_BACKOFF:?} took {waited:?}"
+        );
     }
+}
+
+/// A sole key's 429 is retried on the same key, as a 503 is, but it is a rate
+/// limit and the page says so: labelling it unreachable told the candidate the
+/// wrong thing for the whole cooldown. A sole key stays in rotation, so every
+/// retry takes this path; the bound stops the loop inside the second backoff.
+#[tokio::test]
+// The handshake callback's error type is a full HTTP response.
+#[allow(clippy::result_large_err)]
+async fn a_sole_key_rate_limit_is_announced_as_quota() {
+    use tokio_tungstenite::tungstenite::handshake::server;
+
+    let config = load_from_pairs([
+        ("LIVEKIT_URL", "wss://example.livekit.cloud"),
+        ("LIVEKIT_API_KEY", "devkey"),
+        ("LIVEKIT_API_SECRET", "devsecret"),
+        ("GOOGLE_API_KEY", "rate-limited-only"),
+        ("GEMINI_LIVE_MODEL", "gemini-live"),
+    ])
+    .unwrap();
+    let keys = GeminiKeys::from_config(&config);
+    let boot = crate::runtime::bootstrap(&config, "interview-fixed", Some("two-sum"), 45);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("ws://{}/", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        loop {
+            let (socket, _) = listener.accept().await.unwrap();
+            let _ = tokio_tungstenite::accept_hdr_async(
+                socket,
+                |_: &server::Request, _: server::Response| {
+                    let mut refusal = server::ErrorResponse::new(None);
+                    *refusal.status_mut() = axum::http::StatusCode::TOO_MANY_REQUESTS;
+                    Err(refusal)
+                },
+            )
+            .await;
+        }
+    });
+
+    let mut notices = Vec::new();
+    let _ = crate::gemini::first_open_within(
+        COLD_OPEN_BACKOFF + COLD_OPEN_BACKOFF / 4,
+        retry_cold_open(
+            &keys,
+            &mut 0,
+            || crate::gemini::live_session_with_keys_at(&url, &keys, &boot, None),
+            |notice| {
+                notices.push(notice);
+                async {}
+            },
+        ),
+    )
+    .await;
+    server.abort();
+
+    assert_eq!(
+        notices[..2],
+        [
+            reconnect_wait("quota", Some(COLD_OPEN_BACKOFF)),
+            reconnect_wait("quota", None),
+        ],
+        "{notices:?}"
+    );
+    assert!(
+        notices[2..]
+            .iter()
+            .all(|notice| notice["reason"] == "quota"),
+        "{notices:?}"
+    );
 }
 
 /// The first open's retries run inside a wall-clock bound, not only the
@@ -1684,9 +1812,12 @@ async fn a_first_open_gives_up_at_its_time_limit() {
     let started = Instant::now();
     let error = crate::gemini::first_open_within(
         COLD_OPEN_BACKOFF / 4,
-        retry_cold_open(&keys, &mut 0, || {
-            crate::gemini::live_session_with_keys_at(&url, &keys, &boot, None)
-        }),
+        retry_cold_open(
+            &keys,
+            &mut 0,
+            || crate::gemini::live_session_with_keys_at(&url, &keys, &boot, None),
+            |_| async {},
+        ),
     )
     .await
     .err()
@@ -1733,10 +1864,15 @@ async fn a_rotation_emptied_by_billing_failures_reports_billing() {
         }
     });
     let mut attempts = 0;
-    let error = retry_cold_open(&keys, &mut 0, || {
-        attempts += 1;
-        crate::gemini::live_session_with_keys_at(&url, &keys, &boot, None)
-    })
+    let error = retry_cold_open(
+        &keys,
+        &mut 0,
+        || {
+            attempts += 1;
+            crate::gemini::live_session_with_keys_at(&url, &keys, &boot, None)
+        },
+        |_| async {},
+    )
     .await
     .err()
     .unwrap();
@@ -1818,19 +1954,32 @@ async fn an_exhausted_rotation_waits_only_for_a_key_out_on_quota() {
 
         let mut restarts = if budget_left { 0 } else { GEMINI_RESTART_LIMIT };
         let mut attempts = 0;
+        let mut notices = Vec::new();
         let error = crate::gemini::first_open_within(
             COLD_OPEN_BACKOFF / 4,
-            retry_cold_open(&keys, &mut restarts, || {
-                attempts += 1;
-                let error = keys.select().unwrap_err();
-                async move { Err(error.into()) }
-            }),
+            retry_cold_open(
+                &keys,
+                &mut restarts,
+                || {
+                    attempts += 1;
+                    let error = keys.select().unwrap_err();
+                    async move { Err(error.into()) }
+                },
+                |notice| {
+                    notices.push(notice);
+                    async {}
+                },
+            ),
         )
         .await
         .err()
         .unwrap();
         assert_eq!(attempts, 1, "{prefix}");
+        assert_eq!(notices.len(), usize::from(waits), "{prefix}");
         if waits {
+            assert_eq!(notices[0]["reason"], "quota");
+            assert_eq!(notices[0]["reconnecting"], true);
+            assert!((1..=60).contains(&notices[0]["waitSeconds"].as_u64().unwrap()));
             assert!(error.to_string().contains("did not open within"), "{error}");
             assert_eq!(restarts, 1, "{prefix}");
         } else {
@@ -5368,4 +5517,26 @@ fn a_replacement_drops_the_briefing_its_predecessor_owed() {
     };
     clear_abandoned_socket_work(&mut state, &mut RuntimeActivity::new(Instant::now()));
     assert!(!state.recovery_reply_pending);
+}
+
+#[test]
+fn reconnect_wait_uses_machine_reason_and_rounds_up() {
+    assert_eq!(
+        reconnect_wait("quota", Some(Duration::from_millis(42001))),
+        serde_json::json!({
+            "type": "interviewer_state", "reconnecting": true, "reason": "quota", "waitSeconds": 43
+        })
+    );
+    assert_eq!(
+        reconnect_wait("retrying", Some(Duration::from_secs(2)))["waitSeconds"],
+        2
+    );
+    assert_eq!(
+        interviewer_state(false),
+        serde_json::json!({ "type": "interviewer_state", "reconnecting": false })
+    );
+    assert_eq!(
+        reconnect_wait("retrying", None),
+        serde_json::json!({ "type": "interviewer_state", "reconnecting": true, "reason": "retrying" })
+    );
 }
