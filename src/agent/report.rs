@@ -434,8 +434,7 @@ pub(crate) fn sanitize_report_candidate(
         checks.retain(|check| {
             check
                 .as_str()
-                .and_then(|check| refused_judgment(check, true))
-                .is_none()
+                .is_none_or(|check| refused_judgments(check, true).is_empty())
         });
         let removed = before - checks.len();
         dropped += removed;
@@ -609,10 +608,39 @@ fn validate_observable_judgments(value: &serde_json::Value, path: &str, errors: 
         let improvement = IMPROVEMENT_PATHS
             .iter()
             .any(|prefix| path.starts_with(prefix));
-        if let Some((reason, phrase)) = refused_judgment(text, improvement) {
-            errors.push(format!("{path}: {reason} ({phrase:?})"));
+        for (reason, phrases) in refused_judgments(text, improvement) {
+            errors.push(judgment_error(path, reason, &phrases));
         }
     });
+}
+
+/// The longest a validation error gets, both in the repair prompt and in the
+/// note a candidate reads when no repair succeeded.
+pub(crate) const MAX_ERROR_CHARS: usize = 240;
+
+/// Names as many phrases as fit in `MAX_ERROR_CHARS` and counts the rest. Cut
+/// at the bound instead, a field with many phrases loses its last one midway,
+/// and the repair never learns to remove it.
+fn judgment_error(path: &str, reason: &str, phrases: &[&str]) -> String {
+    let quoted = phrases
+        .iter()
+        .map(|phrase| format!("{phrase:?}"))
+        .collect::<Vec<_>>();
+    let naming = |named: usize| {
+        let list = quoted[..named].join(", ");
+        match quoted.len() - named {
+            0 => format!("{path}: {reason} ({list})"),
+            more => format!("{path}: {reason} ({list}, and {more} more)"),
+        }
+    };
+
+    // One phrase always, even past the bound: a path that long is cut by the
+    // repair prompt anyway, and an error naming nothing gives a repair less.
+    (2..=quoted.len())
+        .rev()
+        .map(naming)
+        .find(|error| error.chars().count() <= MAX_ERROR_CHARS)
+        .unwrap_or_else(|| naming(1))
 }
 
 /// Where a report tells the candidate what to fix: the two improvement lists
@@ -628,7 +656,7 @@ const IMPROVEMENT_PATHS: [&str; 3] = [
 /// error because the lists are ours and the model cannot see them: told only
 /// that a check is unsupported, a repair swaps "appeared nervous" for "sounded
 /// confident" and fails again. Each phrase is whole words, spelled with the
-/// spaces `refused_judgment` pads the text with.
+/// spaces `refused_judgments` pads the text with.
 struct JudgmentRule {
     reason: &'static str,
     /// Only where the report says what to fix, rather than everywhere.
@@ -798,31 +826,44 @@ const JUDGMENT_RULES: [JudgmentRule; 3] = [
     },
 ];
 
-/// The first rule `text` breaks and the phrase it breaks it with, if any,
-/// with `improvement` saying whether the text tells the candidate what to fix.
-fn refused_judgment(text: &str, improvement: bool) -> Option<(&'static str, &'static str)> {
+/// Every rule `text` breaks, each with every phrase it breaks it with, so a
+/// repair need not discover another violation in the same field on its next
+/// attempt. Listed phrases come in list order, then adjectives before a speech
+/// word in the order the text uses them. `improvement` says whether the field
+/// tells the candidate what to fix.
+fn refused_judgments(text: &str, improvement: bool) -> Vec<(&'static str, Vec<&'static str>)> {
     let words = spelled_words(text);
     let padded = format!(" {} ", words.join(" "));
-    JUDGMENT_RULES
+    let mut matches = Vec::new();
+    for rule in JUDGMENT_RULES
         .iter()
         .filter(|rule| improvement || !rule.improvements_only)
-        .find_map(|rule| {
-            let phrase = rule.phrases.iter().find(|phrase| padded.contains(**phrase));
-            let adjective = || {
-                words.iter().enumerate().find_map(|(at, word)| {
-                    let adjective = rule.before_speech.iter().find(|name| **name == word)?;
-                    let mut next = words.get(at + 1)?;
-                    if next == "language" {
-                        next = words.get(at + 2)?;
-                    }
-                    SPEECH_WORDS.contains(&next.as_str()).then_some(*adjective)
-                })
+    {
+        let mut phrases = rule
+            .phrases
+            .iter()
+            .filter(|phrase| padded.contains(**phrase))
+            .map(|phrase| phrase.trim())
+            .collect::<Vec<_>>();
+        for (at, word) in words.iter().enumerate() {
+            let Some(adjective) = rule.before_speech.iter().find(|name| **name == word) else {
+                continue;
             };
-            phrase
-                .map(|phrase| phrase.trim())
-                .or_else(adjective)
-                .map(|phrase| (rule.reason, phrase))
-        })
+            let next = match words.get(at + 1).map(String::as_str) {
+                Some("language") => words.get(at + 2),
+                _ => words.get(at + 1),
+            };
+            if next.is_some_and(|next| SPEECH_WORDS.contains(&next.as_str()))
+                && !phrases.contains(adjective)
+            {
+                phrases.push(*adjective);
+            }
+        }
+        if !phrases.is_empty() {
+            matches.push((rule.reason, phrases));
+        }
+    }
+    matches
 }
 
 fn exact_keys(

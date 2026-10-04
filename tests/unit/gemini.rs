@@ -3474,3 +3474,121 @@ async fn a_quota_failure_waits_only_when_no_other_key_can_answer() {
         Some(credentials::QUOTA_COOLDOWN)
     );
 }
+
+#[test]
+fn success_criterion_repair_names_every_prohibited_phrase() {
+    let mut report = valid_report();
+    report["improvementPlan"][1]["successCriterion"] =
+        json!("Maintain eye contact, avoid filler words, and never sound nervous.");
+    let output = report.to_string();
+    let ReportStep::Repair(repair) = attempt_for(&output, 0, report_problem()) else {
+        panic!("an unsafe success criterion must be repaired");
+    };
+    let diagnostic = "$.improvementPlan[1].successCriterion: unsupported delivery or personality judgment (\"filler words\", \"eye contact\", \"nervous\")";
+    let encoded = serde_json::to_string(diagnostic).unwrap();
+    assert!(
+        repair.contains(&encoded),
+        "missing diagnostic: {diagnostic}"
+    );
+
+    assert!(last_attempt(&output).is_err());
+    report["improvementPlan"][1]["successCriterion"] =
+        json!("Trace the loop invariant and verify the empty-input and duplicate cases.");
+    let repaired = report.to_string();
+    assert!(run_attempts(&[&output, &repaired]).is_ok());
+}
+
+#[test]
+fn every_rule_one_field_breaks_reaches_the_repair() {
+    let mut report = valid_report();
+    report["improvementPlan"][1]["successCriterion"] =
+        json!("Speak clearly in English to avoid transcription ambiguity; never sound nervous.");
+    let output = report.to_string();
+    let ReportStep::Repair(repair) = attempt_for(&output, 0, report_problem()) else {
+        panic!("both policy rules must trigger a repair");
+    };
+    let errors =
+        crate::agent::validate_report_for_round(&report, report_problem(), true).unwrap_err();
+    assert_eq!(errors.len(), 2);
+    for error in errors {
+        assert!(repair.contains(&serde_json::to_string(&error).unwrap()));
+    }
+}
+
+#[test]
+fn a_long_phrase_list_is_counted_rather_than_cut_midway() {
+    let mut report = valid_report();
+    report["improvementPlan"][1]["successCriterion"] = json!(
+        "Mind accent, dialect, typing speed, speech rate, filler words, disfluency, eye contact, \
+         posture, body language, facial expression, voice tone and physical appearance."
+    );
+    let errors =
+        crate::agent::validate_report_for_round(&report, report_problem(), true).unwrap_err();
+    let [error] = errors.as_slice() else {
+        panic!("one rule, one error: {errors:?}");
+    };
+
+    // Every phrase it names is whole, and the bound leaves it as it is, so the
+    // repair reads exactly what validation wrote.
+    assert!(
+        error.chars().count() <= crate::agent::MAX_ERROR_CHARS,
+        "{error}"
+    );
+    assert_eq!(bounded_errors(&errors), errors);
+    let (named, more) = error
+        .strip_prefix(
+            "$.improvementPlan[1].successCriterion: unsupported delivery or personality judgment (\"",
+        )
+        .and_then(|rest| rest.split_once("\", and "))
+        .unwrap_or_else(|| panic!("the rest must be counted: {error}"));
+    let named = named.split("\", \"").collect::<Vec<_>>();
+    let more = more
+        .strip_suffix(" more)")
+        .and_then(|count| count.parse::<usize>().ok())
+        .unwrap();
+    assert_eq!(named.len() + more, 12, "{error}");
+    assert_eq!(named[0], "accent");
+}
+
+#[test]
+fn every_failing_path_is_named_before_a_second_error_on_one() {
+    let mut errors = Vec::new();
+    for field in 0..4 {
+        for rule in 0..3 {
+            errors.push(format!(
+                "$.codingFeedback.improvements[{field}]: rule {rule}"
+            ));
+        }
+    }
+    errors.push("$.improvementPlan[1].successCriterion: rule 0".to_string());
+    let bounded = bounded_errors(&errors);
+    assert_eq!(bounded.len(), 12);
+    assert!(bounded.contains(&errors[12]), "{bounded:?}");
+
+    // What was dropped is a second or third error on a path already named, and
+    // the order validation found them in is kept.
+    for field in 0..4 {
+        let path = format!("$.codingFeedback.improvements[{field}]:");
+        assert!(bounded.iter().any(|error| error.starts_with(&path)));
+    }
+    let found = bounded
+        .iter()
+        .map(|error| errors.iter().position(|e| e == error).unwrap())
+        .collect::<Vec<_>>();
+    assert!(found.is_sorted(), "{found:?}");
+}
+
+#[test]
+fn a_self_review_check_with_multiple_policy_violations_is_dropped_once() {
+    let mut report = valid_report();
+    report["improvementPlan"][0]["selfReview"] = json!([
+        "Speak clearly in English without nervous filler words.",
+        "Verify the loop invariant"
+    ]);
+    let salvage = salvage_report(report, 0, report_problem(), true).unwrap();
+    assert_eq!(salvage.dropped, 1);
+    assert_eq!(
+        salvage.report["improvementPlan"][0]["selfReview"],
+        json!(["Verify the loop invariant"])
+    );
+}

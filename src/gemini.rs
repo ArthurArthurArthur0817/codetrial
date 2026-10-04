@@ -1073,12 +1073,24 @@ fn parse_report_text(text: &str) -> Result<Value, Vec<String>> {
 /// the prompt that asks for a repair, and the sentence a candidate is left with
 /// when none came. A response can break the same rule on every array element,
 /// and neither a model fixing them nor a person reading them gets further for
-/// having all of them.
+/// having all of them. A path not yet named goes ahead of a second error on
+/// one already named, so one field breaking several rules cannot crowd a later
+/// field out; the kept errors stay in the order they were found.
 fn bounded_errors(errors: &[String]) -> Vec<String> {
-    errors
-        .iter()
-        .take(12)
-        .map(|error| error.chars().take(240).collect::<String>())
+    let mut named = std::collections::HashSet::new();
+    let (first, again): (Vec<usize>, Vec<usize>) = (0..errors.len()).partition(|&at| {
+        let error = errors[at].as_str();
+        named.insert(error.split_once(": ").map_or(error, |(path, _)| path))
+    });
+    let mut kept = first.into_iter().chain(again).take(12).collect::<Vec<_>>();
+    kept.sort_unstable();
+    kept.into_iter()
+        .map(|at| {
+            errors[at]
+                .chars()
+                .take(crate::agent::MAX_ERROR_CHARS)
+                .collect()
+        })
         .collect()
 }
 
