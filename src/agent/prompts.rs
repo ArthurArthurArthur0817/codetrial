@@ -257,7 +257,10 @@ There is no code editor and no test runner, and nothing they draw will run.",
   snapshots",
         snapshot_note:
             "- A board snapshot is an image of the whole board, sent a moment after they stop
-  drawing: the state of their thinking, never only what changed since the last.",
+  drawing: the state of their thinking, never only what changed since the last.
+  Handwriting and sketches can be hard to read. Read an unclear mark by what
+  they said while drawing it; if that does not settle it, ask what the box,
+  arrow or symbol stands for rather than guessing or naming it for them.",
         read_tool: "`read_board`",
         work_changes: "board changes",
 

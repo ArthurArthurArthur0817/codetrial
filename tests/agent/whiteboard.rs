@@ -35,6 +35,11 @@ fn each_mode_is_told_about_its_own_surface_and_no_other() {
     assert!(board.contains("no code editor and no test runner"));
     assert!(board.contains("WHITEBOARD FLOW"));
 
+    // A sketch the model cannot read is settled by the narration, then by a
+    // question, never by the model naming the mark itself.
+    assert!(board.contains("Read an unclear mark by what\n  they said while drawing it"));
+    assert!(board.contains("rather than guessing or naming it for them"));
+
     let editor = instructions(problem, 45);
     for absent in ["read_board", "board snapshot", "whiteboard"] {
         assert!(
