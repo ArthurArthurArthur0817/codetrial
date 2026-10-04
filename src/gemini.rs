@@ -830,9 +830,10 @@ impl ReportCallBudget {
 ///
 /// A repair can make a response worse: the model fixes the rule it was told
 /// about and breaks one it was not, or the call after it never answers. So the
-/// latest response that only a dropped self-review check kept from being a
-/// report is held, and it is what the candidate gets if no later attempt does
-/// better, rather than `INCOMPLETE` for a report an earlier attempt had.
+/// latest response that only a dropped self-review check or a replaced success
+/// criterion kept from being a report is held, and it is what the candidate
+/// gets if no later attempt does better, rather than `INCOMPLETE` for a report
+/// an earlier attempt had.
 struct ReportAttempts {
     held: Option<Salvage>,
     behavioral_round_opened: bool,
@@ -897,11 +898,11 @@ impl ReportAttempts {
     /// still has to reach someone.
     ///
     /// Logged where a salvage is used, not where one is found: a held salvage
-    /// that a later attempt beats was never shown to anyone. The dropped
-    /// checks are model output the candidate never sees, and a repair would
-    /// otherwise have been the record of them. The error is quoted because
-    /// `unknown field` names a key the model chose, and a newline in it would
-    /// otherwise write a log line of its own.
+    /// that a later attempt beats was never shown to anyone. The dropped checks
+    /// and replaced criteria are model output the candidate never sees, and a
+    /// repair would otherwise have been the record of them. The error is quoted
+    /// because `unknown field` names a key the model chose, and a newline in it
+    /// would otherwise write a log line of its own.
     fn finish(
         &mut self,
         problem: &crate::agent::Problem,
@@ -912,9 +913,10 @@ impl ReportAttempts {
             return Err(error);
         };
         let line = format!(
-            "gemini report self_review_dropped problem={} checks={} attempt={} after={after} error={:?}",
+            "gemini report salvaged problem={} checks={} criteria={} attempt={} after={after} error={:?}",
             problem.id,
-            salvage.dropped,
+            salvage.removed.checks,
+            salvage.removed.criteria,
             salvage.attempt,
             error.to_string()
         );
@@ -923,24 +925,25 @@ impl ReportAttempts {
 }
 
 /// A response that is a report once its unsafe self-review checks are
-/// dropped.
+/// dropped and its unsafe success criteria replaced.
 struct Salvage {
     report: Value,
-    dropped: usize,
+    removed: crate::agent::Sanitized,
     attempt: usize,
 }
 
-/// A response whose only fault is a self-review check judging delivery or
-/// personality, with that check dropped. Anything else wrong with it, and it
-/// is not a salvage: the report it returns has passed the whole validation.
+/// A response whose only fault is a self-review check or success criterion
+/// judging delivery or personality, with that check dropped or that criterion
+/// replaced. Anything else wrong with it, and it is not a salvage: the report
+/// it returns has passed the whole validation.
 fn salvage_report(
     raw: Value,
     attempt: usize,
     problem: &crate::agent::Problem,
     behavioral_round_opened: bool,
 ) -> Option<Salvage> {
-    let (sanitized, dropped) = crate::agent::sanitize_report_candidate(raw);
-    if dropped == 0 {
+    let (sanitized, removed) = crate::agent::sanitize_report_candidate(raw);
+    if removed.is_empty() {
         return None;
     }
     let report =
@@ -948,7 +951,7 @@ fn salvage_report(
             .ok()?;
     Some(Salvage {
         report,
-        dropped,
+        removed,
         attempt,
     })
 }

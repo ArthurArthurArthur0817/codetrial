@@ -1296,7 +1296,7 @@ fn unsafe_checks_across_plan_items_are_all_dropped_and_counted() {
 
     let salvage = salvage_report(report, 0, report_problem(), true)
         .expect("every item is safe once its unsafe checks are gone");
-    assert_eq!(salvage.dropped, 3);
+    assert_eq!(salvage.removed.checks, 3);
     let lists = salvage.report["improvementPlan"]
         .as_array()
         .unwrap()
@@ -1353,7 +1353,7 @@ fn a_used_salvage_logs_the_checks_it_dropped_and_the_attempt_it_came_from() {
     assert_eq!(
         line.as_deref(),
         Some(
-            "gemini report self_review_dropped problem=two-sum checks=2 attempt=0 \
+            "gemini report salvaged problem=two-sum checks=2 criteria=0 attempt=0 \
              after=transport_error error=\"no answer\""
         )
     );
@@ -1366,7 +1366,7 @@ fn a_used_salvage_logs_the_checks_it_dropped_and_the_attempt_it_came_from() {
     assert_eq!(
         line,
         Some(format!(
-            "gemini report self_review_dropped problem=two-sum checks=2 attempt=0 \
+            "gemini report salvaged problem=two-sum checks=2 criteria=0 attempt=0 \
              after=no_repair_left error=\"Gemini report failed schema validation \
              after {MAX_REPORT_REPAIRS} repairs: $.x\\nforged: unknown field\""
         ))
@@ -1415,7 +1415,7 @@ fn sanitizing_a_report_without_a_plan_changes_nothing() {
     ] {
         assert_eq!(
             crate::agent::sanitize_report_candidate(raw.clone()),
-            (raw, 0)
+            (raw, crate::agent::Sanitized::default())
         );
     }
 }
@@ -3491,11 +3491,73 @@ fn success_criterion_repair_names_every_prohibited_phrase() {
         "missing diagnostic: {diagnostic}"
     );
 
-    assert!(last_attempt(&output).is_err());
+    // A repair that removes the claim keeps the model's own criterion, which is
+    // why the replacement waits for the repairs to run out.
     report["improvementPlan"][1]["successCriterion"] =
         json!("Trace the loop invariant and verify the empty-input and duplicate cases.");
     let repaired = report.to_string();
-    assert!(run_attempts(&[&output, &repaired]).is_ok());
+    let report = run_attempts(&[&output, &repaired]).unwrap();
+    assert_eq!(
+        report["improvementPlan"][1]["successCriterion"],
+        "Trace the loop invariant and verify the empty-input and duplicate cases."
+    );
+}
+
+/// The report the issue lost: after both repairs the one error left was a
+/// success criterion judging delivery, and the candidate got no scores for it.
+#[test]
+fn a_success_criterion_still_unsafe_after_both_repairs_is_replaced_and_scored() {
+    let mut report = valid_report();
+    report["improvementPlan"][1]["successCriterion"] =
+        json!("Maintain eye contact and avoid filler words while explaining.");
+    let output = report.to_string();
+    let raw = last_attempt(&output).expect("one unsafe criterion must not lose the evaluation");
+    assert_eq!(
+        raw["improvementPlan"][1]["successCriterion"],
+        crate::agent::SUCCESS_CRITERION_REPLACEMENT
+    );
+    assert_eq!(
+        raw["improvementPlan"][0]["successCriterion"], "State it independently",
+        "a criterion with nothing unsafe is left as the model wrote it"
+    );
+    let card = crate::agent::final_report(Some(&raw), 0, None, report_problem());
+    assert!(card.get("incomplete").is_none(), "{card}");
+    assert_eq!(card["codingScore"], 82);
+
+    let (_, line) = run_for(&[&output, &output, &output], report_problem()).unwrap();
+    let line = line.expect("a used salvage is logged");
+    assert!(
+        line.starts_with(
+            "gemini report salvaged problem=two-sum checks=0 criteria=1 attempt=2 \
+             after=no_repair_left error="
+        ),
+        "{line}"
+    );
+}
+
+/// A response refused for something no salvage touches is not a salvage, even
+/// one that would pass validation as it stands.
+#[test]
+fn a_response_with_nothing_to_remove_is_never_a_salvage() {
+    assert!(salvage_report(valid_report(), 0, report_problem(), true).is_none());
+}
+
+/// Fixed text, so checked once against every title it could be shown under.
+#[test]
+fn the_success_criterion_replacement_is_safe_for_every_problem() {
+    let mut raw = valid_report();
+    raw["improvementPlan"][0]["successCriterion"] = json!("Never appear nervous.");
+    for problem in crate::agent::PROBLEMS {
+        let salvage = salvage_report(raw.clone(), 0, problem, true)
+            .unwrap_or_else(|| panic!("rejected for {}", problem.id));
+        assert_eq!(
+            salvage.removed,
+            crate::agent::Sanitized {
+                checks: 0,
+                criteria: 1
+            }
+        );
+    }
 }
 
 #[test]
@@ -3586,7 +3648,7 @@ fn a_self_review_check_with_multiple_policy_violations_is_dropped_once() {
         "Verify the loop invariant"
     ]);
     let salvage = salvage_report(report, 0, report_problem(), true).unwrap();
-    assert_eq!(salvage.dropped, 1);
+    assert_eq!(salvage.removed.checks, 1);
     assert_eq!(
         salvage.report["improvementPlan"][0]["selfReview"],
         json!(["Verify the loop invariant"])

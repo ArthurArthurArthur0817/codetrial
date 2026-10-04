@@ -47,10 +47,11 @@ the shared five-call report budget. The repair prompt bounds the number and
 length of errors it carries: an error names as many phrases as fit and counts
 the rest, and every failing path gets one error before any path gets a second.
 When the repairs run out, the latest response that becomes a valid report
-once its prohibited self-review checks are dropped is kept, even if a later
-response broke something else, and a list left empty gets one fixed, neutral
-check. Without such a response, a claim that remains after the last repair
-leaves the report incomplete, with no score or verdict.
+once its prohibited self-review checks are dropped and its prohibited success
+criteria replaced is kept, even if a later response broke something else: a
+list left empty gets one fixed, neutral check, and a criterion is replaced with
+fixed text that judges no one. Without such a response, a claim that remains
+after the last repair leaves the report incomplete, with no score or verdict.
 
 The same scan refuses a report that names the natural language a transcript
 came out in, such as "a response in Mandarin", or judges English proficiency,
