@@ -5,7 +5,7 @@
   "//browser-checks": "CI installs Playwright to run the browser gate. Locally: `npm install && npx playwright install chromium`, then `./scripts/visual-parity-check.sh` and `cargo test --test web -- --ignored`. Direct dependencies are pinned exactly and package-lock.json is committed, because eslint's transitive graph is caret-ranged and CI runs `npm ci`.",
   "devDependencies": {
     "eslint": "10.11.0",
-    "globals": "17.12.0",
+    "globals": "17.13.0",
     "playwright": "1.63.0",
     "prettier": "3.9.9"
   },
