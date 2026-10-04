@@ -76,6 +76,43 @@ function strokeWidth(tool, eraserWidth = ERASER_WIDTH) {
   return ERASER_WIDTHS.includes(eraserWidth) ? eraserWidth : ERASER_WIDTH;
 }
 
+/// Which pointer is drawing, with palm rejection for a pen.
+///
+/// Mouse, pen and touch all reach the board as pointer events, so the board
+/// takes all three, one pointer at a time: a second finger never extends or
+/// ends the first finger's stroke. A hand resting on a tablet reports as
+/// touch, so a touch is refused while a pen is down. A palm that landed first
+/// has already begun a stroke, and a pen arriving takes the board from it:
+/// `down` answers `"replace"`, and the caller cancels that stroke before
+/// beginning the pen's.
+export function createPointerGate() {
+  let owner = null;
+  const pens = new Set();
+  return {
+    /// `"begin"`, `"replace"`, or `null` for a pointer that must not draw.
+    down({ pointerId, pointerType, button }) {
+      if (pointerType === "pen") pens.add(pointerId);
+      if (button !== 0) return null;
+      if (owner) {
+        if (pointerType !== "pen" || owner.type !== "touch") return null;
+        owner = { id: pointerId, type: pointerType };
+        return "replace";
+      }
+      if (pointerType === "touch" && pens.size > 0) return null;
+      owner = { id: pointerId, type: pointerType };
+      return "begin";
+    },
+    owns: ({ pointerId }) => owner?.id === pointerId,
+    /// Forgets the pointer, and returns whether it was the one drawing.
+    up({ pointerId }) {
+      pens.delete(pointerId);
+      if (owner?.id !== pointerId) return false;
+      owner = null;
+      return true;
+    },
+  };
+}
+
 /// A coordinate on the board.
 ///
 /// Clamped because a pointer that leaves the canvas mid-drag still reports
@@ -114,6 +151,9 @@ export function createBoard() {
   // to redo.
   let cleared = null;
   let open = null;
+  /// The redo history `begin` discarded, kept until the stroke ends so that a
+  /// stroke cancelled before it ended discards nothing.
+  let beforeOpen = null;
   /// What has been done to the board since somebody last asked.
   ///
   /// The replay is the drawing as operations rather than as pictures, and this
@@ -144,6 +184,7 @@ export function createBoard() {
     /// Starts a stroke, and returns whether the board took it.
     begin(tool, color, x, y, eraserWidth = ERASER_WIDTH) {
       if (strokes.length >= MAX_STROKES) return false;
+      beforeOpen = { undone, cleared };
       undone = [];
       cleared = null;
       open = {
@@ -183,6 +224,20 @@ export function createBoard() {
       });
       finished(open);
       open = null;
+      beforeOpen = null;
+      return true;
+    },
+
+    /// Takes back the open stroke as though it had never begun: nothing is
+    /// journaled, and the redo history its start dropped is restored. This is
+    /// a palm that reached the board before the pen did, which is no edit the
+    /// candidate made and should not cost them a redo.
+    cancel() {
+      if (!open) return false;
+      strokes.splice(strokes.indexOf(open), 1);
+      ({ undone, cleared } = beforeOpen);
+      open = null;
+      beforeOpen = null;
       return true;
     },
 

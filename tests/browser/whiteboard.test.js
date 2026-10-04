@@ -19,6 +19,7 @@ import {
   PEN_WIDTH,
   boardPoint,
   createBoard,
+  createPointerGate,
   drawBoard,
 } from "../../web/whiteboard.js";
 
@@ -430,4 +431,80 @@ test("a stroke from a recording is checked before it is drawn", () => {
   assert.equal(applyOp(board, { op: "highlight" }), false);
   assert.equal(applyOp(board, null), false);
   assert.equal(board.strokeCount(), 1);
+});
+
+const mouse = (pointerId, button = 0) => ({
+  pointerId,
+  pointerType: "mouse",
+  button,
+});
+const pen = (pointerId) => ({ pointerId, pointerType: "pen", button: 0 });
+const touch = (pointerId) => ({ pointerId, pointerType: "touch", button: 0 });
+
+test("a mouse, a pen and a finger can each draw", () => {
+  for (const pointer of [mouse(1), pen(2), touch(3)]) {
+    const gate = createPointerGate();
+    assert.equal(gate.down(pointer), "begin");
+    assert.ok(gate.owns(pointer));
+    assert.equal(gate.up(pointer), true);
+    assert.equal(gate.owns(pointer), false);
+  }
+  // Only the primary button draws: a right click or a pen's barrel button is
+  // not a stroke.
+  assert.equal(createPointerGate().down(mouse(1, 2)), null);
+});
+
+test("one pointer draws at a time, and a second finger is not part of its stroke", () => {
+  const gate = createPointerGate();
+  assert.equal(gate.down(touch(1)), "begin");
+  assert.equal(gate.down(touch(2)), null);
+  assert.equal(gate.owns(touch(2)), false);
+  assert.equal(gate.up(touch(2)), false, "the second finger ends nothing");
+  assert.ok(gate.owns(touch(1)));
+});
+
+test("a palm is kept off the board while a pen is down", () => {
+  const gate = createPointerGate();
+  assert.equal(gate.down(pen(1)), "begin");
+  assert.equal(gate.down(touch(2)), null);
+  // Lifting the pen between strokes leaves the resting palm refused, since it
+  // went down while the pen was there; the pen's next stroke is unaffected.
+  gate.up(pen(1));
+  assert.equal(gate.owns(touch(2)), false);
+  assert.equal(gate.down(pen(1)), "begin");
+  gate.up(pen(1));
+  gate.up(touch(2));
+  // With no pen down a finger draws again.
+  assert.equal(gate.down(touch(3)), "begin");
+});
+
+test("a pen takes the board from a palm that landed first", () => {
+  const gate = createPointerGate();
+  assert.equal(gate.down(touch(1)), "begin");
+  assert.equal(gate.down(pen(2)), "replace");
+  assert.ok(gate.owns(pen(2)));
+  assert.equal(gate.owns(touch(1)), false);
+  assert.equal(gate.up(touch(1)), false, "the palm lifting ends nothing");
+  // A pen does not take a stroke from a mouse, which no palm produces.
+  const desk = createPointerGate();
+  desk.down(mouse(1));
+  assert.equal(desk.down(pen(2)), null);
+});
+
+test("a cancelled stroke leaves the board, the journal and redo as they were", () => {
+  const board = createBoard();
+  stroke(board, 0, 0, 10, 10);
+  stroke(board, 20, 20, 30, 30);
+  board.undo();
+  board.takeOps();
+  const before = board.strokes();
+
+  board.begin("pen", BLACK, 50, 50);
+  board.extend(60, 60);
+  assert.equal(board.cancel(), true);
+  assert.deepEqual(board.strokes(), before);
+  assert.deepEqual(board.takeOps(), []);
+  assert.equal(board.isDrawing(), false);
+  assert.ok(board.redo(), "the palm did not cost the redo it would have");
+  assert.equal(board.cancel(), false, "nothing open, nothing to cancel");
 });

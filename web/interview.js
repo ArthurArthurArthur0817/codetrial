@@ -19,6 +19,7 @@ import {
   PEN_COLORS,
   boardPoint,
   createBoard,
+  createPointerGate,
   drawBoard,
 } from "./whiteboard.js";
 import {
@@ -272,6 +273,7 @@ const mode = whiteboard ? "whiteboard" : "coding";
 /// either.
 const board = {
   model: null,
+  pointers: createPointerGate(),
   context: null,
   color: PEN_COLORS[0],
   tool: "pen",
@@ -3320,9 +3322,9 @@ function initWhiteboard() {
   paintBoard();
 }
 
-/// Mouse only, for this first version: a stylus and a finger both report
-/// through the same events, but neither has been tried against a board this
-/// size, and palm rejection is not something the page can do for them.
+/// Mouse, pen and finger alike; `createPointerGate` decides which pointer
+/// draws and keeps a resting palm off the board while a pen is down. The
+/// canvas sets `touch-action: none`, so a finger draws instead of scrolling.
 ///
 /// The pointer is captured on the way down, which is what keeps a stroke
 /// attached to the canvas when the candidate draws off the edge of it -- the
@@ -3330,8 +3332,10 @@ function initWhiteboard() {
 /// ends.
 function bindBoardPointer() {
   nodes.board.addEventListener("pointerdown", (event) => {
-    if (event.pointerType !== "mouse" || event.button !== 0) return;
     if (boardLocked()) return;
+    const claim = board.pointers.down(event);
+    if (!claim) return;
+    if (claim === "replace") board.model.cancel();
     const point = boardPoint(nodes.board, event);
     if (
       !board.model.begin(
@@ -3341,20 +3345,27 @@ function bindBoardPointer() {
         point.y,
         board.eraserWidth,
       )
-    )
+    ) {
+      board.pointers.up(event);
+      paintBoard();
       return;
+    }
+    // A stroke is under way, so the board is not settled. Left running, the
+    // timer from the previous stroke would export this one half-drawn.
+    clearTimeout(board.settle);
+    board.settle = null;
     nodes.board.setPointerCapture(event.pointerId);
     event.preventDefault();
     paintBoard();
   });
   nodes.board.addEventListener("pointermove", (event) => {
-    if (!board.model.isDrawing()) return;
+    if (!board.pointers.owns(event) || !board.model.isDrawing()) return;
     const point = boardPoint(nodes.board, event);
     if (board.model.extend(point.x, point.y)) paintBoard();
   });
   for (const ending of ["pointerup", "pointercancel"]) {
     nodes.board.addEventListener(ending, (event) => {
-      if (!board.model.end()) return;
+      if (!board.pointers.up(event) || !board.model.end()) return;
       if (nodes.board.hasPointerCapture?.(event.pointerId)) {
         nodes.board.releasePointerCapture(event.pointerId);
       }
