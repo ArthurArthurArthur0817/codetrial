@@ -4,10 +4,26 @@
 // that matters most: the textarea is the source of truth and the overlay must
 // never be able to introduce markup or lose a character.
 
-import { test } from "node:test";
+import { before, test } from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 
+import { tokenize } from "../../web/tokenizer.js";
 import { highlight } from "../../web/highlight.js";
+import { indentNewline } from "../../web/editor.js";
+import { createSyntaxParser } from "../../web/syntax-parser.js";
+
+const syntax = createSyntaxParser({
+  loadBytes: async (url) => new Uint8Array(await readFile(url)),
+});
+
+before(async () => {
+  await Promise.all(
+    ["python", "javascript", "c", "cpp", "java"].map((language) =>
+      syntax.prepareLanguage(language),
+    ),
+  );
+});
 
 /// The overlay must render exactly the characters the textarea holds, or the
 /// painted text drifts out of line with the caret.
@@ -177,6 +193,258 @@ test("an unknown language falls back instead of throwing", () => {
   const html = highlight("const x = 1;", "brainfuck");
   assert.match(html, /tok-keyword/);
   roundTrips("const x = 1;", "brainfuck");
+});
+
+const marked = (html, kind) =>
+  [
+    ...html.matchAll(
+      new RegExp(`<span class="tok-${kind}">([\\s\\S]*?)</span>`, "g"),
+    ),
+  ].map((match) => textOf(match[1]));
+
+for (const [mode, parse] of [
+  ["scanner", () => null],
+  ["parser", syntax.parseSyntax],
+]) {
+  const render = (code, language, brackets = []) =>
+    highlight(code, language, brackets, tokenize(code, language, parse).tokens);
+
+  test(`${mode}: matching brackets preserve offsets across string and comment regions`, () => {
+    const code = 'const text = "\u03b1\ud83d\ude00"; if (ready) { /* text */ }';
+    const html = render(code, "javascript", [
+      code.indexOf("{"),
+      code.lastIndexOf("}"),
+    ]);
+    assert.equal((html.match(/class="matching-bracket"/g) ?? []).length, 2);
+    assert.deepEqual(marked(html, "string"), ['"\u03b1\ud83d\ude00"']);
+    assert.deepEqual(marked(html, "comment"), ["/* text */"]);
+    assert.ok(marked(html, "keyword").includes("if"));
+    assert.equal(textOf(html), code);
+  });
+
+  test(`${mode}: matching brackets preserve template interpolation colors`, () => {
+    const code = "const text = `value ${call(true)}`;";
+    const html = render(code, "javascript", [
+      code.indexOf("("),
+      code.indexOf(")"),
+    ]);
+    assert.equal((html.match(/class="matching-bracket"/g) ?? []).length, 2);
+    assert.deepEqual(marked(html, "literal"), ["true"]);
+    assert.equal(textOf(html), code);
+  });
+  test(`${mode}: an unfinished block comment is colored and does not increase indentation`, () => {
+    const code = "/*\n    if (ready) {";
+    for (const language of ["javascript", "c", "cpp", "java"]) {
+      const html = render(code, language);
+      assert.deepEqual(marked(html, "comment"), [code], language);
+      assert.deepEqual(marked(html, "keyword"), [], language);
+      assert.equal(textOf(html), code, language);
+      const expected = code + "\n    ";
+      assert.deepEqual(
+        indentNewline(code, code.length, code.length, language, parse),
+        { value: expected, start: expected.length, end: expected.length },
+        language,
+      );
+    }
+  });
+
+  test(`${mode}: code after a closing block comment is colored and indented`, () => {
+    const comment = "/*\n * setup {\n */";
+    const code = comment + " if (ready) {";
+    for (const language of ["javascript", "c", "cpp", "java"]) {
+      const html = render(code, language);
+      assert.deepEqual(marked(html, "comment"), [comment], language);
+      assert.deepEqual(marked(html, "keyword"), ["if"], language);
+      const expected = code + "\n     ";
+      assert.deepEqual(
+        indentNewline(code, code.length, code.length, language, parse),
+        { value: expected, start: expected.length, end: expected.length },
+        language,
+      );
+    }
+  });
+
+  test(`${mode}: block markers in multiline strings do not hide later code`, () => {
+    for (const [language, prefix, literal] of [
+      ["javascript", "const text = ", "`\n/*\n`"],
+      ["cpp", "auto text = ", 'R"tag(\n/*\n)tag"'],
+      ["java", "String text = ", '"""\n/*\n"""'],
+      ["python", "text = ", '"""\n/*\n"""'],
+    ]) {
+      const code =
+        prefix +
+        literal +
+        ";\n" +
+        (language === "python" ? "if ready:" : "if (ready) {");
+      const html = render(code, language);
+      assert.deepEqual(marked(html, "string"), [literal], language);
+      assert.deepEqual(marked(html, "comment"), [], language);
+      assert.ok(marked(html, "keyword").includes("if"), language);
+      assert.equal(textOf(html), code, language);
+      const expected = code + "\n    ";
+      assert.deepEqual(
+        indentNewline(code, code.length, code.length, language, parse),
+        { value: expected, start: expected.length, end: expected.length },
+        language,
+      );
+    }
+  });
+
+  test(`${mode}: regexp contents are colored as a literal while division stays code`, () => {
+    const literal = String.raw`/\/*/`;
+    const code = `const re = ${literal};\nconst value = total / count / size;\nif (ready) {`;
+    const html = render(code, "javascript");
+    assert.deepEqual(marked(html, "string"), [literal]);
+    assert.deepEqual(marked(html, "comment"), []);
+    assert.ok(marked(html, "keyword").includes("if"));
+    assert.equal(textOf(html), code);
+    const expected = code + "\n    ";
+    assert.deepEqual(
+      indentNewline(code, code.length, code.length, "javascript", parse),
+      { value: expected, start: expected.length, end: expected.length },
+    );
+  });
+
+  test(`${mode}: template interpolation is colored as code`, () => {
+    const code = 'const text = `start ${ready ? true : "no"} end`;';
+    const html = render(code, "javascript");
+    assert.deepEqual(marked(html, "string"), ["`start ", '"no"', " end`"]);
+    assert.deepEqual(marked(html, "literal"), ["true"]);
+    assert.equal(textOf(html), code);
+  });
+
+  test(`${mode}: nested templates return to their enclosing string`, () => {
+    const code = "const text = `a ${`b ${true}`} c`;";
+    const html = render(code, "javascript");
+    assert.deepEqual(marked(html, "string"), ["`a ", "`b ", "`", " c`"]);
+    assert.deepEqual(marked(html, "literal"), ["true"]);
+    assert.equal(textOf(html), code);
+  });
+
+  test(`${mode}: code regions retain each language's keyword, literal and number colors`, () => {
+    // Mixed-width Unicode fixtures check source-range offsets.
+    for (const [language, code, keyword, literal] of [
+      [
+        "python",
+        'if True: text = "\u03b1\ud83d\ude00"; count = 42',
+        "if",
+        "True",
+      ],
+      [
+        "javascript",
+        'const text = "\u03b1\ud83d\ude00"; if (true) count = 42;',
+        "const",
+        "true",
+      ],
+      [
+        "c",
+        'int f() { char *text = "\u03b1\ud83d\ude00"; return NULL; int count = 42; }',
+        "int",
+        "NULL",
+      ],
+      [
+        "cpp",
+        'auto text = "\u03b1\ud83d\ude00"; bool ready = NULL; int count = 42;',
+        "bool",
+        "NULL",
+      ],
+      [
+        "java",
+        'class A { String text = "\u03b1\ud83d\ude00"; boolean ready = true; int count = 42; }',
+        "class",
+        "true",
+      ],
+    ]) {
+      const html = render(code, language);
+      assert.ok(marked(html, "keyword").includes(keyword), language);
+      assert.deepEqual(marked(html, "literal"), [literal], language);
+      assert.deepEqual(marked(html, "number"), ["42"], language);
+      assert.deepEqual(
+        marked(html, "string"),
+        ['"\u03b1\ud83d\ude00"'],
+        language,
+      );
+      assert.equal(textOf(html), code, language);
+    }
+  });
+
+  test(`${mode}: a trailing newline inside an unfinished region preserves the final editor line`, () => {
+    for (const [language, code] of [
+      ["javascript", "/*\n"],
+      ["javascript", "const text = `\n"],
+      ["cpp", 'auto text = R"(\n'],
+      ["java", 'String text = """\n'],
+      ["python", 'text = """\n'],
+    ]) {
+      assert.equal(textOf(render(code, language)), code + "\n", language);
+    }
+  });
+
+  test(`${mode}: unfinished regions escape markup and preserve non-ASCII characters`, () => {
+    for (const [language, code] of [
+      ["javascript", "/* <img src=x onerror=alert(1)> & \u03b1 \ud83d\ude00"],
+      ["javascript", 'const text = `<>&" \u03b1 \ud83d\ude00'],
+      ["cpp", 'auto text = R"(<>&" \u03b1 \ud83d\ude00'],
+      ["java", 'String text = """\n<>&" \u03b1 \ud83d\ude00'],
+      ["python", 'text = """<>&" \u03b1 \ud83d\ude00'],
+    ]) {
+      const html = render(code, language);
+      assert.doesNotMatch(html, /<img/);
+      assert.equal(textOf(html), code, language);
+    }
+  });
+
+  test(`${mode}: another language's comment and template syntax stays code`, () => {
+    const python = render("/*\nif ready:", "python");
+    assert.deepEqual(marked(python, "comment"), []);
+    assert.deepEqual(marked(python, "keyword"), ["if"]);
+    for (const language of ["c", "java"]) {
+      const html = render("`return`", language);
+      assert.deepEqual(marked(html, "string"), [], language);
+      assert.deepEqual(marked(html, "keyword"), ["return"], language);
+    }
+  });
+}
+
+test("parsed regexps after declarations do not hide later code", () => {
+  for (const declaration of ["function f() {}", "class A {}"]) {
+    const literal = String.raw`/\/*/`;
+    const code = `${declaration}\n${literal}.test(text);\nif (ready) {`;
+    const html = highlight(
+      code,
+      "javascript",
+      [],
+      tokenize(code, "javascript", syntax.parseSyntax).tokens,
+    );
+    assert.deepEqual(marked(html, "string"), [literal], declaration);
+    assert.deepEqual(marked(html, "comment"), [], declaration);
+    assert.ok(marked(html, "keyword").includes("if"), declaration);
+    const expected = code + "\n    ";
+    assert.deepEqual(
+      indentNewline(
+        code,
+        code.length,
+        code.length,
+        "javascript",
+        syntax.parseSyntax,
+      ),
+      { value: expected, start: expected.length, end: expected.length },
+      declaration,
+    );
+  }
+});
+
+test("parsed Python f-string expressions retain literal and number colors", () => {
+  const code = 'text = f"value {True} {42}"';
+  const html = highlight(
+    code,
+    "python",
+    [],
+    tokenize(code, "python", syntax.parseSyntax).tokens,
+  );
+  assert.deepEqual(marked(html, "literal"), ["True"]);
+  assert.deepEqual(marked(html, "number"), ["42"]);
+  assert.equal(textOf(html), code);
 });
 
 test("matching bracket spans preserve escaping, syntax colors, and newlines", () => {

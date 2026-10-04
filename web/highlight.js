@@ -5,12 +5,11 @@
 // escaped HTML with spans behind it; the palette follows VS Code Dark+ so the
 // result matches the captured visual goldens.
 //
-// Deliberately not a parser: it tokenizes comments, strings, numbers, and
-// identifiers in that order and leaves everything else as plain text. That is
-// enough to read code and cannot mangle it, because the textarea remains the
-// source of truth.
+// Comments, strings and regexps share the indentation tokenizer. Keywords and
+// numbers are colored only in code regions; the textarea is the source of truth.
 
 import { escapeHtml } from "./lib.js";
+import { tokenize } from "./tokenizer.js";
 
 const JS_KEYWORDS = [
   "async",
@@ -213,72 +212,60 @@ const C_LITERALS = ["NULL"];
 const CPP_LITERALS = ["true", "false", "nullptr", "NULL"];
 const JAVA_LITERALS = ["true", "false", "null"];
 const PY_LITERALS = ["True", "False", "None"];
-const C_LIKE_STRING = String.raw`\`(?:\\.|[^\`\\])*\`|"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'`;
-const C_LIKE_COMMENT = String.raw`//[^\n]*|/\*[\s\S]*?\*/`;
-
 const LANGUAGES = {
   python: {
     keywords: PY_KEYWORDS,
     literals: PY_LITERALS,
-    // Triple-quoted first: a bare quote rule would end the string early.
-    string: String.raw`"""[\s\S]*?"""|'''[\s\S]*?'''|"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'`,
-    comment: String.raw`#[^\n]*`,
   },
   javascript: {
     keywords: JS_KEYWORDS,
     literals: JS_LITERALS,
-    string: C_LIKE_STRING,
-    comment: C_LIKE_COMMENT,
   },
   c: {
     keywords: C_KEYWORDS,
     literals: C_LITERALS,
-    string: C_LIKE_STRING,
-    comment: C_LIKE_COMMENT,
   },
   cpp: {
     keywords: CPP_KEYWORDS,
     literals: CPP_LITERALS,
-    string: C_LIKE_STRING,
-    comment: C_LIKE_COMMENT,
   },
   java: {
     keywords: JAVA_KEYWORDS,
     literals: JAVA_LITERALS,
-    string: C_LIKE_STRING,
-    comment: C_LIKE_COMMENT,
   },
 };
 
 const NUMBER = String.raw`\b\d(?:[\w.]*\w)?`;
 const IDENTIFIER = String.raw`[A-Za-z_$][\w$]*`;
 
-const patterns = new Map();
+const CODE_PATTERN = new RegExp(
+  `(?<number>${NUMBER})|(?<identifier>${IDENTIFIER})`,
+  "g",
+);
 
-function pattern(spec) {
-  if (!patterns.has(spec)) {
-    patterns.set(
-      spec,
-      new RegExp(
-        `(?<comment>${spec.comment})|(?<string>${spec.string})|(?<number>${NUMBER})|(?<identifier>${IDENTIFIER})`,
-        "g",
-      ),
-    );
+function highlightCode(code, spec, renderSlice) {
+  let html = "";
+  let last = 0;
+  for (const match of code.matchAll(CODE_PATTERN)) {
+    html += renderSlice(last, match.index);
+    const text = renderSlice(match.index, match.index + match[0].length);
+    const { number, identifier } = match.groups;
+    if (number !== undefined) html += `<span class="tok-number">${text}</span>`;
+    else if (spec.keywords.includes(identifier))
+      html += `<span class="tok-keyword">${text}</span>`;
+    else if (spec.literals.includes(identifier))
+      html += `<span class="tok-literal">${text}</span>`;
+    else html += text;
+    last = match.index + match[0].length;
   }
-  return patterns.get(spec);
+  return html + renderSlice(last, code.length);
 }
 
-function languageSpec(language) {
-  return LANGUAGES[language] ?? LANGUAGES.javascript;
-}
-
-/// Returns HTML for `code`. Every branch escapes, so candidate code can never
-/// introduce markup into the page.
-export function highlight(code, language, brackets = []) {
-  const spec = languageSpec(language);
-  const regex = pattern(spec);
-  regex.lastIndex = 0;
-
+/// Returns HTML for code. Every branch escapes candidate text.
+/// Supplied token ranges let callers reuse an existing classification.
+export function highlight(code, language, brackets = [], tokens) {
+  const selected = Object.hasOwn(LANGUAGES, language) ? language : "javascript";
+  const spec = LANGUAGES[selected];
   const renderSlice = (start, end) => {
     let text = "";
     for (const index of brackets ?? []) {
@@ -289,31 +276,19 @@ export function highlight(code, language, brackets = []) {
     }
     return text + escapeHtml(code.slice(start, end));
   };
-
   let html = "";
-  let last = 0;
-  for (const match of code.matchAll(regex)) {
-    html += renderSlice(last, match.index);
-    const text = renderSlice(match.index, match.index + match[0].length);
-    const { comment, string, number, identifier } = match.groups;
-    if (comment !== undefined) {
-      html += `<span class="tok-comment">${text}</span>`;
-    } else if (string !== undefined) {
-      html += `<span class="tok-string">${text}</span>`;
-    } else if (number !== undefined) {
-      html += `<span class="tok-number">${text}</span>`;
-    } else if (spec.keywords.includes(identifier)) {
-      html += `<span class="tok-keyword">${text}</span>`;
-    } else if (spec.literals.includes(identifier)) {
-      html += `<span class="tok-literal">${text}</span>`;
+  for (const { start, end, kind } of tokens ??
+    tokenize(code, selected).tokens) {
+    if (kind === "code") {
+      html += highlightCode(code.slice(start, end), spec, (from, to) =>
+        renderSlice(start + from, start + to),
+      );
     } else {
-      html += text;
+      const style = kind === "comment" ? "comment" : "string";
+      html += `<span class="tok-${style}">${renderSlice(start, end)}</span>`;
     }
-    last = match.index + match[0].length;
   }
-  html += renderSlice(last, code.length);
-
   // A trailing newline would otherwise collapse, leaving the last line of the
   // overlay one row above the textarea's caret.
-  return html.endsWith("\n") ? `${html}\n` : html;
+  return code.endsWith("\n") ? `${html}\n` : html;
 }
