@@ -1,6 +1,6 @@
 ---
 name: codetrial-contribute
-description: Help CodeTrial contributors turn observations into clear English GitHub issues, small contribution plans, and pull request descriptions. Use to draft, improve or file a CodeTrial issue, prepare a PR description, ask a focused maintainer question, or choose a bounded first contribution with an AI agent. The deliverable is copy-ready text; judging an existing backlog for duplicates is codetrial-triage. Opening a PR goes through gh-submit when it is installed; this skill covers it otherwise.
+description: Help CodeTrial contributors turn observations into clear English GitHub issues, small contribution plans, and pull request descriptions, and see them through. Use to draft, improve or file a CodeTrial issue, answer what a maintainer asked on it (a revision, a log, an initial analysis, a retest), prepare a PR description, respond to review requests such as rebase, squash or commit message fixes, check which of your own issues and PRs are waiting on you, ask a focused maintainer question, or choose a bounded first contribution with an AI agent. The deliverable is copy-ready text; judging an existing backlog for duplicates is codetrial-triage. Opening a PR goes through gh-submit when it is installed; this skill covers it otherwise.
 ---
 
 # Contribute to CodeTrial
@@ -51,7 +51,9 @@ Choose the smallest useful structure:
   symptom means two different things across that split. Record frequency or
   regression range when known.
   Unknown details can stay explicitly unknown; a useful report need not
-  diagnose a fix.
+  diagnose a fix. Retest on the current `latest` release or `main` before
+  filing: the lobby and the interviewer change daily, and #146 and #171 both
+  reported behavior that had already been fixed after the reporter's download.
 - **Feature**: who is affected (candidate, operator or contributor) and in which
   workflow, desired outcome, present workaround, scope and observable acceptance
   criteria. Keep a suggested implementation separate from the need it serves.
@@ -59,6 +61,42 @@ Choose the smallest useful structure:
   intended correction or reader outcome. Do not demand runtime logs for prose.
 
 Do not split a single problem across multiple issues just to fill categories.
+Do not combine two problems in one issue either; #151 and #205 each had to be
+split after the fact.
+
+## Get the facts a maintainer asks for
+
+These are the requests that recur on this tracker. The contributor may never
+have done any of them, so give the exact steps for their platform, run what can
+be run in the checkout, and check the result before it is posted.
+
+| Asked for | How to get it |
+| --- | --- |
+| The revision | `codetrial --version` with the binary that ran, or `cargo run -- --version` in a checkout. It prints `codetrial 0.1.0 (<sha>)`; post that line. |
+| The revision of a binary too old for `--version` | Builds before 3ec7cb4 (2026-09-29) print nothing. A saved report's header shows `Contract: bundle N`, and `git log -S'INTERVIEW_CONTRACT_BUNDLE_VERSION: u32 = N;' --format='%h %cI' -- src/agent.rs` gives the commit that set N and the one that replaced it; the build lies between them, as #188 shows. Without a report, give the exact download time, which bounds the build from above. |
+| The agent terminal output | The terminal window where `codetrial` is running prints the agent log. Copy the lines around the failure, starting at `starting interview: room=...`. Remove API keys and tokens, and every line that quotes what the candidate said: personal interview content stays out of a public thread even when the contributor would not mind. |
+| The browser console | F12 or Ctrl+Shift+J (Cmd+Option+J on macOS) in Chrome and Edge, Ctrl+Shift+K in Firefox; Safari needs Settings, Advanced, "Show features for web developers" first. Copy the text rather than a screenshot. |
+| A retest of an open PR | From a checkout: `gh pr checkout <N> --repo sysprog21/codetrial`, or `git fetch https://github.com/sysprog21/codetrial.git pull/<N>/head:pr-<N> && git switch pr-<N>`, then `cargo run -- web`. Report the result on the PR, not on the issue. |
+| A retest after a merge | Download the `latest` release again, or `git pull` on `main`, and confirm `--version` names the merge commit or later. |
+| An edit to the issue | On the issue page, the `...` menu on the first post, then Edit; or `gh issue edit <N> --repo sysprog21/codetrial --body-file <file>`. Edit in place rather than filing again. |
+
+## Write the initial analysis a maintainer asked for
+
+"Provide an initial analysis and a list of follow-up actions" asks the
+contributor to read the code, not the UI. A useful answer has four parts, and
+#66, #133 and #211 are worked examples on this tracker:
+
+1. The path: which file and function handle the behavior, found with `git grep`
+   on a log line or a UI string the contributor saw. Give `path:line` at a named
+   revision.
+2. The evidence: the log line, measurement or state that shows where the
+   behavior diverges from the expected one.
+3. One hypothesis, labeled as such, and the experiment that would refute it.
+4. Follow-up actions, each small enough to be a commit or a question.
+
+An agent's summary of the codebase is not an analysis. A maintainer rejected
+one on #66 because it had no motivation and no evidence. Post the analysis as a
+comment, or fold it into the body, then say which one you did.
 
 Return a copy-ready title and body, followed by any remaining questions outside
 the draft. Link related work and explain whether it overlaps or differs. For a
@@ -137,4 +175,74 @@ gh issue create --repo sysprog21/codetrial --title "$(cat "$SCRATCH/title.txt")"
 ```
 
 Finish with the verified URL and the next concrete step, including any
-outstanding evidence the contributor can supply.
+outstanding evidence the contributor can supply. Tell the contributor that
+filing starts the work rather than finishing it: a maintainer usually asks
+something within a day, and an issue whose question goes unanswered for two
+weeks is closed.
+
+## Follow through on what you filed
+
+When a contributor asks what needs their attention, or comes back to an issue
+or PR, start from the same snapshots triage uses, filtered to them:
+
+```sh
+me=$(gh api user --jq .login)
+.claude/skills/codetrial-triage/issue-sweep.sh |
+  jq --arg me "$me" '.waiting[] | select(.author == $me)'
+gh pr list --repo sysprog21/codetrial --author "@me" \
+  --json number,title,reviewDecision,mergeable,updatedAt
+```
+
+`pr-sweep.sh` is no help for one's own pull requests: it leaves out the viewer's
+PRs, since its nudges and rebase requests are a maintainer's to send. A PR whose
+`reviewDecision` is `CHANGES_REQUESTED` or whose `mergeable` is `CONFLICTING`
+is waiting on its author.
+
+For each hit, read the newest maintainer comment and do what it asks, using the
+table above. Answer it in that thread, quoting the question when the thread has
+several. A fact that belongs in the report also goes into the body by editing
+it, so the next reader does not need the comments. When a maintainer links a
+PR that may fix the issue, retest it and say on the PR whether it does. When a
+fix merged and the retest passes, say so with the `--version` line, and close
+the issue if a maintainer has not. An open issue nobody can confirm stays on
+everyone's list.
+
+## Answer a review
+
+Most review requests here are about git and the commit message, not about the
+code, and they recur. What each asks:
+
+- "Rebase latest `main` and resolve conflicts": find the remote that points at
+  `sysprog21/codetrial` in `git remote -v`. On a fork it is usually missing, so
+  add it with
+  `git remote add upstream https://github.com/sysprog21/codetrial.git`; in a
+  clone of upstream itself it is `origin`, so use that name wherever `upstream`
+  appears below. Then `git fetch upstream && git rebase upstream/main`,
+  resolve each conflict, `./scripts/test.sh`, and
+  `git push --force-with-lease`. A merge commit from `main` is not a rebase.
+- "Squash" or "fold similar commits": one commit per functional change, with the
+  review fixups folded into the commit they fix. `git rebase -i upstream/main`
+  is the tool. An agent that cannot drive an interactive editor can run
+  `git reset --soft "$(git merge-base HEAD upstream/main)"` and commit again, but
+  only when the result is meant to be a single commit. Show the contributor the
+  new `git log` before pushing.
+- "Read cbea.ms/git-commit" or "refine commit messages": run
+  `./scripts/git-commit-msg.sh --rules`, then `make hooks` so the next commit is
+  checked before it leaves the machine. The body says what and why. The
+  conversation that produced the change stays out of it, and so do
+  `Co-Authored-By` trailers and "Generated with" lines for an AI tool.
+- "Run `make indent`": run it, check that `git diff` shows only formatting, and
+  amend the commit that introduced the code rather than adding a "format"
+  commit.
+- "Append `Closes #N`" or "avoid `Refs`": put `Closes #N` alone on the last line
+  of the commit message as well as the PR body, when the change finishes the
+  issue. `Refs #N` is for a change that does not, and then the body says what
+  is left; a bare `Refs: #60` told the reviewer nothing.
+- A question in a review thread: answer it in that thread. A changed line
+  answers itself, so resolve the thread rather than replying "done".
+
+Replies follow the register in CONTRIBUTING.md, and maintainers here enforce it
+in public. A reply opens with the fact. It carries no greeting, thanks, apology
+("Sorry for the delay"), self-introduction ("my first issue"), or list of what
+the last push changed. Maintainers called out each of those on #83, #94, #123,
+#185 and #60.
