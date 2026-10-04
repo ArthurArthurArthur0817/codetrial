@@ -1787,15 +1787,6 @@ fn tested(state: &mut RuntimeState) -> Result<FrameworkEvidence, &'static str> {
     )
 }
 
-fn type_code(state: &mut RuntimeState, language: &str, code: &str) {
-    apply_data_event(
-        state,
-        TOPIC_CODE_UPDATE,
-        &json!({"language": language, "code": code}),
-        99.0,
-    );
-}
-
 #[test]
 fn test_execution_credit_requires_written_code_and_survives_a_later_outage() {
     let mut state = RuntimeState::default();

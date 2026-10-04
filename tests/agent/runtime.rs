@@ -2437,3 +2437,129 @@ fn a_test_reaction_carries_the_code_the_model_has_not_seen() {
     assert!(!again.contains("BEGIN UNTRUSTED EDITOR"), "{again}");
     assert!(!again.contains("read_editor"), "{again}");
 }
+
+#[test]
+fn language_switches_preserve_spoken_progress_before_typing() {
+    let transcript = vec![
+        "Interviewer: What are the inputs and outputs?".to_string(),
+        "Candidate: An array and a target; return the matching indices.".to_string(),
+        "Interviewer: Walk me through an example.".to_string(),
+        "Candidate: For [2, 7] and 9, return [0, 1].".to_string(),
+    ];
+    let mut state = RuntimeState {
+        transcript: transcript.clone(),
+        ..RuntimeState::default()
+    };
+    for language in ["c", "python", "cpp"] {
+        let reply = type_code(&mut state, language, "")
+            .generate_reply
+            .expect("a switch is acknowledged");
+        assert!(reply.contains("Continue the current discussion"), "{reply}");
+        assert!(!reply.contains("begin the interview"), "{reply}");
+        assert_eq!(state.transcript, transcript);
+        assert!(!state.code_edited);
+        assert_eq!(state.language, language);
+    }
+}
+
+#[test]
+fn only_the_first_silent_language_choice_opens_the_interview() {
+    let mut state = RuntimeState {
+        transcript: vec!["Interviewer: Which language would you like to use?".to_string()],
+        ..RuntimeState::default()
+    };
+    for (language, opens) in [("c", true), ("cpp", false), ("python", false)] {
+        let reply = type_code(&mut state, language, "")
+            .generate_reply
+            .expect("a switch is acknowledged");
+        assert_eq!(reply.contains("begin the interview"), opens, "{reply}");
+        if !opens {
+            assert!(reply.contains("Continue the current discussion"), "{reply}");
+        }
+        assert!(!state.code_edited);
+    }
+}
+
+#[test]
+fn small_talk_before_a_language_click_keeps_the_opening_available() {
+    let mut state = RuntimeState {
+        transcript: vec!["Candidate: Hi, can you hear me?".to_string()],
+        ..RuntimeState::default()
+    };
+    let reply = type_code(&mut state, "cpp", "")
+        .generate_reply
+        .expect("a switch is acknowledged");
+    assert!(reply.contains("Continue the current discussion"), "{reply}");
+}
+
+/// A turn the recognizer returned in another script is not discussion of the
+/// exercise, so a first click after one still opens the interview. Escapes
+/// keep this source ASCII.
+#[test]
+fn an_unrecognized_turn_before_a_language_click_still_opens_the_interview() {
+    let mut state = RuntimeState {
+        transcript: vec![
+            "Interviewer: Which language would you like to use?".to_string(),
+            "Candidate: \u{662f}\u{554a}\u{3002}\u{5982}\u{679c}\u{8863}\u{670d}".to_string(),
+        ],
+        ..RuntimeState::default()
+    };
+    let reply = type_code(&mut state, "cpp", "")
+        .generate_reply
+        .expect("a switch is acknowledged");
+    assert!(reply.contains("begin the interview"), "{reply}");
+    assert!(
+        !reply.contains("Continue the current discussion"),
+        "{reply}"
+    );
+}
+
+#[test]
+fn typed_code_outranks_an_earlier_language_choice() {
+    let mut state = RuntimeState {
+        transcript: vec!["Candidate: I will use a hash map.".to_string()],
+        language_chosen: true,
+        code_edited: true,
+        ..RuntimeState::default()
+    };
+    let reply = type_code(&mut state, "java", "")
+        .generate_reply
+        .expect("a switch is acknowledged");
+    assert!(
+        reply.contains("They already have code in the editor"),
+        "{reply}"
+    );
+    assert!(
+        !reply.contains("Continue the current discussion"),
+        "{reply}"
+    );
+    assert!(!reply.contains("begin the interview"), "{reply}");
+}
+
+/// A replacement interviewer briefed after the switches inherits the choice
+/// and the discussion, so it neither asks for a language nor starts over.
+#[test]
+fn a_cold_replacement_after_language_switches_keeps_the_choice_and_discussion() {
+    let mut state = RuntimeState {
+        transcript: vec![
+            "Interviewer: What are the inputs and outputs?".to_string(),
+            "Candidate: An array and a target; return the matching indices.".to_string(),
+        ],
+        ..RuntimeState::default()
+    };
+    for language in ["c", "cpp"] {
+        type_code(&mut state, language, "");
+    }
+    let brief = cold_restart(&state);
+    assert!(
+        brief.contains(
+            "The candidate selected cpp in the editor; do not ask them to choose a language again."
+        ),
+        "{brief}"
+    );
+    assert!(brief.contains("An array and a target"), "{brief}");
+    assert!(
+        !brief.contains("has not chosen a programming language"),
+        "{brief}"
+    );
+}

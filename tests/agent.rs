@@ -289,6 +289,7 @@ fn prompt_samples() -> Value {
         "greeting": greeting(),
         "languageChoice": language_choice("C++", LanguageChoiceContext::Start),
         "languageSwitch": language_choice("Java", LanguageChoiceContext::SwitchWithCode),
+        "languageContinue": language_choice("C", LanguageChoiceContext::Continue),
         "silenceBehavioral": behavioral_silence_nudge(),
         "silenceEmpty": silence_nudge(&RuntimeState::default(), &empty, None),
         "silenceEarly": silence_nudge(&RuntimeState::default(), &early, None),
@@ -690,6 +691,17 @@ fn run_tests(state: &mut RuntimeState, passed: i64, total: i64) -> DataEventResu
         "language": state.language, "passed": passed, "total": total, "code": state.code,
     });
     apply_data_event(state, TOPIC_TEST_RESULTS, &packet, 100.0)
+}
+
+/// Publishes the editor buffer under `language`, as a keystroke or a tab click
+/// sends it.
+fn type_code(state: &mut RuntimeState, language: &str, code: &str) -> DataEventResult {
+    apply_data_event(
+        state,
+        TOPIC_CODE_UPDATE,
+        &json!({"language": language, "code": code}),
+        99.0,
+    )
 }
 
 /// Applies one control packet, as the page sends it.

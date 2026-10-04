@@ -168,8 +168,8 @@ pub const THINKING_CHECK_IN_S: u64 = 120;
 pub(crate) const THINKING_RELEASE_COOLDOWN: std::time::Duration =
     std::time::Duration::from_secs(10);
 
-pub const INTERVIEW_CONTRACT_BUNDLE_VERSION: u32 = 27;
-pub const LIVE_PROMPT_VERSION: u32 = 19;
+pub const INTERVIEW_CONTRACT_BUNDLE_VERSION: u32 = 28;
+pub const LIVE_PROMPT_VERSION: u32 = 20;
 pub const REPORT_PROMPT_VERSION: u32 = 16;
 pub const RUBRIC_VERSION: u32 = 1;
 pub const REPORT_SCHEMA_VERSION: u32 = 2;
@@ -2066,11 +2066,24 @@ pub fn mark_unrecognized_turns(lines: &[String]) -> Vec<String> {
         .collect()
 }
 
+/// Whether the candidate has said anything the recognizer did not return
+/// mostly in a non-Latin script. A turn `mark_unrecognized_turns` hides is not
+/// evidence that the discussion of the exercise has begun.
+pub(crate) fn has_recognized_candidate_turn(lines: &[String]) -> bool {
+    lines
+        .iter()
+        .any(|line| candidate_speech(line).is_some_and(|speech| !mostly_non_latin(speech)))
+}
+
 /// Whether `line` is a candidate turn `mark_unrecognized_turns` hides.
 fn is_unrecognized_turn(line: &str) -> bool {
+    candidate_speech(line).is_some_and(mostly_non_latin)
+}
+
+/// What the candidate said in `line`, if it is their turn.
+fn candidate_speech(line: &str) -> Option<&str> {
     line.strip_prefix(CANDIDATE_SPEAKER)
         .and_then(|rest| rest.strip_prefix(": "))
-        .is_some_and(mostly_non_latin)
 }
 
 /// More than two non-Latin letters as well as a majority, so a turn that is
