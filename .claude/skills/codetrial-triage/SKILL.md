@@ -1,13 +1,15 @@
 ---
 name: codetrial-triage
 description: >
-  Triage CodeTrial GitHub issues and open pull requests. Find duplicate or
-  incomplete issues and recommend evidence-backed actions, including notifying
-  contributors that a thread already exists and closing the duplicates; sweep
-  pull requests for held workflow runs, outdated review threads, functional
-  overlap, unanswered reviews and merge conflicts. Use for backlog triage,
-  checking new issues or pull requests, deciding whether a symptom already has
-  an issue, or asking what needs attention. Reviewing authorizes no GitHub edit
+  Triage CodeTrial GitHub issues and open pull requests. Find duplicate,
+  incomplete or not-yet-actionable issues and recommend evidence-backed actions,
+  including notifying contributors that a thread already exists and closing the
+  duplicates; keep filed reports moving by finding the ones nobody answered, the
+  ones waiting on their reporter, and the ones a merged pull request may have
+  fixed; sweep pull requests for held workflow runs, outdated review threads,
+  functional overlap, unanswered reviews and merge conflicts. Use for backlog
+  triage, checking new issues or pull requests, deciding whether a symptom
+  already has an issue, or asking what needs attention. Reviewing authorizes no GitHub edit
   except run approvals, thread resolutions, rebase requests and hiding
   superseded rebase reviews covered by an explicit pull-request sweep. A comment
   that delivers a triage verdict on someone else's thread belongs here; use
@@ -58,9 +60,23 @@ Record the repository, filters and counts in the report.
 ## Retrieve evidence efficiently
 
 For a question about one symptom ("is there already an issue for X"), skip the
-inventory and go straight to the search below. For a backlog sweep, one call
-returns every open issue with its body; raise `--limit` above the open count,
-since `gh` pages internally:
+inventory and go straight to the search below. A backlog sweep starts with one
+read-only snapshot that sorts the open issues before anything is read:
+
+```sh
+.claude/skills/codetrial-triage/issue-sweep.sh "$repo" > "$SCRATCH/issues.json"
+```
+
+Its `lint` list flags what needs no reading to see: an empty body, template
+text left in (`[please fill in ...]`, `<Describe ...>`), a heading with nothing
+under it, a category prefix in the title, a report not in English, and a Bug
+whose reporter never gave a hex revision. A flag picks a candidate and
+does not settle a verdict: a revision may sit in a screenshot, and a quoted
+transcript may be the non-English text. `unanswered`, `waiting` and `linked`
+feed "Keep filed reports moving" below. Report anything in `truncated`.
+
+Then one call returns every open issue with its body; raise `--limit` above the
+open count, since `gh` pages internally:
 
 ```sh
 gh issue list --repo "$repo" --state open --limit 1000 \
@@ -193,6 +209,19 @@ titles or the same broad symptom are insufficient to establish duplication.
 - **No duplicate found in the reviewed scope**: name the search scope. A closed
   fix followed by a failure on a newer version may be a regression; verify the
   version and fix before recommending closure as a duplicate.
+- **Not actionable yet**: nobody could act on the report as written. That means
+  an empty body or one too short to carry the facts the next decision needs
+  (a precise one-line typo report is fine), the bug form's template text left in, prose in a
+  language other than English, a feature that names no affected user and no
+  observable outcome, or two unrelated problems in one thread. The fix is an
+  edit to this issue, not a new one. Closing #48 and #74 and asking for a fresh
+  filing threw away the thread and the notification and cost the reporter a
+  second start, so ask for the body to be rewritten in place and name exactly
+  what it must contain. A report in Chinese or another language gets the same
+  request, in English like everything posted here, saying that their agent can
+  translate the report for them. When two problems share a thread, keep the one the
+  title names and send the other to its existing issue, or ask for a new one
+  for it, as #151 and #205 did.
 
 Which verdicts close, and on what:
 
@@ -203,6 +232,8 @@ Which verdicts close, and on what:
 | Already shipped, and the reported build is unknown or contains it | no | get the revision, then the ancestry check, or investigate a packaging problem or regression |
 | Superseded by an open pull request | no | read `closingIssuesReferences`; its merge closes it, or it needs a manual close |
 | Possibly duplicate, related, no duplicate found | no | waiting on a fact or on work |
+| Not actionable yet | not at first | ask for the edit; the waiting rule below decides later |
+| Waiting on the reporter past both windows below | yes | `--reason "not planned"`, with the fact that reopens it |
 
 A filing date is not a build revision, and the error runs one way. A date can
 prove a build LACKS a commit, because a binary downloaded before a commit
@@ -233,11 +264,57 @@ is not an empty backlog. Use a compact table with:
 Explain uncertainty rather than presenting guesses as root causes. Prioritize by
 demonstrated impact on interview use. Propose a title correction when a title
 breaks the conventions title rule. Do not close reports for age, AI assistance,
-imperfect English or missing nonessential fields.
+imperfect English or missing nonessential fields. A report that has gone
+unanswered because its reporter stopped replying is a different case, and the
+next section covers it.
 
-Recommend `good first issue` only when acceptance criteria, likely entry points
-and a feasible verification path are known, with no unresolved design or hidden
-credential/setup blocker. Small word count alone does not make an issue easy.
+Describe how well an issue is scoped in plain words: acceptance criteria, likely
+entry points, a feasible way to verify. Do not propose a label for it.
+
+## Keep filed reports moving
+
+A report helps only while someone can still answer for it. The maintainers here
+usually ask for a revision or a log within a day, and in most open issues that
+question is still the newest comment. #56 was closed after six silent days
+with "Lost further actions", which told the reporter nothing about what would
+have kept it open.
+The three sweep lists are the queue, and each one has a fixed next move:
+
+- `unanswered`: no maintainer has spoken. Triage these first, oldest first,
+  with the verdicts above. The longer the first answer takes, the less likely
+  the reporter still has the build and the log it will ask for.
+- `waiting`: a maintainer spoke last and the reporter has not commented or
+  edited the body since. Read that comment first. A correction or a note
+  carried over from another thread is not a question; neither is "see if PR #N
+  resolves this", which is a request to the maintainer and belongs under
+  `linked`. When the newest maintainer comment is already the reminder below,
+  its `asked_at` starts the second window, so an `overdue` entry then means
+  proposing the close, never a second reminder. Otherwise, once an entry is
+  `overdue`, post one reminder on the thread. It
+  repeats the same fact in the same words, says how to get it with the recipe
+  from [codetrial-contribute](../codetrial-contribute/SKILL.md), and says that
+  the issue closes if nothing arrives in another wait period. When that second
+  period also passes in silence, propose closing as not planned. The closing
+  comment names the fact again and says that posting it reopens the issue. An
+  issue a maintainer opened is left out of `waiting`, because its author already
+  knows the rule.
+- `linked`, with `merged` set: a merged pull request referenced the issue after
+  it was filed, and GitHub did not close it, so that PR only touched it, or its
+  `Closes` line named another issue. Read the PR and the issue. When the PR does
+  what the issue asks, ask the reporter to retest on the `latest` release built
+  from that merge, and to post the output of `codetrial --version` with the
+  result. #82 got exactly that and was closed within a day. When the PR covers
+  only part of it, narrow the issue to the remainder, as #85 was. The same
+  waiting rule then applies to the retest.
+- `linked`, with `open` set: a cross-reference is only a mention, so read the
+  PR. When it implements the request, the issue is superseded by that open pull
+  request (see the verdicts above). Ask the reporter, and anyone in the thread about to
+  write a second branch, to test that PR. Say how to check it out, since many
+  reporters have never fetched a pull request.
+
+The two windows are the sweep's `wait-days` argument, 7 by default. Report each
+list's counts next to the duplicate counts, so the maintainer sees what is
+waiting and on whom.
 
 ## Draft the notice the other thread needs
 
@@ -245,7 +322,20 @@ A notice on a contributor's issue is part of the deliverable rather than an
 extra, and it decides whether the backlog converges or grows a parallel thread.
 Whichever verdict it carries, it opens with what the other thread says rather
 than with the verdict, and ends with one concrete next step. Anything written on
-the contributor's own behalf is codetrial-contribute. What the shapes add:
+the contributor's own behalf is codetrial-contribute.
+
+Many reporters here are filing their first issue, and a request they cannot
+carry out goes unanswered just as one they never saw does. A request for the Git
+revision got back a "Github Version" on #67 and "this binary does not appear to
+expose a command" on #171. "Provide an initial analysis" with nothing else gets
+an apology or silence. So every request for a fact says how to get it, using the
+recipe in [codetrial-contribute](../codetrial-contribute/SKILL.md), and says what
+each possible answer would decide, as #148 and #158 did. A request for an
+analysis names what one contains: the code path and the log line, as #133 and
+#211 show. Ask the reporter to answer in this thread and to fix the body by
+editing it, never by filing again.
+
+What the shapes add:
 
 - Closing a duplicate: say where to continue and what to add there. The
   preserved evidence itself goes to the canonical issue, not into this notice.
@@ -254,6 +344,20 @@ the contributor's own behalf is codetrial-contribute. What the shapes add:
   never pastes a blank template.
 - Redirecting to an open pull request: address everyone in the thread who is
   about to write that second implementation, not only the reporter.
+- Asking for an edit to a report that is not actionable yet: list the missing
+  pieces as the bug form or the feature fields name them, and point at one
+  issue from this tracker that has them, such as #149 for a measured bug or
+  #173 for a feature.
+- Reminding a reporter: one short paragraph, addressed with an @mention, that
+  repeats the open question and the date it was asked. Never a second wording
+  of the question.
+- Closing for no reply: say what was asked and when, that the report could not
+  be acted on without it, and the exact thing to post to reopen it. Not a
+  verdict on the report.
+- Asking for a retest after a merge: name the PR, its merge commit and the
+  release that contains it, and say what each result means: fixed means close,
+  and still failing means post the `codetrial --version` output and the new
+  log here.
 
 ## Apply only the confirmed list
 
@@ -282,7 +386,13 @@ gh issue comment "$number" --repo "$repo" --body-file "$SCRATCH/reply.md"
 gh issue edit "$number" --repo "$repo" --title "$(cat "$SCRATCH/title.txt")" \
   --add-label "<label>"
 gh issue close "$number" --repo "$repo" --duplicate-of "$canonical"
+gh issue close "$number" --repo "$repo" --reason "not planned"  # no reply, after its comment
 ```
+
+A close for no reply posts its comment first with `--body-file`, so the reopen
+condition is on the thread even if the close fails. Before proposing one,
+refetch the thread: a reply posted during the second window, or a body edit,
+puts the issue back in triage.
 
 `--duplicate-of` records the relationship in GitHub. Try it first: an unknown
 flag fails locally without touching the thread, so no probe is needed. Only after
