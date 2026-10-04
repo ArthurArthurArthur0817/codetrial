@@ -545,3 +545,26 @@ test("quota recovery waits for the provider cooldown and hides framework hints",
   page.advance(30_000);
   assert.equal(page.reportRecovery.retry(), true);
 });
+
+test("a refused report is offered under its own cause, and anything else is an outage", () => {
+  const causes = (reportRecovery) => {
+    const seen = [];
+    const recovery = createReportRecovery({
+      timers: { setTimeout: () => 1, clearTimeout() {} },
+      send() {},
+      offer: (ready, seconds, cause) => seen.push(cause),
+      waiting() {},
+      finalize() {},
+    });
+    recovery.start({
+      ...raw,
+      reportRecovery: { ...raw.reportRecovery, ...reportRecovery },
+    });
+    return seen;
+  };
+  assert.deepEqual(causes({ cause: "schema" }), ["schema"]);
+  assert.deepEqual(causes({ cause: "unavailable" }), ["unavailable"]);
+  // Untrusted metadata: a missing or unknown cause gets the ordinary wording.
+  assert.deepEqual(causes({}), ["unavailable"]);
+  assert.deepEqual(causes({ cause: "<b>forged</b>" }), ["unavailable"]);
+});

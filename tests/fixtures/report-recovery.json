@@ -8,5 +8,9 @@
     "accepted",
     "early",
     "closed"
+  ],
+  "causes": [
+    "schema",
+    "unavailable"
   ]
 }

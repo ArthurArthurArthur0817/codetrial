@@ -303,8 +303,16 @@ async fn report_transport_fixture_with_body(
     let server = tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
-    let result =
-        generate_report_transport(&keys, &url, "prompt", &mut budget, backoff, "test-room").await;
+    let result = generate_report_transport(
+        &keys,
+        &url,
+        "prompt",
+        &mut budget,
+        backoff,
+        "test-room",
+        GENERATION_SEED,
+    )
+    .await;
     server.abort();
     let seen = requests.lock().unwrap().clone();
     (result, seen, budget.remaining)
@@ -414,6 +422,7 @@ async fn a_key_ruled_out_during_the_backoff_is_not_retried() {
         &mut budget,
         REPORT_RETRY_BACKOFF,
         "test-room",
+        GENERATION_SEED,
     )
     .await;
     server.abort();
@@ -938,8 +947,8 @@ fn report_retry_backoff_doubles_from_the_first_wait() {
 
 #[test]
 fn report_requests_are_session_local_and_never_reuse_personalized_output() {
-    let first = generate_report_request("session-a private evidence");
-    let second = generate_report_request("session-b private evidence");
+    let first = generate_report_request("session-a private evidence", GENERATION_SEED);
+    let second = generate_report_request("session-b private evidence", GENERATION_SEED);
     assert_ne!(first, second);
     assert!(first.to_string().contains("session-a private evidence"));
     assert!(!first.to_string().contains("session-b private evidence"));
@@ -958,9 +967,16 @@ pub(crate) async fn generate_report_at(
     backoff: Duration,
     prompt: &str,
     problem: &crate::agent::Problem,
-    scope: &str,
+    run: ReportRun<'_>,
 ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
-    generate_report_with_keys_at(keys, url, backoff, prompt, problem, true, scope).await
+    let calls = ReportCalls {
+        keys,
+        url: url.to_string(),
+        budget: ReportCallBudget::new(),
+        backoff,
+        run,
+    };
+    generate_report_with_keys_at(calls, prompt, problem, true).await
 }
 
 pub(crate) fn valid_report() -> Value {
@@ -1056,6 +1072,69 @@ fn run_for_round(
 
 fn run_attempts(outputs: &[&str]) -> ReportResult {
     run_for(outputs, report_problem()).map(|(report, _)| report)
+}
+
+/// What a report refused after every repair fails with, for the recovery tests.
+pub(crate) fn refused_report_error() -> Box<dyn std::error::Error + Send + Sync> {
+    run_attempts(&["{}", "{}", "{}"]).unwrap_err()
+}
+
+/// A refused response, then a repair call that fails with `retry_after`.
+struct RefusedThenFailing {
+    calls: usize,
+    retry_after: Option<Duration>,
+    refused: bool,
+}
+
+impl ReportTransport for RefusedThenFailing {
+    fn call(
+        &mut self,
+        _prompt: &str,
+    ) -> impl Future<Output = Result<String, Box<dyn std::error::Error + Send + Sync>>> + Send {
+        self.calls += 1;
+        std::future::ready(if self.calls == 1 {
+            Ok("{}".to_string())
+        } else {
+            Err(ReportTransportFailure {
+                detail: "repair call failed".to_string(),
+                retry_after: self.retry_after,
+            }
+            .into())
+        })
+    }
+
+    fn answer_refused(&mut self) {
+        self.refused = true;
+    }
+}
+
+/// A repair call that fails after a refusal keeps its own retry policy: a
+/// quota on a sole key still waits out the cooldown, and a failure no wait can
+/// fix still offers nothing. The refusal is recorded beside it, which is what
+/// sends the regeneration to the other seed.
+#[test]
+fn a_repair_call_that_fails_after_a_refusal_keeps_its_retry_policy() {
+    for retry_after in [Some(QUOTA_COOLDOWN), None] {
+        let mut transport = RefusedThenFailing {
+            calls: 0,
+            retry_after,
+            refused: false,
+        };
+        let error = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap()
+            .block_on(report_attempts(
+                "original",
+                report_problem(),
+                true,
+                &mut transport,
+            ))
+            .expect_err("nothing was held");
+        assert_eq!(transport.calls, 2);
+        assert!(transport.refused);
+        assert!(!is_report_schema_failure(error.as_ref()));
+        assert_eq!(report_regeneration_retry_after(error.as_ref()), retry_after);
+    }
 }
 
 #[test]
@@ -1332,7 +1411,7 @@ fn a_transport_failure_after_a_salvageable_response_keeps_the_report() {
     let report = run_attempts(&[&salvageable]).expect("the held report outlives the socket");
     assert_eq!(report["codingScore"], 82);
 
-    let error = run_attempts(&["{}"]).expect_err("nothing was held, so the failure stands");
+    let error = run_attempts(&[]).expect_err("nothing was held, so the failure stands");
     assert_eq!(error.to_string(), "no answer");
 }
 
@@ -1506,7 +1585,11 @@ async fn a_misrecognized_turn_neither_appears_in_nor_decides_the_report() {
         &prompt,
         problem,
         false,
-        "report-probe",
+        ReportRun {
+            scope: "report-probe",
+            seed: GENERATION_SEED,
+            refused: &std::sync::atomic::AtomicBool::new(false),
+        },
     )
     .await
     .expect("production returns a report");
@@ -2022,7 +2105,7 @@ fn report_generation_request_matches_python_report_model_config() {
         "https://generativelanguage.googleapis.com/v1beta/models/gemini-report:generateContent"
     );
 
-    let request = generate_report_request("score this");
+    let request = generate_report_request("score this", GENERATION_SEED);
     assert_eq!(request["contents"][0]["parts"][0]["text"], "score this");
 
     // The constant half goes first, as the system instruction, so every report
@@ -2032,7 +2115,7 @@ fn report_generation_request_matches_python_report_model_config() {
         crate::agent::report_system_instruction()
     );
     assert_eq!(
-        generate_report_request("another session")["systemInstruction"],
+        generate_report_request("another session", GENERATION_SEED)["systemInstruction"],
         request["systemInstruction"]
     );
     assert_eq!(
@@ -2685,7 +2768,7 @@ fn the_interim_review_asks_for_bounded_prose_and_no_thinking() {
     );
 
     // The report's own config still goes through the shared envelope unchanged.
-    let report = generate_report_request("write the debrief");
+    let report = generate_report_request("write the debrief", GENERATION_SEED);
     assert_eq!(
         report["generationConfig"]["responseMimeType"],
         "application/json"
@@ -3292,9 +3375,15 @@ async fn quota_regeneration_waits_until_the_whole_key_rotation_can_make_a_call()
         axum::serve(listener, app).await.unwrap();
     });
     assert_eq!(
-        generate_report_once(&selected, &url, "same frozen prompt", "quota-regeneration")
-            .await
-            .unwrap(),
+        generate_report_once(
+            &selected,
+            &url,
+            "same frozen prompt",
+            "quota-regeneration",
+            GENERATION_SEED,
+        )
+        .await
+        .unwrap(),
         "report"
     );
     assert_eq!(calls.load(Ordering::SeqCst), 1);
@@ -3387,6 +3476,7 @@ async fn concurrent_quota_exhaustion_keeps_its_delay_after_a_report_503() {
         &mut budget,
         Duration::ZERO,
         "concurrent-quota",
+        GENERATION_SEED,
     )
     .await
     .unwrap_err();

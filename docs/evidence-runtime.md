@@ -160,7 +160,9 @@ sent the same prompts exactly when that digest matches.
 
 The interim review and the final report sample with a fixed seed. Measured on
 the report model at its temperature, four calls with one prompt and the seed
-returned one answer, and four without it returned four. The Live session is
+returned one answer, and four without it returned four. A report regenerated
+after its first generation had an answer refused samples with a second fixed
+seed, since the first would return that answer again. The Live session is
 left unseeded: identical words for every candidate is not a trade the interview
 should make, and its audio cannot be replayed byte for byte either way. A bounded digest history makes an edit
 that revisits an earlier state observable as an undo/redo cycle; it retains

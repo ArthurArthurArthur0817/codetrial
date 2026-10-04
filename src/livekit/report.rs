@@ -50,6 +50,8 @@ fn freeze_report_prompt(
 pub(super) struct FrozenAssessment {
     pub prompt: String,
     state: RuntimeState,
+    /// Whether the first generation had an answer refused, for recovery.
+    pub refused: std::sync::atomic::AtomicBool,
 }
 
 impl FrozenAssessment {
@@ -67,6 +69,7 @@ pub(super) fn freeze_assessment(
     FrozenAssessment {
         prompt,
         state: state.clone(),
+        refused: std::sync::atomic::AtomicBool::new(false),
     }
 }
 
@@ -77,6 +80,8 @@ pub(super) async fn generate_report_bounded(
     prompt: &str,
     behavioral_round_opened: bool,
     api_key: &GeminiKeys,
+    seed: i64,
+    refused: &std::sync::atomic::AtomicBool,
 ) -> GeneratedReport {
     tokio::time::timeout(
         REPORT_TIMEOUT,
@@ -86,7 +91,11 @@ pub(super) async fn generate_report_bounded(
             prompt,
             boot.problem,
             behavioral_round_opened,
-            boot.room_name,
+            crate::gemini::ReportRun {
+                scope: boot.room_name,
+                seed,
+                refused,
+            },
         ),
     )
     .await
@@ -266,22 +275,42 @@ fn queued_receipt<Event: DeliveryEvent>(
 const REPORT_RECOVERY_WINDOW: std::time::Duration = std::time::Duration::from_secs(300);
 const REPORT_RETRY_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// Whether the generation ended on a refused answer, rather than on a call
+/// that never answered.
+fn refused_report(generated: &GeneratedReport) -> bool {
+    matches!(generated, Ok(Err(error)) if crate::gemini::is_report_schema_failure(error.as_ref()))
+}
+
+/// The seed the one regeneration asks with, given whether the first
+/// generation had an answer refused, for the reasons `REGENERATION_SEED`
+/// gives.
+fn regeneration_seed(refused: bool) -> i64 {
+    if refused {
+        crate::gemini::REGENERATION_SEED
+    } else {
+        crate::gemini::GENERATION_SEED
+    }
+}
+
 /// How long the candidate waits before a regeneration may start, or `None`
-/// when the failure is not one waiting can fix. A deadline says nothing about
-/// the keys, so it asks the rotation itself: a retry offered while every key is
-/// still out on quota would fail before its first call and spend the one retry.
+/// when the failure is not one a regeneration can fix. A deadline and a refused
+/// report say nothing about the keys, so both ask the rotation itself: a retry
+/// offered while every key is still out on quota would fail before its first
+/// call and spend the one retry.
 fn regeneration_cooldown(
     generated: &GeneratedReport,
     keys: &GeminiKeys,
 ) -> Option<std::time::Duration> {
     let retry_after = match generated {
-        Err(_) => match report_readiness(keys) {
+        Ok(Ok(_)) => None,
+        Ok(Err(error)) if !crate::gemini::is_report_schema_failure(error.as_ref()) => {
+            crate::gemini::report_regeneration_retry_after(error.as_ref())
+        }
+        _ => match report_readiness(keys) {
             Readiness::Ready => Some(std::time::Duration::ZERO),
             Readiness::Wait(delay) => Some(delay),
             Readiness::Never => None,
         },
-        Ok(Err(error)) => crate::gemini::report_regeneration_retry_after(error.as_ref()),
-        Ok(Ok(_)) => None,
     };
     retry_after.map(|delay| delay.max(REPORT_RETRY_COOLDOWN))
 }
@@ -637,7 +666,13 @@ pub(super) async fn publish_with_recovery(
         keys,
         candidate,
     } = recovery;
-    let FrozenAssessment { prompt, mut state } = assessment;
+    let FrozenAssessment {
+        prompt,
+        mut state,
+        refused,
+    } = assessment;
+    let refused = refused.into_inner() || refused_report(&generated);
+    let again = std::sync::atomic::AtomicBool::new(false);
     let behavioral_round_opened = crate::agent::BehavioralRound::of(&state).opened();
     let mut room = LiveRecoveryRoom {
         room,
@@ -652,9 +687,17 @@ pub(super) async fn publish_with_recovery(
             state: &mut state,
             reason,
             keys,
+            refused,
         },
         generated,
-        generate_report_bounded(boot, &prompt, behavioral_round_opened, keys),
+        generate_report_bounded(
+            boot,
+            &prompt,
+            behavioral_round_opened,
+            keys,
+            regeneration_seed(refused),
+            &again,
+        ),
         tokio::time::Instant::now,
         close_live,
     )
@@ -669,6 +712,9 @@ struct RecoveryReport<'a> {
     state: &'a mut RuntimeState,
     reason: &'a str,
     keys: &'a GeminiKeys,
+    /// Whether the first generation had an answer refused, which a deadline
+    /// that overtook it no longer says.
+    refused: bool,
 }
 
 /// `clock` names when the offer went out. The agent reads the real clock; a
@@ -687,6 +733,7 @@ async fn run_recovery(
         state,
         reason,
         keys,
+        refused,
     } = report;
 
     // The Live session is closed once, beside the first report's delivery:
@@ -705,8 +752,9 @@ async fn run_recovery(
         );
         return published.map(|_| ());
     };
+    let cause = if refused { "schema" } else { "unavailable" };
     let mut provisional = report_value(boot, state, reason, keys, generated);
-    provisional["reportRecovery"] = recovery_metadata(cooldown);
+    provisional["reportRecovery"] = recovery_metadata(cooldown, cause);
     let provisional = report_data_packet(provisional)?;
     let started = clock();
     let (acknowledged, ()) = tokio::join!(room.publish(provisional.clone()), close_live);
@@ -728,10 +776,13 @@ async fn run_recovery(
     Ok(())
 }
 
-fn recovery_metadata(cooldown: std::time::Duration) -> serde_json::Value {
+/// `cause` is `schema` when the report answered and was refused, so the page
+/// does not call it a passing outage, and `unavailable` otherwise.
+fn recovery_metadata(cooldown: std::time::Duration, cause: &str) -> serde_json::Value {
     serde_json::json!({
         "expiresInSeconds": REPORT_RECOVERY_WINDOW.as_secs(),
         "retryAfterSeconds": whole_seconds(cooldown),
+        "cause": cause,
     })
 }
 

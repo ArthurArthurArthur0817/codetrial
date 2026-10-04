@@ -51,7 +51,9 @@ once its prohibited self-review checks are dropped and its prohibited success
 criteria replaced is kept, even if a later response broke something else: a
 list left empty gets one fixed, neutral check, and a criterion is replaced with
 fixed text that judges no one. Without such a response, a claim that remains
-after the last repair leaves the report incomplete, with no score or verdict.
+after the last repair leaves the report incomplete, with no score or verdict,
+and the candidate may request the one regeneration that
+[provider cost and degradation](provider-cost-and-degradation.md) describes.
 
 The same scan refuses a report that names the natural language a transcript
 came out in, such as "a response in Mandarin", or judges English proficiency,

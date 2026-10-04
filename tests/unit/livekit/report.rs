@@ -9,6 +9,7 @@ use super::*;
 use crate::agent::record_framework_evidence;
 use crate::config::load_from_pairs;
 use crate::runtime::bootstrap;
+use std::sync::atomic::AtomicBool;
 
 /// The credentials every report test needs and none of them asserts on.
 ///
@@ -798,19 +799,71 @@ fn only_the_original_candidate_can_request_report_regeneration() {
 }
 
 #[tokio::test]
-async fn only_transient_failure_and_deadline_can_offer_regeneration() {
+async fn only_a_failed_report_can_offer_regeneration() {
     let keys = GeminiKeys::single("test");
     assert!(regeneration_cooldown(&Ok(Ok(serde_json::json!({}))), &keys).is_none());
-    let schema_failure = Ok(Err(std::io::Error::new(
-        std::io::ErrorKind::InvalidData,
-        "schema failure",
-    )
-    .into()));
-    assert!(regeneration_cooldown(&schema_failure, &keys).is_none());
+
+    // Any other error that is neither transport nor schema, such as a bad
+    // model, answers the same way every time.
+    let permanent = Ok(Err(std::io::Error::other("bad model").into()));
+    assert!(regeneration_cooldown(&permanent, &keys).is_none());
+    assert!(!refused_report(&permanent));
     assert_eq!(
         regeneration_cooldown(&Err(elapsed().await), &keys),
         Some(REPORT_RETRY_COOLDOWN)
     );
+    assert!(!refused_report(&Err(elapsed().await)));
+    assert_eq!(regeneration_seed(false), crate::gemini::GENERATION_SEED);
+    assert_eq!(regeneration_seed(true), crate::gemini::REGENERATION_SEED);
+}
+
+/// A deadline says only that time ran out. When the first generation had an
+/// answer refused before it, the offer says so, and the page does not call it
+/// a passing outage.
+#[tokio::test]
+async fn a_deadline_after_a_refused_answer_is_offered_as_a_refusal() {
+    for (refused, cause) in [(true, "schema"), (false, "unavailable")] {
+        let config = report_test_config();
+        let boot = bootstrap(&config, "interview-fixed", Some("two-sum"), 45);
+        let mut live = RuntimeState::default();
+        let mut frozen = freeze_assessment(&boot, &mut live, 12.0);
+        let keys = GeminiKeys::single("deadline-refused");
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        tx.send(RecoveryEvent::Left).unwrap();
+        let mut room = RecoveryFixture::new(rx);
+        run_recovery(
+            &mut room,
+            RecoveryReport {
+                boot: &boot,
+                state: &mut frozen.state,
+                reason: "time_up",
+                keys: &keys,
+                refused,
+            },
+            Err(elapsed().await),
+            async { Ok(Ok(serde_json::json!({}))) },
+            tokio::time::Instant::now,
+            async {},
+        )
+        .await
+        .unwrap();
+        assert_eq!(room.2[0]["reportRecovery"]["cause"], cause, "{:?}", room.2);
+        drop(tx);
+    }
+}
+
+/// A refused report says nothing about the keys, so the offer waits for them
+/// like a deadline does, and one no key can ever answer is not offered.
+#[test]
+fn a_refused_report_is_offered_only_when_a_key_can_answer() {
+    let refused = Ok(Err(crate::gemini::tests::refused_report_error()));
+    assert_eq!(
+        regeneration_cooldown(&refused, &GeminiKeys::single("test")),
+        Some(REPORT_RETRY_COOLDOWN)
+    );
+    let keys = GeminiKeys::report_quota_exhausted(&["refused-quota-first", "refused-quota-second"]);
+    let cooldown = regeneration_cooldown(&refused, &keys).unwrap();
+    assert!(cooldown > REPORT_RETRY_COOLDOWN, "{cooldown:?}");
 }
 
 async fn elapsed() -> tokio::time::error::Elapsed {
@@ -834,7 +887,7 @@ async fn a_deadline_during_quota_exhaustion_waits_for_the_keys() {
     assert!(cooldown > REPORT_RETRY_COOLDOWN, "{cooldown:?}");
     assert!(cooldown <= crate::gemini::QUOTA_COOLDOWN, "{cooldown:?}");
     assert_eq!(
-        recovery_metadata(cooldown)["retryAfterSeconds"],
+        recovery_metadata(cooldown, "unavailable")["retryAfterSeconds"],
         crate::gemini::QUOTA_COOLDOWN.as_secs()
     );
 }
@@ -1177,11 +1230,20 @@ fn recovery_notices_use_the_statuses_the_page_reads() {
 fn recovery_offer_matches_browser_limits_and_generation_deadline() {
     let limits: serde_json::Value =
         serde_json::from_str(include_str!("../../fixtures/report-recovery.json")).unwrap();
-    let offer = recovery_metadata(REPORT_RETRY_COOLDOWN);
+    let offer = recovery_metadata(REPORT_RETRY_COOLDOWN, "unavailable");
     assert_eq!(offer["expiresInSeconds"], limits["expiresInSeconds"]);
     assert_eq!(offer["retryAfterSeconds"], limits["retryAfterSeconds"]);
+    for cause in ["schema", "unavailable"] {
+        assert!(
+            limits["causes"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!(cause)),
+            "the page does not know the cause {cause}"
+        );
+    }
     assert_eq!(
-        recovery_metadata(crate::gemini::QUOTA_COOLDOWN)["retryAfterSeconds"],
+        recovery_metadata(crate::gemini::QUOTA_COOLDOWN, "unavailable")["retryAfterSeconds"],
         limits["quotaRetryAfterSeconds"]
     );
 
@@ -1226,6 +1288,33 @@ async fn recovery_room_events_ignore_unrelated_activity_and_stop_on_disconnect()
         recovery_event(rx.recv().await, candidate),
         RecoveryEvent::Left
     );
+}
+
+/// One report generation against a local server, under the agent's deadline,
+/// for the two-sum interview the recovery tests freeze.
+async fn generate_at(
+    keys: &GeminiKeys,
+    url: &str,
+    prompt: &str,
+    seed: i64,
+    refused: &std::sync::atomic::AtomicBool,
+) -> GeneratedReport {
+    tokio::time::timeout(
+        REPORT_TIMEOUT,
+        crate::gemini::tests::generate_report_at(
+            keys,
+            url,
+            std::time::Duration::ZERO,
+            prompt,
+            crate::agent::get_problem(Some("two-sum")),
+            crate::gemini::ReportRun {
+                scope: "interview-fixed",
+                seed,
+                refused,
+            },
+        ),
+    )
+    .await
 }
 
 fn past_cooldown() -> tokio::time::Instant {
@@ -1274,26 +1363,24 @@ async fn a_report_lost_to_503s_is_regenerated_from_the_frozen_interview() {
     let mut live = RuntimeState::default();
     let mut frozen = freeze_assessment(&boot, &mut live, 12.0);
     let keys = GeminiKeys::single("recovery-e2e");
-    let generate = |prompt: &str| {
-        let (keys, url, problem) = (&keys, url.clone(), boot.problem);
-        let prompt = prompt.to_string();
-        async move {
-            tokio::time::timeout(
-                REPORT_TIMEOUT,
-                crate::gemini::tests::generate_report_at(
-                    keys,
-                    &url,
-                    std::time::Duration::ZERO,
-                    &prompt,
-                    problem,
-                    "interview-fixed",
-                ),
-            )
-            .await
-        }
-    };
-    let first = generate(&frozen.prompt).await;
-    let regenerate = generate(&frozen.prompt);
+    let (flag, again) = (AtomicBool::default(), AtomicBool::default());
+    let first = generate_at(
+        &keys,
+        &url,
+        &frozen.prompt,
+        crate::gemini::GENERATION_SEED,
+        &flag,
+    )
+    .await;
+    let refused = flag.into_inner() || refused_report(&first);
+    assert!(!refused, "nothing answered, so nothing was refused");
+    let regenerate = generate_at(
+        &keys,
+        &url,
+        &frozen.prompt,
+        regeneration_seed(refused),
+        &again,
+    );
 
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     tx.send(RecoveryEvent::Retry).unwrap();
@@ -1306,6 +1393,7 @@ async fn a_report_lost_to_503s_is_regenerated_from_the_frozen_interview() {
             state: &mut frozen.state,
             reason: "interview_complete",
             keys: &keys,
+            refused: false,
         },
         first,
         regenerate,
@@ -1340,6 +1428,114 @@ async fn a_report_lost_to_503s_is_regenerated_from_the_frozen_interview() {
     drop(tx);
 }
 
+/// The recovery for a report refused after both repairs. The frozen prompt
+/// with the first seed answers what it answered before, so the regeneration
+/// asks with another, and the candidate gets the scores the first generation
+/// lost, within the same ten-call ceiling.
+#[tokio::test]
+async fn a_report_refused_after_both_repairs_is_regenerated_on_another_seed() {
+    let seeds = std::sync::Arc::new(std::sync::Mutex::new(Vec::<i64>::new()));
+    let seen = std::sync::Arc::clone(&seeds);
+    let app = axum::Router::new().route(
+        "/",
+        axum::routing::post(move |body: String| {
+            let seen = std::sync::Arc::clone(&seen);
+            async move {
+                let body = serde_json::from_str::<serde_json::Value>(&body).unwrap();
+                let seed = body["generationConfig"]["seed"].as_i64().unwrap();
+                seen.lock().unwrap().push(seed);
+
+                // The first seed always answers with a field the schema does
+                // not have, which no salvage takes out.
+                let mut report = crate::gemini::tests::valid_report();
+                if seed == crate::gemini::GENERATION_SEED {
+                    report["unexpected"] = serde_json::json!(true);
+                }
+                let text = report.to_string();
+                axum::Json(
+                    serde_json::json!({"candidates": [{"content": {"parts": [{"text": text}]}}]}),
+                )
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+    let config = report_test_config();
+    let boot = bootstrap(&config, "interview-fixed", Some("two-sum"), 45);
+    let mut live = RuntimeState::default();
+    let mut frozen = freeze_assessment(&boot, &mut live, 12.0);
+    let keys = GeminiKeys::single("schema-recovery");
+    let (flag, again) = (AtomicBool::default(), AtomicBool::default());
+    let first = generate_at(
+        &keys,
+        &url,
+        &frozen.prompt,
+        crate::gemini::GENERATION_SEED,
+        &flag,
+    )
+    .await;
+    assert!(flag.into_inner());
+    assert!(refused_report(&first));
+    assert_eq!(
+        regeneration_cooldown(&first, &keys),
+        Some(REPORT_RETRY_COOLDOWN)
+    );
+    let seed = regeneration_seed(true);
+    assert_eq!(seed, crate::gemini::REGENERATION_SEED);
+    let regenerate = generate_at(&keys, &url, &frozen.prompt, seed, &again);
+
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    tx.send(RecoveryEvent::Retry).unwrap();
+    let mut room = RecoveryFixture::new(rx);
+    run_recovery(
+        &mut room,
+        RecoveryReport {
+            boot: &boot,
+            state: &mut frozen.state,
+            reason: "interview_complete",
+            keys: &keys,
+            refused: true,
+        },
+        first,
+        regenerate,
+        past_cooldown,
+        async {},
+    )
+    .await
+    .unwrap();
+    server.abort();
+
+    let [provisional, report] = &room.2[..] else {
+        panic!("expected two reports, got {:?}", room.2);
+    };
+    assert_eq!(provisional["incomplete"], true);
+    assert_eq!(provisional["reportRecovery"]["cause"], "schema");
+    assert!(
+        provisional["summary"]
+            .as_str()
+            .unwrap()
+            .contains("failed schema validation"),
+        "{provisional}"
+    );
+    assert_ne!(report["incomplete"], true, "{report}");
+    assert_eq!(report["codingScore"], 82);
+    assert_eq!(room.1, [RecoveryNotice::Accepted]);
+
+    let seeds = seeds.lock().unwrap();
+    assert_eq!(
+        *seeds,
+        [
+            crate::gemini::GENERATION_SEED,
+            crate::gemini::GENERATION_SEED,
+            crate::gemini::GENERATION_SEED,
+            crate::gemini::REGENERATION_SEED,
+        ]
+    );
+    drop(tx);
+}
+
 /// A candidate who left before the interview ended cannot ask for a retry, and
 /// their departure was consumed by the interview loop: the final failure goes
 /// out at once instead of a five-minute wait in an empty room.
@@ -1362,6 +1558,7 @@ async fn an_absent_candidate_gets_the_failure_without_a_recovery_window() {
             state: &mut frozen.state,
             reason: "time_up",
             keys: &keys,
+            refused: false,
         },
         Err(elapsed().await),
         async {
@@ -2064,6 +2261,7 @@ async fn only_an_unacknowledged_provisional_report_is_republished() {
                 state: &mut frozen.state,
                 reason: "time_up",
                 keys: &keys,
+                refused: false,
             },
             Err(elapsed().await),
             async { Ok(Ok(serde_json::json!({}))) },

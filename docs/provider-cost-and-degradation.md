@@ -89,15 +89,25 @@ counter is consumed immediately before the network request. Authentication
 failures, bad models, malformed responses, and other permanent failures get no
 transport retry.
 
-After transient transport exhaustion or the overall report deadline, the
-connected candidate may request one regeneration after a 30-second cooldown,
-or for quota exhaustion until the first configured key leaves its cooldown, at
-most 60 seconds; a sole key waits the whole 60, and a usable backup only the 30.
-A missed deadline asks the key rotation the same question, and so does an
-accepted request, so keys another interview sent back to quota during the wait
+After transient transport exhaustion, the overall report deadline, or a report
+still refused when its repairs ran out, the connected candidate may request one
+regeneration after a 30-second cooldown, or for quota exhaustion until the first
+configured key leaves its cooldown, at most 60 seconds; a sole key waits the
+whole 60, and a usable backup only the 30. A repair call that fails after a
+refusal is judged by its own failure like any other call, so a rejected
+credential still offers nothing. A missed deadline and a refused report ask the
+key rotation the same question,
+and so does an accepted request, so keys another interview sent back to quota during the wait
 answer `early` rather than spend the regeneration on a call that cannot start. It
 reuses the frozen assessment, has its own five-call pool and 125-second
 deadline, and therefore bounds final reporting at ten HTTP calls per interview.
+Report calls are seeded, so with the first seed the frozen prompt answers a
+regeneration exactly as it answered the first time. When the first generation
+had an answer refused, whether it then ran out of repairs, lost its repair call
+or missed the deadline, the regeneration samples with a second fixed seed; one
+that never had an answer refused keeps the first. The offer names its cause,
+`schema` when an answer was refused and `unavailable` otherwise, so the page
+does not call a refusal a passing outage.
 Successful or salvaged reports cannot be regenerated. A rejected credential
 never qualifies on its own; an available or quota-limited backup may still
 offer recovery, regardless of which credential failed last. An already
@@ -117,9 +127,10 @@ regeneration), and announces `closed` at expiry or when no key can ever answer;
 a duplicate request during
 regeneration gets no answer. The browser waits at most 145 seconds from its
 request or the acceptance, whichever came last, so neither a reconnect nor a
-lost answer cuts off a regeneration still in progress. A transient
-burst followed by a schema failure offers no regeneration: the terminal failure
-determines eligibility. Reloads and process restarts cannot recover the inputs.
+lost answer cuts off a regeneration still in progress. The terminal failure
+determines eligibility, so a transient burst followed by a schema failure
+regenerates as a schema failure. Reloads and process restarts cannot recover
+the inputs.
 
 Every report packet, provisional, regenerated or final, is delivered the same
 way. The agent publishes those same bytes at most three times, each with a
