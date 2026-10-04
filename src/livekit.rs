@@ -2988,6 +2988,8 @@ async fn handle_data_packet(
             &assessment.prompt,
             assessment.behavioral_round_opened(),
             api_key,
+            crate::gemini::GENERATION_SEED,
+            &assessment.refused,
         ),
         farewell
     );

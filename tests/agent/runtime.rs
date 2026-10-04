@@ -111,6 +111,9 @@ fn unsupported_delivery_and_personality_judgments_are_rejected_atomically() {
         "You were visibly nervous.",
         "A nervous pause followed the question.",
         "Your nervous energy showed.",
+        "State the complexity without hesitation.",
+        "You were hesitant about the loop invariant.",
+        "You answered hesitantly.",
     ] {
         let mut report = valid_strict_report();
         report["summary"] = json!(claim);
@@ -141,10 +144,12 @@ fn unsupported_delivery_and_personality_judgments_are_rejected_atomically() {
                     return false;
                 };
 
-                // The phrase is the one this claim tripped on, not merely the
-                // first on the list: naming the wrong one sends a repair after
-                // words the model never wrote.
-                normalized.contains(phrase)
+                // Every phrase named is one this claim tripped on, not merely
+                // the first on the list: naming the wrong one sends a repair
+                // after words the model never wrote.
+                phrase
+                    .split("\", \"")
+                    .all(|phrase| normalized.contains(phrase))
             }),
             "claim escaped delivery policy: {claim:?}: {errors:?}"
         );
@@ -249,6 +254,7 @@ fn technical_confidence_language_remains_valid() {
         "Your parser accepts identifiers in another language's alphabet.",
         "Your tokenizer kept Japanese text and Korean characters intact.",
         "You tested the Spanish-language input and the French locale.",
+        "Do not hesitate to ask a clarifying question before coding.",
     ] {
         let mut report = valid_strict_report();
         report["summary"] = json!(allowed);
@@ -2561,5 +2567,53 @@ fn a_cold_replacement_after_language_switches_keeps_the_choice_and_discussion() 
     assert!(
         !brief.contains("has not chosen a programming language"),
         "{brief}"
+    );
+}
+
+#[test]
+fn judgment_diagnostics_group_all_matches_by_rule_and_field() {
+    let mut report = valid_strict_report();
+    report["improvementPlan"][1]["successCriterion"] = json!(
+        "Avoid nervous filler words; speak clearly in English to avoid transcription ambiguity."
+    );
+    let errors = validate_report_candidate(&report, get_problem(Some("two-sum"))).unwrap_err();
+    let errors = errors
+        .iter()
+        .filter(|error| error.starts_with("$.improvementPlan[1].successCriterion:"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        errors,
+        vec![
+            "$.improvementPlan[1].successCriterion: unsupported delivery or personality judgment (\"filler words\", \"nervous\")",
+            "$.improvementPlan[1].successCriterion: a speech-recognition gap is not the candidate's weakness (\"avoid transcription\", \"in english\", \"speak clearly\")",
+        ]
+    );
+
+    report["improvementPlan"][1]["successCriterion"] = json!(
+        "Use a Spanish-language explanation, a Japanese response and a Spanish answer in French."
+    );
+    let errors = validate_report_candidate(&report, get_problem(Some("two-sum"))).unwrap_err();
+    let errors = errors
+        .iter()
+        .filter(|error| error.starts_with("$.improvementPlan[1].successCriterion:"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        errors,
+        vec![
+            "$.improvementPlan[1].successCriterion: the recognizer's language attributed to the candidate (\"in french\", \"spanish\", \"japanese\")",
+        ]
+    );
+}
+
+#[test]
+fn grouped_summary_judgments_do_not_apply_improvement_only_rules() {
+    let mut report = valid_strict_report();
+    report["summary"] = json!("Speak clearly despite nervous filler words.");
+    let errors = validate_report_candidate(&report, get_problem(Some("two-sum"))).unwrap_err();
+    assert_eq!(
+        errors,
+        vec![
+            "$.summary: unsupported delivery or personality judgment (\"filler words\", \"nervous\")",
+        ]
     );
 }

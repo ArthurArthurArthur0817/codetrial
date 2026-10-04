@@ -1421,7 +1421,7 @@ const reportRecovery = createReportRecovery({
       reportRecovery.finish(),
     );
   },
-  offer: (ready, cooldown) => {
+  offer: (ready, cooldown, cause) => {
     state.phase = "report_recovery";
     if (!ready) stopEndingEscape();
     globalThis.clearTimeout(frameworkHintTimer);
@@ -1433,16 +1433,22 @@ const reportRecovery = createReportRecovery({
     pendingLanguagePublish = null;
     nodes.editor.disabled = true;
     nodes.ending.hidden = false;
-    nodes.endingTitle.textContent = "Evaluation temporarily unavailable";
+    const refused = cause === "schema";
+    nodes.endingTitle.textContent = refused
+      ? "Evaluation could not be completed"
+      : "Evaluation temporarily unavailable";
     nodes.ending.querySelector(".spinner").hidden = true;
     nodes.forceReport.hidden = true;
     nodes.leaveRoom.hidden = false;
     nodes.leaveRoom.textContent = "Save incomplete report and leave";
     nodes.retryReport.hidden = false;
     nodes.retryReport.disabled = !ready;
+    const failed = refused
+      ? "The generated evaluation did not pass validation, so it was not shown."
+      : "Evaluation failed temporarily.";
     nodes.endingDetail.textContent = ready
-      ? "Evaluation failed temporarily. Retry the report using your completed interview, or leave safely."
-      : `Evaluation failed temporarily. Report retry will be available in ${cooldown} seconds.`;
+      ? `${failed} Retry the report using your completed interview, or leave safely.`
+      : `${failed} Report retry will be available in ${cooldown} seconds.`;
     startEndingClock();
   },
   waiting: () => {

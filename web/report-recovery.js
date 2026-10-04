@@ -8,6 +8,9 @@ export const reportRecoveryLimits = Object.freeze({
   // for that word and falls back on its own only when the word never comes.
   closeGraceSeconds: 15,
   retryStatuses: Object.freeze(["accepted", "early", "closed"]),
+  // Why the report failed: `schema` when it answered and was refused, so the
+  // page does not call that a passing outage.
+  causes: Object.freeze(["schema", "unavailable"]),
 });
 
 // The provisional failure is finalized once, whether the candidate retries,
@@ -35,6 +38,7 @@ export function createReportRecovery({
   // too, so an `early` answer arriving this late cannot reopen it.
   let expired = false;
   let ready = false;
+  let cause = "unavailable";
   // "idle", "sent" while the request awaits its answer, "accepted" once the
   // agent is generating.
   let retry = "idle";
@@ -68,12 +72,12 @@ export function createReportRecovery({
   }
   function offerAfter(seconds) {
     ready = false;
-    offer(false, seconds);
+    offer(false, seconds, cause);
     if (readyTimer) timers.clearTimeout(readyTimer);
     readyTimer = timers.setTimeout(() => {
       readyTimer = 0;
       ready = true;
-      offer(true, seconds);
+      offer(true, seconds, cause);
     }, seconds * 1000);
   }
   return {
@@ -92,6 +96,11 @@ export function createReportRecovery({
       )
         return false;
       opened = true;
+      // Untrusted like the rest of the packet: anything outside the list is
+      // the ordinary wording.
+      cause = reportRecoveryLimits.causes.includes(recovery.cause)
+        ? recovery.cause
+        : "unavailable";
       report = { ...raw };
       delete report.reportRecovery;
       keep(report);

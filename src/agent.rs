@@ -69,18 +69,18 @@ pub use prompts::{
     unrecorded_earlier_phases, with_owed_reply, wrap_up,
 };
 pub(crate) use prompts::{editor_tool_continuity, end_interview_refusal, report_transcript_lines};
-pub(crate) use report::sanitize_report_candidate;
+pub(crate) use report::{MAX_ERROR_CHARS, Sanitized, sanitize_report_candidate};
 pub use report::{
     MAX_SUMMARY_TEXT, fallback_report, final_report, names_published_problem,
     report_response_schema, spelled_words, validate_report, validate_report_candidate,
     validate_report_for_round,
 };
 
-// Only the tests read this, and a report the filter emptied is the one place it
-// is written, so exporting it unconditionally is an unused name in a release
-// build.
+// Only the tests read these, and a report the filter changed is the one place
+// they are written, so exporting them unconditionally is an unused name in a
+// release build.
 #[cfg(test)]
-pub(crate) use report::SELF_REVIEW_REPLACEMENT;
+pub(crate) use report::{SELF_REVIEW_REPLACEMENT, SUCCESS_CRITERION_REPLACEMENT};
 pub use value::json_number;
 pub(crate) use value::{bounded_model_text, json_int, python_truthy, truthy_string, value_string};
 

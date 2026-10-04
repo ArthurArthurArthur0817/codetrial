@@ -303,8 +303,16 @@ async fn report_transport_fixture_with_body(
     let server = tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
-    let result =
-        generate_report_transport(&keys, &url, "prompt", &mut budget, backoff, "test-room").await;
+    let result = generate_report_transport(
+        &keys,
+        &url,
+        "prompt",
+        &mut budget,
+        backoff,
+        "test-room",
+        GENERATION_SEED,
+    )
+    .await;
     server.abort();
     let seen = requests.lock().unwrap().clone();
     (result, seen, budget.remaining)
@@ -414,6 +422,7 @@ async fn a_key_ruled_out_during_the_backoff_is_not_retried() {
         &mut budget,
         REPORT_RETRY_BACKOFF,
         "test-room",
+        GENERATION_SEED,
     )
     .await;
     server.abort();
@@ -938,8 +947,8 @@ fn report_retry_backoff_doubles_from_the_first_wait() {
 
 #[test]
 fn report_requests_are_session_local_and_never_reuse_personalized_output() {
-    let first = generate_report_request("session-a private evidence");
-    let second = generate_report_request("session-b private evidence");
+    let first = generate_report_request("session-a private evidence", GENERATION_SEED);
+    let second = generate_report_request("session-b private evidence", GENERATION_SEED);
     assert_ne!(first, second);
     assert!(first.to_string().contains("session-a private evidence"));
     assert!(!first.to_string().contains("session-b private evidence"));
@@ -958,9 +967,16 @@ pub(crate) async fn generate_report_at(
     backoff: Duration,
     prompt: &str,
     problem: &crate::agent::Problem,
-    scope: &str,
+    run: ReportRun<'_>,
 ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
-    generate_report_with_keys_at(keys, url, backoff, prompt, problem, true, scope).await
+    let calls = ReportCalls {
+        keys,
+        url: url.to_string(),
+        budget: ReportCallBudget::new(),
+        backoff,
+        run,
+    };
+    generate_report_with_keys_at(calls, prompt, problem, true).await
 }
 
 pub(crate) fn valid_report() -> Value {
@@ -1056,6 +1072,69 @@ fn run_for_round(
 
 fn run_attempts(outputs: &[&str]) -> ReportResult {
     run_for(outputs, report_problem()).map(|(report, _)| report)
+}
+
+/// What a report refused after every repair fails with, for the recovery tests.
+pub(crate) fn refused_report_error() -> Box<dyn std::error::Error + Send + Sync> {
+    run_attempts(&["{}", "{}", "{}"]).unwrap_err()
+}
+
+/// A refused response, then a repair call that fails with `retry_after`.
+struct RefusedThenFailing {
+    calls: usize,
+    retry_after: Option<Duration>,
+    refused: bool,
+}
+
+impl ReportTransport for RefusedThenFailing {
+    fn call(
+        &mut self,
+        _prompt: &str,
+    ) -> impl Future<Output = Result<String, Box<dyn std::error::Error + Send + Sync>>> + Send {
+        self.calls += 1;
+        std::future::ready(if self.calls == 1 {
+            Ok("{}".to_string())
+        } else {
+            Err(ReportTransportFailure {
+                detail: "repair call failed".to_string(),
+                retry_after: self.retry_after,
+            }
+            .into())
+        })
+    }
+
+    fn answer_refused(&mut self) {
+        self.refused = true;
+    }
+}
+
+/// A repair call that fails after a refusal keeps its own retry policy: a
+/// quota on a sole key still waits out the cooldown, and a failure no wait can
+/// fix still offers nothing. The refusal is recorded beside it, which is what
+/// sends the regeneration to the other seed.
+#[test]
+fn a_repair_call_that_fails_after_a_refusal_keeps_its_retry_policy() {
+    for retry_after in [Some(QUOTA_COOLDOWN), None] {
+        let mut transport = RefusedThenFailing {
+            calls: 0,
+            retry_after,
+            refused: false,
+        };
+        let error = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap()
+            .block_on(report_attempts(
+                "original",
+                report_problem(),
+                true,
+                &mut transport,
+            ))
+            .expect_err("nothing was held");
+        assert_eq!(transport.calls, 2);
+        assert!(transport.refused);
+        assert!(!is_report_schema_failure(error.as_ref()));
+        assert_eq!(report_regeneration_retry_after(error.as_ref()), retry_after);
+    }
 }
 
 #[test]
@@ -1296,7 +1375,7 @@ fn unsafe_checks_across_plan_items_are_all_dropped_and_counted() {
 
     let salvage = salvage_report(report, 0, report_problem(), true)
         .expect("every item is safe once its unsafe checks are gone");
-    assert_eq!(salvage.dropped, 3);
+    assert_eq!(salvage.removed.checks, 3);
     let lists = salvage.report["improvementPlan"]
         .as_array()
         .unwrap()
@@ -1332,7 +1411,7 @@ fn a_transport_failure_after_a_salvageable_response_keeps_the_report() {
     let report = run_attempts(&[&salvageable]).expect("the held report outlives the socket");
     assert_eq!(report["codingScore"], 82);
 
-    let error = run_attempts(&["{}"]).expect_err("nothing was held, so the failure stands");
+    let error = run_attempts(&[]).expect_err("nothing was held, so the failure stands");
     assert_eq!(error.to_string(), "no answer");
 }
 
@@ -1353,7 +1432,7 @@ fn a_used_salvage_logs_the_checks_it_dropped_and_the_attempt_it_came_from() {
     assert_eq!(
         line.as_deref(),
         Some(
-            "gemini report self_review_dropped problem=two-sum checks=2 attempt=0 \
+            "gemini report salvaged problem=two-sum checks=2 criteria=0 attempt=0 \
              after=transport_error error=\"no answer\""
         )
     );
@@ -1366,7 +1445,7 @@ fn a_used_salvage_logs_the_checks_it_dropped_and_the_attempt_it_came_from() {
     assert_eq!(
         line,
         Some(format!(
-            "gemini report self_review_dropped problem=two-sum checks=2 attempt=0 \
+            "gemini report salvaged problem=two-sum checks=2 criteria=0 attempt=0 \
              after=no_repair_left error=\"Gemini report failed schema validation \
              after {MAX_REPORT_REPAIRS} repairs: $.x\\nforged: unknown field\""
         ))
@@ -1415,7 +1494,7 @@ fn sanitizing_a_report_without_a_plan_changes_nothing() {
     ] {
         assert_eq!(
             crate::agent::sanitize_report_candidate(raw.clone()),
-            (raw, 0)
+            (raw, crate::agent::Sanitized::default())
         );
     }
 }
@@ -1506,7 +1585,11 @@ async fn a_misrecognized_turn_neither_appears_in_nor_decides_the_report() {
         &prompt,
         problem,
         false,
-        "report-probe",
+        ReportRun {
+            scope: "report-probe",
+            seed: GENERATION_SEED,
+            refused: &std::sync::atomic::AtomicBool::new(false),
+        },
     )
     .await
     .expect("production returns a report");
@@ -2022,7 +2105,7 @@ fn report_generation_request_matches_python_report_model_config() {
         "https://generativelanguage.googleapis.com/v1beta/models/gemini-report:generateContent"
     );
 
-    let request = generate_report_request("score this");
+    let request = generate_report_request("score this", GENERATION_SEED);
     assert_eq!(request["contents"][0]["parts"][0]["text"], "score this");
 
     // The constant half goes first, as the system instruction, so every report
@@ -2032,7 +2115,7 @@ fn report_generation_request_matches_python_report_model_config() {
         crate::agent::report_system_instruction()
     );
     assert_eq!(
-        generate_report_request("another session")["systemInstruction"],
+        generate_report_request("another session", GENERATION_SEED)["systemInstruction"],
         request["systemInstruction"]
     );
     assert_eq!(
@@ -2685,7 +2768,7 @@ fn the_interim_review_asks_for_bounded_prose_and_no_thinking() {
     );
 
     // The report's own config still goes through the shared envelope unchanged.
-    let report = generate_report_request("write the debrief");
+    let report = generate_report_request("write the debrief", GENERATION_SEED);
     assert_eq!(
         report["generationConfig"]["responseMimeType"],
         "application/json"
@@ -3292,9 +3375,15 @@ async fn quota_regeneration_waits_until_the_whole_key_rotation_can_make_a_call()
         axum::serve(listener, app).await.unwrap();
     });
     assert_eq!(
-        generate_report_once(&selected, &url, "same frozen prompt", "quota-regeneration")
-            .await
-            .unwrap(),
+        generate_report_once(
+            &selected,
+            &url,
+            "same frozen prompt",
+            "quota-regeneration",
+            GENERATION_SEED,
+        )
+        .await
+        .unwrap(),
         "report"
     );
     assert_eq!(calls.load(Ordering::SeqCst), 1);
@@ -3387,6 +3476,7 @@ async fn concurrent_quota_exhaustion_keeps_its_delay_after_a_report_503() {
         &mut budget,
         Duration::ZERO,
         "concurrent-quota",
+        GENERATION_SEED,
     )
     .await
     .unwrap_err();
@@ -3472,5 +3562,185 @@ async fn a_quota_failure_waits_only_when_no_other_key_can_answer() {
     assert_eq!(
         report_regeneration_retry_after(result.unwrap_err().as_ref()),
         Some(credentials::QUOTA_COOLDOWN)
+    );
+}
+
+#[test]
+fn success_criterion_repair_names_every_prohibited_phrase() {
+    let mut report = valid_report();
+    report["improvementPlan"][1]["successCriterion"] =
+        json!("Maintain eye contact, avoid filler words, and never sound nervous.");
+    let output = report.to_string();
+    let ReportStep::Repair(repair) = attempt_for(&output, 0, report_problem()) else {
+        panic!("an unsafe success criterion must be repaired");
+    };
+    let diagnostic = "$.improvementPlan[1].successCriterion: unsupported delivery or personality judgment (\"filler words\", \"eye contact\", \"nervous\")";
+    let encoded = serde_json::to_string(diagnostic).unwrap();
+    assert!(
+        repair.contains(&encoded),
+        "missing diagnostic: {diagnostic}"
+    );
+
+    // A repair that removes the claim keeps the model's own criterion, which is
+    // why the replacement waits for the repairs to run out.
+    report["improvementPlan"][1]["successCriterion"] =
+        json!("Trace the loop invariant and verify the empty-input and duplicate cases.");
+    let repaired = report.to_string();
+    let report = run_attempts(&[&output, &repaired]).unwrap();
+    assert_eq!(
+        report["improvementPlan"][1]["successCriterion"],
+        "Trace the loop invariant and verify the empty-input and duplicate cases."
+    );
+}
+
+/// The report the issue lost: after both repairs the one error left was a
+/// success criterion judging delivery, and the candidate got no scores for it.
+#[test]
+fn a_success_criterion_still_unsafe_after_both_repairs_is_replaced_and_scored() {
+    let mut report = valid_report();
+    report["improvementPlan"][1]["successCriterion"] =
+        json!("Maintain eye contact and avoid filler words while explaining.");
+    let output = report.to_string();
+    let raw = last_attempt(&output).expect("one unsafe criterion must not lose the evaluation");
+    assert_eq!(
+        raw["improvementPlan"][1]["successCriterion"],
+        crate::agent::SUCCESS_CRITERION_REPLACEMENT
+    );
+    assert_eq!(
+        raw["improvementPlan"][0]["successCriterion"], "State it independently",
+        "a criterion with nothing unsafe is left as the model wrote it"
+    );
+    let card = crate::agent::final_report(Some(&raw), 0, None, report_problem());
+    assert!(card.get("incomplete").is_none(), "{card}");
+    assert_eq!(card["codingScore"], 82);
+
+    let (_, line) = run_for(&[&output, &output, &output], report_problem()).unwrap();
+    let line = line.expect("a used salvage is logged");
+    assert!(
+        line.starts_with(
+            "gemini report salvaged problem=two-sum checks=0 criteria=1 attempt=2 \
+             after=no_repair_left error="
+        ),
+        "{line}"
+    );
+}
+
+/// A response refused for something no salvage touches is not a salvage, even
+/// one that would pass validation as it stands.
+#[test]
+fn a_response_with_nothing_to_remove_is_never_a_salvage() {
+    assert!(salvage_report(valid_report(), 0, report_problem(), true).is_none());
+}
+
+/// Fixed text, so checked once against every title it could be shown under.
+#[test]
+fn the_success_criterion_replacement_is_safe_for_every_problem() {
+    let mut raw = valid_report();
+    raw["improvementPlan"][0]["successCriterion"] = json!("Never appear nervous.");
+    for problem in crate::agent::PROBLEMS {
+        let salvage = salvage_report(raw.clone(), 0, problem, true)
+            .unwrap_or_else(|| panic!("rejected for {}", problem.id));
+        assert_eq!(
+            salvage.removed,
+            crate::agent::Sanitized {
+                checks: 0,
+                criteria: 1
+            }
+        );
+    }
+}
+
+#[test]
+fn every_rule_one_field_breaks_reaches_the_repair() {
+    let mut report = valid_report();
+    report["improvementPlan"][1]["successCriterion"] =
+        json!("Speak clearly in English to avoid transcription ambiguity; never sound nervous.");
+    let output = report.to_string();
+    let ReportStep::Repair(repair) = attempt_for(&output, 0, report_problem()) else {
+        panic!("both policy rules must trigger a repair");
+    };
+    let errors =
+        crate::agent::validate_report_for_round(&report, report_problem(), true).unwrap_err();
+    assert_eq!(errors.len(), 2);
+    for error in errors {
+        assert!(repair.contains(&serde_json::to_string(&error).unwrap()));
+    }
+}
+
+#[test]
+fn a_long_phrase_list_is_counted_rather_than_cut_midway() {
+    let mut report = valid_report();
+    report["improvementPlan"][1]["successCriterion"] = json!(
+        "Mind accent, dialect, typing speed, speech rate, filler words, disfluency, eye contact, \
+         posture, body language, facial expression, voice tone and physical appearance."
+    );
+    let errors =
+        crate::agent::validate_report_for_round(&report, report_problem(), true).unwrap_err();
+    let [error] = errors.as_slice() else {
+        panic!("one rule, one error: {errors:?}");
+    };
+
+    // Every phrase it names is whole, and the bound leaves it as it is, so the
+    // repair reads exactly what validation wrote.
+    assert!(
+        error.chars().count() <= crate::agent::MAX_ERROR_CHARS,
+        "{error}"
+    );
+    assert_eq!(bounded_errors(&errors), errors);
+    let (named, more) = error
+        .strip_prefix(
+            "$.improvementPlan[1].successCriterion: unsupported delivery or personality judgment (\"",
+        )
+        .and_then(|rest| rest.split_once("\", and "))
+        .unwrap_or_else(|| panic!("the rest must be counted: {error}"));
+    let named = named.split("\", \"").collect::<Vec<_>>();
+    let more = more
+        .strip_suffix(" more)")
+        .and_then(|count| count.parse::<usize>().ok())
+        .unwrap();
+    assert_eq!(named.len() + more, 12, "{error}");
+    assert_eq!(named[0], "accent");
+}
+
+#[test]
+fn every_failing_path_is_named_before_a_second_error_on_one() {
+    let mut errors = Vec::new();
+    for field in 0..4 {
+        for rule in 0..3 {
+            errors.push(format!(
+                "$.codingFeedback.improvements[{field}]: rule {rule}"
+            ));
+        }
+    }
+    errors.push("$.improvementPlan[1].successCriterion: rule 0".to_string());
+    let bounded = bounded_errors(&errors);
+    assert_eq!(bounded.len(), 12);
+    assert!(bounded.contains(&errors[12]), "{bounded:?}");
+
+    // What was dropped is a second or third error on a path already named, and
+    // the order validation found them in is kept.
+    for field in 0..4 {
+        let path = format!("$.codingFeedback.improvements[{field}]:");
+        assert!(bounded.iter().any(|error| error.starts_with(&path)));
+    }
+    let found = bounded
+        .iter()
+        .map(|error| errors.iter().position(|e| e == error).unwrap())
+        .collect::<Vec<_>>();
+    assert!(found.is_sorted(), "{found:?}");
+}
+
+#[test]
+fn a_self_review_check_with_multiple_policy_violations_is_dropped_once() {
+    let mut report = valid_report();
+    report["improvementPlan"][0]["selfReview"] = json!([
+        "Speak clearly in English without nervous filler words.",
+        "Verify the loop invariant"
+    ]);
+    let salvage = salvage_report(report, 0, report_problem(), true).unwrap();
+    assert_eq!(salvage.removed.checks, 1);
+    assert_eq!(
+        salvage.report["improvementPlan"][0]["selfReview"],
+        json!(["Verify the loop invariant"])
     );
 }
