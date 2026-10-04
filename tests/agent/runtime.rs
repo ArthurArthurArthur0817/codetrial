@@ -111,6 +111,9 @@ fn unsupported_delivery_and_personality_judgments_are_rejected_atomically() {
         "You were visibly nervous.",
         "A nervous pause followed the question.",
         "Your nervous energy showed.",
+        "State the complexity without hesitation.",
+        "You were hesitant about the loop invariant.",
+        "You answered hesitantly.",
     ] {
         let mut report = valid_strict_report();
         report["summary"] = json!(claim);
@@ -251,6 +254,7 @@ fn technical_confidence_language_remains_valid() {
         "Your parser accepts identifiers in another language's alphabet.",
         "Your tokenizer kept Japanese text and Korean characters intact.",
         "You tested the Spanish-language input and the French locale.",
+        "Do not hesitate to ask a clarifying question before coding.",
     ] {
         let mut report = valid_strict_report();
         report["summary"] = json!(allowed);

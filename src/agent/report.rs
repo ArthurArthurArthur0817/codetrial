@@ -743,6 +743,14 @@ const JUDGMENT_RULES: [JudgmentRule; 3] = [
             " filler words ",
             " disfluency ",
             " disfluencies ",
+            // A disfluency by another name: an accepted success criterion asked
+            // for an answer "without hesitation". Not the verb, since "do not
+            // hesitate to ask a clarifying question" is coaching about the
+            // conversation rather than a judgment of how it sounded.
+            " hesitation ",
+            " hesitations ",
+            " hesitant ",
+            " hesitantly ",
             " eye contact ",
             " posture ",
             " body language ",
