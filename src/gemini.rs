@@ -625,6 +625,13 @@ pub(crate) fn retry_live_open(
     })
 }
 
+/// Whether `error` is a rate limit on the key it used, which waiting clears.
+/// A replacement retrying it tells the candidate the interviewer is rate
+/// limited rather than unreachable.
+pub(crate) fn is_quota_failure(error: &(dyn std::error::Error + 'static)) -> bool {
+    credential_failure(error) == Some(CredentialFailure::Quota)
+}
+
 /// Whether `error` says the project cannot pay, which no retry on the same key
 /// changes, or is a rotation that ran dry with a key out for that reason. The
 /// room names it as the reason the interview ended.

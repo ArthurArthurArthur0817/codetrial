@@ -1382,6 +1382,34 @@ export function captionWindow(text, maxChars) {
   return `...${text.slice(-(maxChars - 3))}`;
 }
 
+// Seconds read fine up to two minutes; past that the count is noise.
+function reconnectWaitText(seconds) {
+  if (seconds < 120) {
+    return `${seconds} second${seconds === 1 ? "" : "s"}`;
+  }
+  return `${Math.ceil(seconds / 60)} minutes`;
+}
+
+// The agent's machine reasons. Anything else keeps the generic notice, so no
+// provider text reaches the candidate.
+const RECONNECT_CAUSES = {
+  quota: "is rate limited",
+  retrying: "could not be reached",
+};
+
+export function interviewerReconnectMessage(message) {
+  if (!Object.hasOwn(RECONNECT_CAUSES, message.reason)) {
+    return providerUiState("interviewer_reconnecting").message;
+  }
+  const cause = RECONNECT_CAUSES[message.reason];
+  const wait = message.waitSeconds;
+  const estimate =
+    Number.isSafeInteger(wait) && wait > 0
+      ? ` Retrying in about ${reconnectWaitText(wait)}.`
+      : "";
+  return `The interviewer ${cause} and cannot hear you right now.${estimate} Keep working; nothing is lost.`;
+}
+
 export function providerUiState(kind, detail = "") {
   const detailText = String(detail).toLowerCase();
   const reason = /429|rate limit|too many|busy|capacity/.test(detailText)

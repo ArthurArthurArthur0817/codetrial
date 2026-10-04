@@ -48,6 +48,7 @@ import {
   escapeHtml,
   formatTime,
   integrityEventPayload,
+  interviewerReconnectMessage,
   isAgent,
   providerUiState,
   receiveReportDelivery,
@@ -2008,9 +2009,7 @@ function receiveControl(bytes) {
       // so every other signal the page watches says nothing happened.
       setBanner(
         "reconnect",
-        message.reconnecting
-          ? providerUiState("interviewer_reconnecting").message
-          : "",
+        message.reconnecting ? interviewerReconnectMessage(message) : "",
       );
     } else if (
       message.type === "framework_state" &&

@@ -201,7 +201,12 @@ reconnecting, offline practice, report generation, incomplete report, and
 retry-ready. A reply owed for four seconds with nothing started on it, or one
 that stops producing after its audio runs out, shows the interviewer as thinking
 rather than listening. Reconnecting preserves the live session and resends
-current code. Offline practice keeps the editor and local tests usable while
+current code. While a replacement waits to retry, the notice distinguishes rate
+limiting from an unreachable interviewer and estimates the next retry in seconds,
+then drops the estimate once that retry starts. Each notice is best effort: one
+that cannot be published within a second is skipped rather than delaying the
+retry, so an estimate can outlive its wait. The estimate is a retry delay, not a
+promise of recovery; startup keeps its connecting state. Offline practice keeps the editor and local tests usable while
 explicitly promising no personalized evaluation. An invalid or exhausted report
 says that no scores or verdict were created. Browser fallback may summarize
 local test progress only for a session that never reached an interviewer, and

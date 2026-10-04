@@ -779,6 +779,15 @@ test("a dropped connection is visible and recovers its state", () => {
   assert.match(connect, /Reconnected[\s\S]*?publishCode\(/);
 });
 
+// The agent's reason and wait estimate reach the page only if the whole
+// control message is handed over; the library tests cover the wording.
+test("an interviewer reconnect banner is worded from the agent's notice", () => {
+  assert.match(
+    functionBody(interviewSource(), "receiveControl"),
+    /setBanner\(\s*"reconnect",\s*message\.reconnecting\s*\?\s*interviewerReconnectMessage\(message\)\s*:\s*"",?\s*\)/,
+  );
+});
+
 // A degraded start looks identical whether the server has no LiveKit
 // credentials, is at capacity, or the microphone failed to publish. The server
 // writes candidate-facing text for exactly this; dropping it on the floor is
