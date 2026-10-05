@@ -100,11 +100,6 @@ pub(crate) fn recording_requires_consent() -> Response {
     )
 }
 
-/// The consent a recorded room may start under, or the response refusing it.
-///
-/// Returns `Ok(None)` where recording is off, which is the state every
-/// deployment is in until an operator provisions it: there is no consent to
-/// check because there is nothing to consent to.
 /// The interview id a recorded room may start under, checked but not yet spent.
 ///
 /// Split from the claim below on purpose. This runs before the token is signed

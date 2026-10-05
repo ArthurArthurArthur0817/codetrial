@@ -308,24 +308,23 @@ pub(crate) async fn recording_status_handler(
 /// Idempotent by way of the transition table: `finalizing` may become itself,
 /// so the second of the two normal-end paths to arrive changes nothing.
 pub(crate) async fn finish_recording(
-    _state: &AppState,
     accounts: &Arc<Accounts>,
     recorder: &crate::recording::Recorder,
     recording: &crate::recording::Recording,
-    reason: Option<&str>,
 ) -> Response {
     use crate::recording::RecordingState;
     if !recording.state.is_active() {
         return recording_accepted(recording);
     }
-    let next = if reason.is_some() {
-        // A withdrawal is not a normal end. The recording is not finished, it
-        // is abandoned, and the file it produced is scheduled for deletion.
-        RecordingState::Failed
-    } else {
-        RecordingState::Finalizing
-    };
-    match crate::recording::stop_recording(accounts, recorder, recording, next, reason).await {
+    match crate::recording::stop_recording(
+        accounts,
+        recorder,
+        recording,
+        RecordingState::Finalizing,
+        None,
+    )
+    .await
+    {
         Ok((state, _)) => json_response(
             StatusCode::ACCEPTED,
             json!({ "recordingId": recording.id, "state": state.as_str() }),
