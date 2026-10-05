@@ -244,9 +244,7 @@ pub(crate) async fn end_interview_handler(
         // Nothing recorded, so there is nothing to stop. Not a 404: the
         // interview ending is the candidate's news either way.
         Ok(None) => StatusCode::NO_CONTENT.into_response(),
-        Ok(Some(recording)) => {
-            finish_recording(&state, &accounts, &recorder, &recording, None).await
-        }
+        Ok(Some(recording)) => finish_recording(&accounts, &recorder, &recording).await,
         Err(error) => {
             eprintln!("could not read a recording while ending an interview: {error}");
             json_response(

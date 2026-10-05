@@ -369,10 +369,7 @@ fn redact_replay_string(text: &str) -> String {
     // Cut on a character boundary, not a byte one. The limit is in bytes
     // because that is what storage costs, and slicing a UTF-8 string at an
     // arbitrary byte panics.
-    let mut end = MAX_REPLAY_STRING;
-    while end > 0 && !text.is_char_boundary(end) {
-        end -= 1;
-    }
+    let end = text.floor_char_boundary(MAX_REPLAY_STRING);
     text[..end].to_string()
 }
 
@@ -400,17 +397,6 @@ pub enum Ingest {
     NoInterview,
 }
 
-/// Appends a batch, allocating each sequence number as it goes.
-///
-/// Allocation is inside the insert, not around it. `SELECT MAX(seq)` and then
-/// `INSERT` is two statements with a gap in the middle, and two writers in that
-/// gap both pick the same number: one of them loses to the primary key and its
-/// event is gone. `INSERT ... SELECT` from the same table is one statement, and
-/// SQLite serializes writers, so the number is chosen and taken together.
-///
-/// The quota is checked once, before the batch. Checking per event would let a
-/// batch straddle the limit and store half of itself, and half a batch is a
-/// replay with a hole in it.
 /// Whether this account's replay of this interview is still open, in either
 /// direction.
 ///
@@ -435,6 +421,17 @@ fn replay_open(
     Ok(open > 0)
 }
 
+/// Appends a batch, allocating each sequence number as it goes.
+///
+/// Allocation is inside the insert, not around it. `SELECT MAX(seq)` and then
+/// `INSERT` is two statements with a gap in the middle, and two writers in that
+/// gap both pick the same number: one of them loses to the primary key and its
+/// event is gone. `INSERT ... SELECT` from the same table is one statement, and
+/// SQLite serializes writers, so the number is chosen and taken together.
+///
+/// The quota is checked once, before the batch. Checking per event would let a
+/// batch straddle the limit and store half of itself, and half a batch is a
+/// replay with a hole in it.
 pub fn append_replay_events(
     accounts: &Accounts,
     interview_id: &str,

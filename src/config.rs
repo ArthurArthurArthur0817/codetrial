@@ -587,6 +587,31 @@ pub(crate) fn livekit_scheme(url: &str) -> Option<&'static (&'static str, bool, 
     })
 }
 
+/// The HTTP API base for a LiveKit URL: the same host, over the scheme an
+/// HTTP client will send.
+///
+/// The rewrite goes through `livekit_scheme` rather than matching the two
+/// websocket schemes here, because `validate_livekit_url` accepts a scheme in
+/// any case and this has to rewrite every spelling that accepts. A pasted
+/// `WSS://` used to survive unchanged, and reqwest refuses any scheme but http
+/// and https before the request leaves the process, so credentials that were
+/// good came back as credentials that did not work.
+///
+/// The query and the fragment come off, because the Twirp path is appended
+/// to what this returns and validation accepts both. A configured
+/// `?region=eu` took the method name into the query rather than to the
+/// service. The path itself is kept: a LiveKit behind a reverse proxy at
+/// `https://host/livekit` serves RoomService under that prefix.
+pub(crate) fn livekit_http_base(url: &str) -> String {
+    let trimmed = url.trim();
+    let trimmed = trimmed.split(['?', '#']).next().unwrap_or(trimmed);
+    let trimmed = trimmed.trim_end_matches('/');
+    match livekit_scheme(trimmed) {
+        Some((scheme, _, http)) => format!("{http}{}", &trimmed[scheme.len()..]),
+        None => trimmed.to_string(),
+    }
+}
+
 pub(crate) fn livekit_host_is_csp_safe(authority: &str) -> bool {
     let Some((host, port)) = split_authority(authority) else {
         return false;

@@ -407,6 +407,15 @@ fn contract_stop_egress() {
 /// wire.
 #[tokio::test]
 async fn contract_stop_egress_sends_what_the_fixture_describes() {
+    check_stop_egress("ws", "", "").await;
+}
+
+#[tokio::test]
+async fn contract_egress_normalizes_scheme_and_preserves_proxy_path() {
+    check_stop_egress("Ws", "/livekit/", "?region=eu#fragment").await;
+}
+
+async fn check_stop_egress(scheme: &str, path: &str, suffix: &str) {
     const API_KEY: &str = "APIcontractkey";
     const API_SECRET: &str = "contract-api-secret-7c1d";
 
@@ -463,7 +472,7 @@ async fn contract_stop_egress_sends_what_the_fixture_describes() {
         pool: codetrial::config::ProviderPool {
             providers: vec![codetrial::config::Provider {
                 id: codetrial::config::PRIMARY_PROVIDER_ID.to_string(),
-                url: format!("ws://127.0.0.1:{port}"),
+                url: format!("{scheme}://127.0.0.1:{port}{path}{suffix}"),
                 api_key: API_KEY.to_string(),
                 api_secret: API_SECRET.to_string(),
                 google_api_keys: Vec::new(),
@@ -479,7 +488,14 @@ async fn contract_stop_egress_sends_what_the_fixture_describes() {
         .stop(egress_id, "interview-a1b2c3d4")
         .await
         .expect("a 200 with a JSON body is a stop that landed");
-    let (head, body) = served.await.unwrap();
+
+    // Bounded, because a stop that reports success without sending anything
+    // leaves the stub waiting in accept() and the test hanging rather than
+    // failing.
+    let (head, body) = tokio::time::timeout(std::time::Duration::from_secs(10), served)
+        .await
+        .expect("the stop reported success without reaching the server")
+        .unwrap();
 
     // The body, whole. Not a field check: a key the decoder does not bind is
     // dropped in silence, which is the failure this whole file exists for.
@@ -489,7 +505,8 @@ async fn contract_stop_egress_sends_what_the_fixture_describes() {
     assert_eq!(
         start,
         format!(
-            "POST /twirp/{}/{} HTTP/1.1",
+            "POST {}/twirp/{}/{} HTTP/1.1",
+            path.trim_end_matches('/'),
             recording::EGRESS_SERVICE,
             recording::EGRESS_STOP_METHOD
         ),

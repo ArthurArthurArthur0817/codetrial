@@ -31,6 +31,11 @@ pub(crate) fn create_session(
 ) -> rusqlite::Result<String> {
     accounts.with(|connection| {
         let now = crate::current_epoch_seconds_i64();
+        let session_id = random_token(32).map_err(|_| rusqlite::Error::InvalidQuery)?;
+
+        // A failed session insert must not leave a new account or change the
+        // verified delivery address on an existing one.
+        let transaction = connection.unchecked_transaction()?;
 
         // A positive id came from GitHub and names a returning person, so it
         // updates the row it already owns. A negative one is a freshly minted
@@ -60,17 +65,16 @@ pub(crate) fn create_session(
         // negative id and gets a NULL address and a zero flag, so there is no
         // path by which typing a handle produces a delivery target. Trimmed and
         // non-empty here, not only at the caller. This function is the
-        // persistence boundary and it is public: `email_verified` is derived
-        // from whether this is `Some`, so a positive account whose address is
-        // nothing but spaces would be recorded as verified with nothing to
-        // deliver to.
+        // persistence boundary: `email_verified` is derived from whether this
+        // is `Some`, so a positive account whose address is nothing but spaces
+        // would be recorded as verified with nothing to deliver to.
         let verified_email = profile
             .verified_email
             .as_deref()
             .map(str::trim)
             .filter(|email| !email.is_empty())
             .filter(|_| profile.github_id > 0);
-        connection.execute(
+        transaction.execute(
             &statement,
             (
                 profile.github_id,
@@ -81,13 +85,12 @@ pub(crate) fn create_session(
                 i64::from(verified_email.is_some()),
             ),
         )?;
-        let user_id = connection.query_row(
+        let user_id = transaction.query_row(
             "SELECT id FROM users WHERE github_id = ?1",
             [profile.github_id],
             |row| row.get::<_, i64>(0),
         )?;
-        let session_id = random_token(32).map_err(|_| rusqlite::Error::InvalidQuery)?;
-        connection.execute(
+        transaction.execute(
             "
         INSERT INTO sessions (id, user_id, expires_at, created_at)
         VALUES (?1, ?2, ?3, ?4)
@@ -99,6 +102,7 @@ pub(crate) fn create_session(
                 now,
             ),
         )?;
+        transaction.commit()?;
         Ok(session_id)
     })
 }

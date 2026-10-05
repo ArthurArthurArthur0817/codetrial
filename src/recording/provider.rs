@@ -265,10 +265,7 @@ impl LiveKitEgress {
             crate::current_epoch_seconds(),
         )
         .map_err(|error| format!("could not sign the egress credential: {error}"))?;
-        let base = url
-            .trim_end_matches('/')
-            .replacen("wss://", "https://", 1)
-            .replacen("ws://", "http://", 1);
+        let base = crate::config::livekit_http_base(&url);
         let response = crate::http_client()
             .post(format!("{base}/twirp/{EGRESS_SERVICE}/{method}"))
             .bearer_auth(token)

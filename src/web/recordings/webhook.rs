@@ -292,7 +292,7 @@ async fn apply_webhook(
     }
 
     match kind {
-        "room_finished" => finish_recording(state, accounts, recorder, &recording, None)
+        "room_finished" => finish_recording(accounts, recorder, &recording)
             .await
             .status()
             .is_success(),

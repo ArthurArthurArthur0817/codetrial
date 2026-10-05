@@ -7,11 +7,6 @@ use crate::accounts::{Accounts, blocking};
 use super::store::{Handle, clear_handle, delivery_handles};
 use super::*;
 
-/// Revokes, deletes, and tombstones, in that order.
-///
-/// A failure anywhere is `cleanup_failed`, which is terminal for the pipeline
-/// and an alert for a person: the media outlived the attempt to delete it, and
-/// nothing automatic is going to fix that.
 /// One step of releasing a recording's media: what to ask the provider for, and
 /// the handle the row stops naming once that lands.
 ///
@@ -39,6 +34,11 @@ enum Call<'a> {
     DeleteObject(&'a str),
 }
 
+/// Revokes, deletes, and tombstones, in that order.
+///
+/// A failure anywhere is `cleanup_failed`, which is terminal for the pipeline
+/// and an alert for a person: the media outlived the attempt to delete it, and
+/// nothing automatic is going to fix that.
 pub async fn delete_recording(
     accounts: &Arc<Accounts>,
     recorder: &Recorder,
