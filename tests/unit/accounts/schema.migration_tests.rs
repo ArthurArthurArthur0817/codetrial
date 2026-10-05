@@ -7,6 +7,43 @@
 use super::*;
 use crate::accounts::*;
 
+#[test]
+fn failed_session_insert_rolls_back_account_changes() {
+    let accounts = accounts_at(Path::new(":memory:"));
+    accounts.initialize_schema().unwrap();
+    let mut profile = GitHubProfile {
+        github_id: 42,
+        login: "original".into(),
+        avatar_url: None,
+        verified_email: Some("original@example.com".into()),
+    };
+    let session = create_session(&accounts, &profile).unwrap();
+    accounts
+        .with(|connection| {
+            connection.execute_batch(
+                "CREATE TRIGGER refuse_session BEFORE INSERT ON sessions
+                 BEGIN SELECT RAISE(ABORT, 'session refused'); END;",
+            )
+        })
+        .unwrap();
+
+    profile.login = "changed".into();
+    profile.verified_email = Some("changed@example.com".into());
+    assert!(create_session(&accounts, &profile).is_err());
+    let user = session_user(&accounts, &session).unwrap().unwrap();
+    assert_eq!(user.login, "original");
+    assert_eq!(user.verified_email.as_deref(), Some("original@example.com"));
+
+    profile.github_id = -42;
+    assert!(create_session(&accounts, &profile).is_err());
+    let count = accounts
+        .with(|connection| {
+            connection.query_row("SELECT COUNT(*) FROM users", [], |row| row.get::<_, i64>(0))
+        })
+        .unwrap();
+    assert_eq!(count, 1, "the failed sign-in must not leave an account");
+}
+
 /// Unverified sign-ins used to accumulate one account row and one session
 /// row each, forever. Rate limiting bounds the rate, not the total.
 #[test]
