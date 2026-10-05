@@ -132,9 +132,35 @@ fn a_service_account_without_a_key_is_refused_at_startup() {
     assert!(GoogleDelivery::new(&pretend, "bucket", "drive", now).is_err());
 }
 
-/// A delivery whose staged-object reads go to `storage_api`. Nothing here
-/// signs, so the credential only has to exist.
-fn delivery_reading_from(storage_api: String) -> GoogleDelivery {
+#[test]
+fn service_account_validation_agrees_at_configuration_and_startup() {
+    for field in ["client_email", "private_key"] {
+        for value in [
+            serde_json::Value::Null,
+            json!(false),
+            json!(""),
+            json!(" \t\n"),
+        ] {
+            let mut credentials =
+                json!({"client_email": "delivery@example.com", "private_key": "key"});
+            credentials[field] = value;
+            let credentials = credentials.to_string();
+            let expected = format!("the service account has no {field}");
+            assert_eq!(
+                readable_service_account(&credentials),
+                Err(expected.clone())
+            );
+            assert_eq!(
+                GoogleDelivery::new(&credentials, "bucket", "drive", Arc::new(|| 0)).err(),
+                Some(expected)
+            );
+        }
+    }
+}
+
+/// A delivery whose staged-object reads and Drive calls both go to `base`.
+/// Nothing here signs, so the credential only has to exist.
+fn delivery_reading_from(base: String) -> GoogleDelivery {
     GoogleDelivery {
         http: reqwest::Client::builder().no_proxy().build().unwrap(),
         credentials: ServiceAccount {
@@ -146,7 +172,27 @@ fn delivery_reading_from(storage_api: String) -> GoogleDelivery {
         drive_id: "drive".to_string(),
         token: Mutex::new(None),
         now: Arc::new(|| 0),
-        storage_api,
+        storage_api: base.clone(),
+        google_api: base,
+    }
+}
+
+#[tokio::test]
+async fn only_an_unauthorized_response_discards_the_cached_token() {
+    let delivery = delivery_reading_from(String::new());
+    for status in [200, 403, 429, 500, 401] {
+        *delivery.token.lock().await = Some(CachedToken {
+            value: "cached-token".into(),
+            expires_at: 3600,
+        });
+        let response = reqwest::Response::from(
+            axum::http::Response::builder()
+                .status(status)
+                .body(String::new())
+                .unwrap(),
+        );
+        delivery.note_status(&response).await;
+        assert_eq!(delivery.token.lock().await.is_none(), status == 401);
     }
 }
 
@@ -206,6 +252,56 @@ async fn a_range_returns_the_bytes_the_object_holds() {
     assert_eq!(
         *seen.lock().unwrap(),
         ["/b/staging/o/codetrial%2Fabc.mp4?alt=media bytes=10-14"]
+    );
+}
+
+/// The id found is the file a resumed transfer continues into, so a wrong one
+/// writes into a file that is not this recording's, and a missed one uploads
+/// a second copy.
+#[tokio::test]
+async fn the_duplicate_search_returns_the_file_it_found() {
+    use axum::response::IntoResponse;
+    let (base, seen) =
+        storage_stub(|| axum::Json(json!({ "files": [{ "id": "drive-file-7" }] })).into_response())
+            .await;
+    let delivery = delivery_reading_from(base);
+    assert_eq!(
+        delivery.existing_file("rec-1", "token").await,
+        Ok(Some("drive-file-7".to_string()))
+    );
+    assert!(seen.lock().unwrap()[0].starts_with("/drive/v3/files?q="));
+
+    let (base, _) = storage_stub(|| axum::Json(json!({ "files": [] })).into_response()).await;
+    let delivery = delivery_reading_from(base);
+    assert_eq!(delivery.existing_file("rec-1", "token").await, Ok(None));
+}
+
+/// The chunks go to the URI the session answered with, so any other one sends
+/// the recording nowhere.
+#[tokio::test]
+async fn an_upload_session_is_the_location_it_answered_with() {
+    use axum::response::IntoResponse;
+    let (base, seen) = storage_stub(|| {
+        (
+            [(
+                axum::http::header::LOCATION,
+                "https://upload.example/session-9",
+            )],
+            "",
+        )
+            .into_response()
+    })
+    .await;
+    let delivery = delivery_reading_from(base);
+    assert_eq!(
+        delivery
+            .upload_session("interview.mp4", "rec-1", "token")
+            .await,
+        Ok("https://upload.example/session-9".to_string())
+    );
+    assert_eq!(
+        *seen.lock().unwrap(),
+        ["/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true "]
     );
 }
 

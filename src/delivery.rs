@@ -83,9 +83,14 @@ pub struct GoogleDelivery {
     /// the staged-object reads can be driven against a local server: they are
     /// the half of delivery whose answers are checked byte for byte.
     storage_api: String,
+    /// Always `GOOGLE_API` outside tests, for the same reason: the Drive calls
+    /// read an id or a session URI out of the answer, and that answer has to
+    /// come from somewhere a test controls.
+    google_api: String,
 }
 
 const STORAGE_API: &str = "https://storage.googleapis.com/storage/v1";
+const GOOGLE_API: &str = "https://www.googleapis.com";
 
 struct ServiceAccount {
     client_email: String,
@@ -105,23 +110,38 @@ struct CachedToken {
 /// be signed with is [`GoogleDelivery::new`]'s question, and startup asks it
 /// before serving.
 pub fn readable_service_account(service_account_json: &str) -> Result<(), String> {
-    let credentials: Value = serde_json::from_str(service_account_json)
-        .map_err(|error| format!("the service account is not JSON: {error}"))?;
-    if credentials
-        .get("client_email")
-        .and_then(Value::as_str)
-        .is_none_or(str::is_empty)
-    {
-        return Err("the service account has no client_email".to_string());
-    }
-    if credentials
-        .get("private_key")
-        .and_then(Value::as_str)
-        .is_none_or(str::is_empty)
-    {
-        return Err("the service account has no private_key".to_string());
-    }
-    Ok(())
+    service_account_fields(&parse_service_account(service_account_json)?).map(|_| ())
+}
+
+/// The fields of a service account this binary reads, checked once for both
+/// the configuration-time question and startup.
+struct ServiceAccountFields<'a> {
+    client_email: &'a str,
+    private_key: &'a str,
+    token_uri: &'a str,
+}
+
+fn service_account_fields(credentials: &Value) -> Result<ServiceAccountFields<'_>, String> {
+    let required = |field: &str| {
+        credentials
+            .get(field)
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| format!("the service account has no {field}"))
+    };
+    Ok(ServiceAccountFields {
+        client_email: required("client_email")?,
+        private_key: required("private_key")?,
+        token_uri: credentials
+            .get("token_uri")
+            .and_then(Value::as_str)
+            .unwrap_or("https://oauth2.googleapis.com/token"),
+    })
+}
+
+fn parse_service_account(service_account_json: &str) -> Result<Value, String> {
+    serde_json::from_str(service_account_json)
+        .map_err(|error| format!("the service account is not JSON: {error}"))
 }
 
 impl GoogleDelivery {
@@ -136,37 +156,24 @@ impl GoogleDelivery {
         drive_id: &str,
         now: Arc<dyn Fn() -> i64 + Send + Sync>,
     ) -> Result<Self, String> {
-        let credentials: Value = serde_json::from_str(service_account_json)
-            .map_err(|error| format!("the service account is not JSON: {error}"))?;
-        let client_email = credentials
-            .get("client_email")
-            .and_then(Value::as_str)
-            .ok_or("the service account has no client_email")?
-            .to_string();
-        let private_key = credentials
-            .get("private_key")
-            .and_then(Value::as_str)
-            .ok_or("the service account has no private_key")?;
-        let token_uri = credentials
-            .get("token_uri")
-            .and_then(Value::as_str)
-            .unwrap_or("https://oauth2.googleapis.com/token")
-            .to_string();
+        let credentials = parse_service_account(service_account_json)?;
+        let fields = service_account_fields(&credentials)?;
         Ok(Self {
             http: reqwest::Client::builder()
                 .timeout(REQUEST_TIMEOUT)
                 .build()
                 .map_err(|error| format!("the delivery client could not be built: {error}"))?,
             credentials: ServiceAccount {
-                client_email,
-                private_key: rsa_key(private_key)?,
-                token_uri,
+                client_email: fields.client_email.to_string(),
+                private_key: rsa_key(fields.private_key)?,
+                token_uri: fields.token_uri.to_string(),
             },
             bucket: bucket.to_string(),
             drive_id: drive_id.to_string(),
             token: Mutex::new(None),
             now,
             storage_api: STORAGE_API.to_string(),
+            google_api: GOOGLE_API.to_string(),
         })
     }
 
@@ -226,14 +233,16 @@ impl GoogleDelivery {
         Ok(value)
     }
 
-    /// Forget the cached token.
+    /// Forget the cached token when the provider rejects it.
     ///
-    /// Called on a `401`, which is the one answer that says the token is wrong
+    /// Cleared on a `401`, which is the one answer that says the token is wrong
     /// whatever the local clock thinks. Without this every attempt in the
     /// queue's schedule reuses the same rejected credential and the recording
     /// runs out of attempts against a token that was never going to work.
-    async fn invalidate(&self) {
-        *self.token.lock().await = None;
+    async fn note_status(&self, response: &reqwest::Response) {
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            *self.token.lock().await = None;
+        }
     }
 
     /// The signed claim that buys a token.
@@ -279,7 +288,7 @@ impl GoogleDelivery {
         );
         let response = self
             .http
-            .get("https://www.googleapis.com/drive/v3/files")
+            .get(format!("{}/drive/v3/files", self.google_api))
             .bearer_auth(token)
             .query(&[
                 ("q", query.as_str()),
@@ -292,9 +301,7 @@ impl GoogleDelivery {
             .send()
             .await
             .map_err(|error| format!("the duplicate search failed: {error}"))?;
-        if response.status().as_u16() == 401 {
-            self.invalidate().await;
-        }
+        self.note_status(&response).await;
         let body = read_json(response, "the duplicate search").await?;
         Ok(body
             .get("files")
@@ -319,9 +326,7 @@ impl GoogleDelivery {
             .send()
             .await
             .map_err(|error| format!("the staged object could not be read: {error}"))?;
-        if response.status().as_u16() == 401 {
-            self.invalidate().await;
-        }
+        self.note_status(&response).await;
         let body = read_json(response, "the staged object").await?;
         body.get("size")
             .and_then(|size| {
@@ -354,9 +359,7 @@ impl GoogleDelivery {
             .send()
             .await
             .map_err(|error| format!("a range of the staged object failed: {error}"))?;
-        if response.status().as_u16() == 401 {
-            self.invalidate().await;
-        }
+        self.note_status(&response).await;
         if !response.status().is_success() {
             return Err(format!(
                 "a range of the staged object was refused: {}",
@@ -409,7 +412,10 @@ impl GoogleDelivery {
     ) -> Result<String, String> {
         let response = self
             .http
-            .post("https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true")
+            .post(format!(
+                "{}/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true",
+                self.google_api
+            ))
             .bearer_auth(token)
             .json(&json!({
                 "name": filename,
@@ -420,9 +426,7 @@ impl GoogleDelivery {
             .send()
             .await
             .map_err(|error| format!("the upload session could not be opened: {error}"))?;
-        if response.status().as_u16() == 401 {
-            self.invalidate().await;
-        }
+        self.note_status(&response).await;
         if !response.status().is_success() {
             return Err(format!(
                 "the upload session was refused: {}",
@@ -672,7 +676,8 @@ impl DeliveryProvider for GoogleDelivery {
             let response = self
                 .http
                 .post(format!(
-                    "https://www.googleapis.com/drive/v3/files/{drive_file_id}/permissions?supportsAllDrives=true&sendNotificationEmail=false"
+                    "{}/drive/v3/files/{drive_file_id}/permissions?supportsAllDrives=true&sendNotificationEmail=false",
+                    self.google_api
                 ))
                 .bearer_auth(&token)
                 .json(&json!({
@@ -684,9 +689,7 @@ impl DeliveryProvider for GoogleDelivery {
                 .send()
                 .await
                 .map_err(|error| format!("the share failed: {error}"))?;
-            if response.status().as_u16() == 401 {
-                self.invalidate().await;
-            }
+            self.note_status(&response).await;
             let body = read_json(response, "the share").await?;
             body.get("id")
                 .and_then(Value::as_str)
@@ -705,15 +708,14 @@ impl DeliveryProvider for GoogleDelivery {
             let response = self
                 .http
                 .delete(format!(
-                    "https://www.googleapis.com/drive/v3/files/{drive_file_id}/permissions/{permission_id}?supportsAllDrives=true"
+                    "{}/drive/v3/files/{drive_file_id}/permissions/{permission_id}?supportsAllDrives=true",
+                    self.google_api
                 ))
                 .bearer_auth(&token)
                 .send()
                 .await
                 .map_err(|error| format!("the revoke failed: {error}"))?;
-            if response.status().as_u16() == 401 {
-                self.invalidate().await;
-            }
+            self.note_status(&response).await;
             gone_or_ok(response.status().as_u16(), "the revoke")
         })
     }
@@ -724,15 +726,14 @@ impl DeliveryProvider for GoogleDelivery {
             let response = self
                 .http
                 .delete(format!(
-                    "https://www.googleapis.com/drive/v3/files/{drive_file_id}?supportsAllDrives=true"
+                    "{}/drive/v3/files/{drive_file_id}?supportsAllDrives=true",
+                    self.google_api
                 ))
                 .bearer_auth(&token)
                 .send()
                 .await
                 .map_err(|error| format!("the file deletion failed: {error}"))?;
-            if response.status().as_u16() == 401 {
-                self.invalidate().await;
-            }
+            self.note_status(&response).await;
             gone_or_ok(response.status().as_u16(), "the file deletion")
         })
     }
@@ -752,9 +753,7 @@ impl DeliveryProvider for GoogleDelivery {
                 .send()
                 .await
                 .map_err(|error| format!("the staged object deletion failed: {error}"))?;
-            if response.status().as_u16() == 401 {
-                self.invalidate().await;
-            }
+            self.note_status(&response).await;
             gone_or_ok(response.status().as_u16(), "the staged object deletion")
         })
     }
