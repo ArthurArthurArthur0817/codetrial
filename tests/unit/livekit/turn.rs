@@ -266,7 +266,7 @@ fn one_review_at_a_time_is_arithmetic_and_not_a_hope() {
     use crate::gemini::INTERIM_ATTEMPT_TIMEOUT;
 
     // A call cannot outlive the wait for the next chance to start one. This is
-    // what makes the slot in `InterimReview` unable to be occupied when a pause
+    // what makes the slot in `SideCall` unable to be occupied when a pause
     // comes due, so the two mechanisms cannot disagree about whether a review
     // is running.
     const { assert!(INTERIM_ATTEMPT_TIMEOUT.as_secs() < INTERIM_COOLDOWN.as_secs()) };
@@ -1443,4 +1443,150 @@ fn a_replacement_socket_has_to_transcribe_the_candidate_again() {
     activity.reset_context_observations(true);
     activity.note_candidate_voice(start + Duration::from_secs(9));
     assert_eq!(activity.last_user_speech, start + Duration::from_secs(9));
+}
+
+/// The phase judge follows the answer that earned a tick within seconds, not
+/// the interim review's minutes: it waits only for the candidate to stop
+/// talking and typing, and for its own short cooldown. It does not wait for the
+/// floor, since it takes no turn. It spends nothing when nothing new was said
+/// or every step it records is closed, and it stops at its ceiling.
+#[test]
+fn the_phase_judge_follows_a_candidate_turn_within_seconds() {
+    let start = Instant::now();
+    let spoke = || RuntimeState {
+        transcript: vec!["Candidate: so I merge the overlapping intervals".to_string()],
+        ..RuntimeState::default()
+    };
+    let mut activity = RuntimeActivity::new(start);
+    activity.floor = Floor::Speaking;
+    assert!(
+        !activity.claim_phase_judge(&spoke(), start + PHASE_JUDGE_IDLE / 2),
+        "the candidate may still be talking"
+    );
+    let idle = start + PHASE_JUDGE_IDLE;
+    assert!(
+        !activity.claim_phase_judge(&RuntimeState::default(), idle),
+        "nothing said, nothing to judge"
+    );
+    assert!(
+        activity.claim_phase_judge(&spoke(), idle),
+        "the interviewer speaking does not hold it back"
+    );
+    assert!(
+        !activity.claim_phase_judge(&spoke(), idle + PHASE_JUDGE_COOLDOWN / 2),
+        "the cooldown is stamped where it is read"
+    );
+    assert!(activity.claim_phase_judge(&spoke(), idle + PHASE_JUDGE_COOLDOWN));
+
+    let mut paused = spoke();
+    paused.paused = true;
+    assert!(!activity.claim_phase_judge(&paused, idle + PHASE_JUDGE_COOLDOWN * 3));
+
+    // Each of the other holds refuses it on its own, whatever else is settled.
+    let mut closing = spoke();
+    closing.end_requested = true;
+    assert!(
+        !activity.claim_phase_judge(&closing, idle + PHASE_JUDGE_COOLDOWN * 3),
+        "the interviewer has asked to close"
+    );
+    let typing_at = idle + PHASE_JUDGE_COOLDOWN * 3;
+    activity.last_code_change = typing_at - PHASE_JUDGE_IDLE / 2;
+    assert!(
+        !activity.claim_phase_judge(&spoke(), typing_at),
+        "the candidate is still typing"
+    );
+    activity.last_code_change = start;
+
+    activity.phase_judges = MAX_PHASE_JUDGES;
+    assert!(
+        !activity.claim_phase_judge(&spoke(), idle + PHASE_JUDGE_COOLDOWN * 4),
+        "past the ceiling the interviewer's own calls remain"
+    );
+    assert!(!activity.reserve_phase_judge(idle));
+    activity.phase_judges = MAX_PHASE_JUDGES - 1;
+    assert!(activity.reserve_phase_judge(idle));
+    assert_eq!(activity.phase_judges, MAX_PHASE_JUDGES);
+    assert_eq!(activity.last_phase_judge, Some(idle));
+    assert!(!activity.reserve_phase_judge(idle + PHASE_JUDGE_COOLDOWN));
+}
+
+/// Typing pauses every few seconds while Coding is open, so a judgment asked
+/// for by the editor alone waits out a longer cooldown and takes at most its
+/// own share of the ceiling. What the candidate says is still judged at the
+/// ordinary pace, and the editor cap does not hold it back.
+#[test]
+fn editor_only_judgments_are_paced_and_capped_apart_from_speech() {
+    let problem = crate::agent::get_problem(Some("two-sum"));
+    let start = Instant::now();
+    let mut state = RuntimeState {
+        code: "def solve(nums):\n    return sorted(nums)\n".to_string(),
+        ..RuntimeState::default()
+    };
+    let mut activity = RuntimeActivity::new(start);
+    let mut at = start + PHASE_JUDGE_IDLE;
+
+    // Each accepted claim takes its window, as the room does, so nothing is due
+    // again until the candidate types or speaks.
+    let mut claim = |state: &mut RuntimeState, at: Instant| {
+        let claimed = activity.claim_phase_judge(state, at);
+        if claimed {
+            crate::agent::take_phase_judge_window(state, problem);
+            assert_eq!(crate::agent::phase_judge_need(state), PhaseJudgeDue::No);
+        }
+        (claimed, activity.editor_phase_judges)
+    };
+    let edit = |state: &mut RuntimeState| {
+        state.code.push_str("# more\n");
+        assert_eq!(
+            crate::agent::phase_judge_need(state),
+            PhaseJudgeDue::EditorOnly,
+            "an edit the judge has not read reopens it"
+        );
+    };
+
+    assert_eq!(
+        crate::agent::phase_judge_need(&state),
+        PhaseJudgeDue::EditorOnly
+    );
+    assert_eq!(claim(&mut state, at), (true, 1));
+    edit(&mut state);
+    at += PHASE_JUDGE_COOLDOWN;
+    assert_eq!(
+        claim(&mut state, at),
+        (false, 1),
+        "a typing pause alone waits the editor cooldown"
+    );
+    at += PHASE_JUDGE_EDITOR_COOLDOWN;
+    assert_eq!(claim(&mut state, at), (true, 2));
+
+    // Speech is judged at the ordinary pace, between editor judgments, and is
+    // not counted against the editor's share.
+    state
+        .transcript
+        .push("Candidate: it is O of n time".to_string());
+    at += PHASE_JUDGE_COOLDOWN;
+    assert_eq!(
+        crate::agent::phase_judge_need(&state),
+        PhaseJudgeDue::Spoken
+    );
+    assert_eq!(claim(&mut state, at), (true, 2));
+
+    // The editor's share runs out on real claims, each reopened by its own
+    // edit, then speech still has the rest of the ceiling.
+    for taken in 3..=MAX_EDITOR_PHASE_JUDGES {
+        edit(&mut state);
+        at += PHASE_JUDGE_EDITOR_COOLDOWN;
+        assert_eq!(claim(&mut state, at), (true, taken));
+    }
+    edit(&mut state);
+    at += PHASE_JUDGE_EDITOR_COOLDOWN;
+    assert_eq!(
+        claim(&mut state, at),
+        (false, MAX_EDITOR_PHASE_JUDGES),
+        "the editor's share is spent"
+    );
+    state
+        .transcript
+        .push("Candidate: and constant extra space".to_string());
+    assert_eq!(claim(&mut state, at), (true, MAX_EDITOR_PHASE_JUDGES));
 }

@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 use crate::config::DEFAULT_MAX_INTERIM_REVIEWS;
 
 use crate::agent::{
-    RuntimeState, SpeakerTurn, TEST_REACTION_COOLDOWN_S, TimingInput, ViewFor,
+    PhaseJudgeDue, RuntimeState, SpeakerTurn, TEST_REACTION_COOLDOWN_S, TimingInput, ViewFor,
     behavioral_silence_nudge, board_silence_nudge, candidate_lines, changed_excerpt,
     proactive_review, silence_nudge, timing_decision, unreviewed_from, with_timer,
 };
@@ -34,6 +34,32 @@ pub(super) const INTERIM_IDLE: Duration = Duration::from_secs(8);
 /// than the one before it, and the final report reads the whole transcript
 /// regardless, so the stretch between two is longer.
 pub(super) const INTERIM_COOLDOWN: Duration = Duration::from_secs(150);
+/// How long the candidate has to have stopped talking and typing before the
+/// phase judge reads the turn: long enough for the turn to be closed into the
+/// transcript, short enough that a tick follows the answer that earned it.
+pub(super) const PHASE_JUDGE_IDLE: Duration = Duration::from_secs(2);
+/// Between two phase judgments. Each reads a small tail, and the calls stop
+/// once nothing is open, so this only keeps a fast exchange from spending a
+/// call per sentence.
+pub(super) const PHASE_JUDGE_COOLDOWN: Duration = Duration::from_secs(6);
+/// A ceiling for a session whose open steps never close, as when the candidate
+/// never restates the problem: past it the interviewer's own calls remain.
+pub(super) const MAX_PHASE_JUDGES: usize = 48;
+/// Between two judgments asked for by the editor alone, and how many of the
+/// ceiling they may take. Typing pauses every few seconds while Coding is
+/// open, and at the ordinary cooldown the ceiling would be spent in minutes of
+/// typing, before the candidate explained anything or the end asked for its
+/// own. What the candidate says is still judged at the ordinary pace, with
+/// the editor read alongside it.
+pub(super) const PHASE_JUDGE_EDITOR_COOLDOWN: Duration = Duration::from_secs(30);
+pub(super) const MAX_EDITOR_PHASE_JUDGES: usize = 12;
+/// A control packet held back to be applied later, as it arrived.
+pub(super) struct ParkedPacket {
+    pub(super) payload: serde_json::Value,
+    pub(super) received: bool,
+    pub(super) deadline: Instant,
+}
+
 /// What one review may read, in bytes.
 ///
 /// The pause it runs in is the budget: `INTERIM_ATTEMPT_TIMEOUT` gives the call
@@ -205,6 +231,20 @@ pub(super) struct RuntimeActivity {
     /// must not change how much of this interview may spend the report model.
     pub(super) max_interim_reviews: usize,
     pub(super) interim_reviews: usize,
+    /// When the phase judge was last started, and how many times; see
+    /// `claim_phase_judge`.
+    pub(super) last_phase_judge: Option<Instant>,
+    pub(super) phase_judges: usize,
+    /// How many of them the editor alone asked for; see
+    /// `MAX_EDITOR_PHASE_JUDGES`.
+    pub(super) editor_phase_judges: usize,
+    /// The judgment in flight, kept here rather than beside the interim review
+    /// because every way the interview ends reaches this, and the end waits
+    /// briefly for it.
+    pub(super) phase_judge: super::SideCall,
+    /// A round transition held for the phase judge; see
+    /// `defers_round_transition`.
+    pub(super) pending_round_transition: Option<ParkedPacket>,
     /// Fixed when the interview starts, like the review quota.
     pub(super) reply_timeout: Duration,
     /// A tool response went out on this socket and its generation has not come
@@ -506,6 +546,11 @@ impl RuntimeActivity {
             last_interim: now,
             max_interim_reviews,
             interim_reviews: 0,
+            last_phase_judge: None,
+            phase_judges: 0,
+            editor_phase_judges: 0,
+            phase_judge: super::SideCall::default(),
+            pending_round_transition: None,
             reply_timeout: REPLY_TIMEOUT,
         }
     }
@@ -1044,6 +1089,89 @@ impl RuntimeActivity {
             self.interim_reviews += 1;
         }
         due
+    }
+
+    /// Whether to start the phase judge now, stamping its cooldown when so.
+    ///
+    /// Unlike the interim review it does not wait for the floor: it reads what
+    /// was said rather than taking a turn, and a tick that waits for the
+    /// interviewer to finish replying arrives after the reply that should have
+    /// been able to rely on it.
+    pub(super) fn claim_phase_judge(&mut self, state: &RuntimeState, now: Instant) -> bool {
+        if state.paused
+            || state.end_requested
+            || now.saturating_duration_since(self.last_user_speech) < PHASE_JUDGE_IDLE
+            || now.saturating_duration_since(self.last_code_change) < PHASE_JUDGE_IDLE
+        {
+            return false;
+        }
+        let (cooldown, editor_only) = match crate::agent::phase_judge_need(state) {
+            PhaseJudgeDue::No => return false,
+            PhaseJudgeDue::Spoken => (PHASE_JUDGE_COOLDOWN, false),
+            PhaseJudgeDue::EditorOnly => (PHASE_JUDGE_EDITOR_COOLDOWN, true),
+        };
+        let rested = self
+            .last_phase_judge
+            .is_none_or(|at| now.saturating_duration_since(at) >= cooldown);
+        if !rested
+            || (editor_only && self.editor_phase_judges >= MAX_EDITOR_PHASE_JUDGES)
+            || !self.reserve_phase_judge(now)
+        {
+            return false;
+        }
+        if editor_only {
+            self.editor_phase_judges += 1;
+        }
+        true
+    }
+
+    /// Shares the call ceiling with judgments requested by a transition or
+    /// the end, which may skip the idle wait but still spend the same budget.
+    pub(super) fn reserve_phase_judge(&mut self, now: Instant) -> bool {
+        if self.phase_judges >= MAX_PHASE_JUDGES {
+            return false;
+        }
+        self.last_phase_judge = Some(now);
+        self.phase_judges += 1;
+        true
+    }
+
+    /// Whether a held round transition should be applied now: the hold has
+    /// run out, or no judgment is out and nothing said since the last one is
+    /// waiting for one. A judgment that finished on a snapshot older than the
+    /// candidate's latest words does not release it; see
+    /// `held_transition_needs_judgment`.
+    ///
+    /// Never while paused: the transition is refused during a pause, and the
+    /// page, which sent it before the pause, does not send it again, so
+    /// releasing it then would lose the round boundary for good. It waits for
+    /// the first tick after the resume, its deadline long past by then.
+    pub(super) fn parked_transition_ready(&self, state: &RuntimeState, now: Instant) -> bool {
+        !state.paused
+            && self
+                .pending_round_transition
+                .as_ref()
+                .is_some_and(|parked| {
+                    now >= parked.deadline
+                        || (!self.phase_judge.is_running() && !crate::agent::phase_judge_due(state))
+                })
+    }
+
+    /// Whether a held transition needs another judgment started: what the
+    /// candidate said or typed after the last one's snapshot is unjudged, none
+    /// is out, and the hold has time left for it.
+    pub(super) fn held_transition_needs_judgment(
+        &self,
+        state: &RuntimeState,
+        now: Instant,
+    ) -> bool {
+        self.pending_round_transition
+            .as_ref()
+            .is_some_and(|parked| {
+                !self.phase_judge.is_running()
+                    && now < parked.deadline
+                    && crate::agent::phase_judge_due(state)
+            })
     }
 
     /// Not once the end is due either: the interviewer has asked to close, or
