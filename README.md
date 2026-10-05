@@ -43,6 +43,7 @@ the interviewer over its own byte stream on the same data channel, and
 board is attached to the report request, so the reviewer grades the drawing
 rather than an empty editor, and the recording keeps the drawing as the
 strokes that made it, which is what lets the replay redraw any moment of it.
+How to hold one is under [Whiteboard interviews](#whiteboard-interviews).
 
 Audio and code snapshots stay in memory unless [recording](#recording) is
 enabled, which is off by default. Candidate video reaches Gemini only with
@@ -152,6 +153,50 @@ Recording lowers that ceiling to `CODETRIAL_RECORDING_MAX_MINUTES`, and the
 lobby is told the ceiling rather than left to discover it. The rules, and why
 the offered length and the enforced length come from one function, are in
 [docs/interview-length.md](docs/interview-length.md).
+
+## Whiteboard interviews
+
+A whiteboard interview practices the round where there is a marker and a blank
+board instead of an editor. Nothing compiles and no test runs, so the answer is
+what you can draw, say aloud and defend by tracing an example by hand.
+
+1. In the lobby, pick a problem, a length and a loop as usual, then press
+   **Whiteboard** beside **Editor** in the same row. The note under the row
+   confirms the switch. Start the interview and complete the media preflight.
+2. The board takes the place of the editor. It accepts strokes only while the
+   interview is live: not before the room is joined, not while it is paused,
+   and not during the behavioral round of a Coding + behavioral loop.
+3. Draw with the mouse, a stylus or a finger. A tablet with a pen is closest to
+   a real board: while the pen is down, a palm resting on the screen is ignored,
+   and a second finger never joins the first finger's stroke.
+4. Use the toolbar above the board:
+
+   | Control | What it does |
+   |---|---|
+   | Pen colors | Black, red, blue and green. Write in black and mark up in the others. |
+   | Eraser | Rubs out what it passes over. The three size buttons beside it pick a size and the eraser together: small for one character, medium for one line, large for a region. Pick a pen color, or press Eraser again, to draw again. |
+   | Undo, Redo | Step back and forward one stroke or erasure at a time. |
+   | Clear board | Wipes the board in one step, which Undo brings back. |
+
+5. Talk while you draw. Jim hears you live and is sent the whole board a moment
+   after you stop drawing, so pause briefly after a figure you want discussed.
+   When a mark is hard to read, Jim asks what it stands for rather than
+   guessing, and what you said while drawing it is how it gets read.
+6. Follow the checklist, which renames the six steps for the board: Repeat,
+   Example (draw one ordinary case and one edge case), Approach (draw the idea
+   and its cost), Trace (walk an example through the drawing), Edge cases, and
+   Complexity. Pseudocode or a diagram is fine for Approach; Trace is where you
+   prove it, so step through your own example and say what each variable holds.
+7. Clear the board between steps whenever it fills up. The board is captured
+   as each step closes, so a clear costs nothing already graded.
+
+Write large and leave space between figures: the board reaches Jim as an image,
+and small, crowded handwriting is the hardest part of it to read. Say "can I get a hint?" exactly as in an editor interview.
+
+The report opens on the board, step by step: the board as each step closed, its
+score and Jim's notes, then your final board. The work score is named Board work
+and grades the drawing and the trace instead of code. The step images are not
+saved with the report, so a report reopened from history says so in their place.
 
 ## Scoring
 
