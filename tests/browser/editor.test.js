@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 import {
+  matchingBrackets,
   indentNewline,
   indentSelection,
   insertBracketPair,
@@ -13,6 +14,7 @@ import {
   deleteEmptyPair,
 } from "../../web/editor.js";
 import { createSyntaxParser } from "../../web/syntax-parser.js";
+import { tokenize } from "../../web/tokenizer.js";
 
 test("Enter keeps working for an unsupported language", () => {
   for (const language of ["unknown", "constructor", "toString", ""]) {
@@ -758,4 +760,176 @@ test("Backspace elsewhere, or between a mismatched pair, falls through to native
   // A selection is not a collapsed caret between the pair, so it also falls
   // through rather than deleting past what was selected.
   assert.equal(deleteEmptyPair("foo()bar", 3, 4), null);
+});
+
+test("matching brackets finds either side and nested mixed pairs", () => {
+  const code = "{call(items[0])}";
+  for (const [caret, pair] of [
+    [0, [0, 15]],
+    [1, [0, 15]],
+    [15, [0, 15]],
+    [16, [0, 15]],
+    [5, [5, 14]],
+    [6, [5, 14]],
+    [14, [5, 14]],
+    [11, [11, 13]],
+    [12, [11, 13]],
+    [13, [11, 13]],
+  ])
+    assert.deepEqual(matchingBrackets(code, caret, caret, "cpp"), pair);
+  assert.deepEqual(matchingBrackets(")(x)", 1, 1, "cpp"), [1, 3]);
+});
+
+test("matching brackets refuses selections, missing pairs, and crossing pairs", () => {
+  for (const [code, start, end] of [
+    ["(x)", 0, 2],
+    ["text", 2, 2],
+    ["", 0, 0],
+    ["(x", 0, 0],
+    ["x)", 2, 2],
+    ["([)]", 0, 0],
+    ["([)]", 1, 1],
+  ])
+    assert.equal(matchingBrackets(code, start, end, "cpp"), null);
+});
+
+test("matching brackets falls back to the left when the right has no pair", () => {
+  for (const code of ["f(x)]", "f(x)(", "f(x)/*[*/", 'f(x)"["']) {
+    let calls = 0;
+    assert.deepEqual(
+      matchingBrackets(code, 4, 4, "cpp", (value, language) => {
+        calls += 1;
+        return tokenize(value, language);
+      }),
+      [1, 3],
+      code,
+    );
+    assert.equal(calls, 1);
+  }
+  assert.deepEqual(matchingBrackets("(x)[y]", 3, 3, "cpp"), [3, 5]);
+});
+
+test("stray closers preserve enclosing pairs without matching themselves", () => {
+  const code = "class A { void a() { f(x)); } void b() {} }";
+  const caret = code.length - 1;
+  assert.deepEqual(matchingBrackets(code, caret, caret, "java"), [
+    code.indexOf("{"),
+    caret,
+  ]);
+  const stray = code.indexOf("));") + 1;
+  assert.equal(matchingBrackets(code, stray + 1, stray + 1, "java"), null);
+  assert.deepEqual(matchingBrackets("{]}", 2, 2, "cpp"), [0, 2]);
+});
+
+test("unrelated closers do not repeatedly scan all enclosing openers", () => {
+  const code = "(".repeat(12000) + "]".repeat(12000) + ")".repeat(12000);
+  let reads = 0;
+  // Count character reads rather than wall time, so slower CI machines use
+  // the same linear-work bound. Tokenization is outside this check.
+  const value = new Proxy(Object(code), {
+    get(target, key) {
+      if (typeof key === "string" && /^\d+$/.test(key)) {
+        reads += 1;
+        assert.ok(reads <= code.length * 4, "bracket scan must stay linear");
+      }
+      return Reflect.get(target, key);
+    },
+  });
+  const caret = code.length - 1;
+  assert.deepEqual(
+    matchingBrackets(value, caret, caret, "cpp", () => ({
+      tokens: [{ kind: "code", start: 0, end: code.length }],
+    })),
+    [0, caret],
+  );
+});
+
+test("matching brackets ignores comments, strings, and regex literals", () => {
+  for (const [code, language] of [
+    ['("[)]" /* } */ value)', "cpp"],
+    ['(R"tag([)])tag" + value)', "cpp"],
+    ["(value // )\n)", "java"],
+    ["(value # )\n)", "python"],
+    ['("""[)]""" + value)', "python"],
+    ["(/[(]/.test(value))", "javascript"],
+  ]) {
+    assert.deepEqual(
+      matchingBrackets(code, 0, 0, language),
+      [0, code.length - 1],
+      code,
+    );
+  }
+  const code = '"()" /* [] */';
+  for (const caret of [1, 2, 8, 9]) {
+    assert.equal(matchingBrackets(code, caret, caret, "cpp"), null);
+  }
+});
+
+test("matching brackets use parsed regions in complete and unfinished code", async () => {
+  const syntax = createSyntaxParser({
+    loadBytes: async (url) => new Uint8Array(await readFile(url)),
+  });
+  await syntax.prepareLanguage("javascript");
+  for (const code of [
+    "const s = `${(value)}`;",
+    "const s = `${(value)}`; if (ready) {",
+  ]) {
+    const start = code.indexOf("(");
+    assert.deepEqual(
+      matchingBrackets(code, start, start, "javascript", (value, language) =>
+        tokenize(value, language, syntax.parseSyntax),
+      ),
+      [start, code.indexOf(")")],
+    );
+  }
+});
+
+test("parsed Python f-strings match expressions but exclude escaped braces and text", async () => {
+  const syntax = createSyntaxParser({
+    loadBytes: async (url) => new Uint8Array(await readFile(url)),
+  });
+  await syntax.prepareLanguage("python");
+  const getTokens = (value, language) =>
+    tokenize(value, language, syntax.parseSyntax);
+  const adjacent = 'f"{x}("';
+  assert.deepEqual(
+    matchingBrackets(adjacent, 5, 5, "python", getTokens),
+    [2, 4],
+  );
+  for (const code of [
+    'f"{items[0]}"',
+    'f"{{{items[0]}}}"',
+    'f"{items[0]:{width}}"',
+    'f"""text\n{items[0]}\n"""',
+  ]) {
+    const start = code.indexOf("[");
+    assert.deepEqual(
+      matchingBrackets(code, start, start, "python", getTokens),
+      [start, code.indexOf("]")],
+      code,
+    );
+  }
+  const code = 'f"{{ }} {items[0]} literal []"';
+  const start = code.indexOf("{items");
+  assert.deepEqual(matchingBrackets(code, start, start, "python", getTokens), [
+    start,
+    code.indexOf("}", start),
+  ]);
+  for (const caret of [2, 3, 5, 6, code.indexOf("[]")]) {
+    assert.equal(
+      matchingBrackets(code, caret, caret, "python", getTokens),
+      null,
+    );
+  }
+  const formatted = 'f"{value:literal[] {width}}"';
+  const literal = formatted.indexOf("[]");
+  assert.equal(
+    matchingBrackets(formatted, literal, literal, "python", getTokens),
+    null,
+  );
+  const width = formatted.indexOf("{width");
+  assert.deepEqual(
+    matchingBrackets(formatted, width, width, "python", getTokens),
+    [width, formatted.indexOf("}", width)],
+  );
 });

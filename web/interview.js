@@ -10,6 +10,7 @@ import {
 } from "./audio-check.js";
 import { highlight } from "./highlight.js";
 import { prepareLanguage } from "./syntax-parser.js";
+import { tokenize } from "./tokenizer.js";
 import {
   indentNewline,
   indentSelection,
@@ -19,6 +20,7 @@ import {
   typeOverCloser,
   isBackspaceKeystroke,
   deleteEmptyPair,
+  matchingBrackets,
 } from "./editor.js";
 import { createDevicePool } from "./devices.js";
 import { createFaceCheck } from "./face-check.js";
@@ -157,6 +159,10 @@ let pendingLanguagePublish = null;
 /// promise nobody saw: `bindEvents` never ran, and the audio check sat on a
 /// disabled button until the browser test timed out.
 let paintedLineCount = 0;
+let paintedEditor = null;
+// Keep only the current buffer's ranges; caret-only repaints need no parse.
+let editorTokenCache = null;
+let editorPaintFrame = null;
 // The agent reads the editor once per 2s watch tick, so publishing every
 // keystroke sends ~10x more full-buffer packets than anyone consumes.
 const CODE_PUBLISH_DEBOUNCE_MS = 300;
@@ -682,6 +688,11 @@ function bindEvents() {
     nodes.editorHighlight.scrollLeft = nodes.editor.scrollLeft;
     nodes.editorLines.scrollTop = nodes.editor.scrollTop;
   });
+  document.addEventListener("selectionchange", () => {
+    if (document.activeElement === nodes.editor) scheduleEditorPaint();
+  });
+  nodes.editor.addEventListener("focus", () => paintEditor());
+  nodes.editor.addEventListener("blur", () => paintEditor(false));
   // Tab indents, so it cannot also move focus. Escape arms the next Tab to do
   // that instead, or a candidate driving the page from the keyboard is stuck
   // in the textarea with no way out.
@@ -772,7 +783,7 @@ function bindEvents() {
     // the one the candidate stayed on.
     flushPendingLanguagePublish();
     state.codeByLanguage[state.language] = nodes.editor.value;
-    paintEditor();
+    scheduleEditorPaint();
     clearTimeout(codePublishTimer);
     // The flush itself, not a copy of its publish. The copy sent the edit and
     // left it out of the editor replay, so only an edit some flush overtook
@@ -1779,7 +1790,14 @@ function applyLanguages(spec) {
 function setLanguage(language) {
   if (state.phase === "report_recovery" || state.phase === "report") return;
   if (!languages.includes(language)) return;
-  void prepareLanguage(language).catch(() => {});
+  void prepareLanguage(language)
+    .then(() => {
+      if (state.language !== language) return;
+      // Replace fallback ranges when the grammar finishes loading.
+      editorTokenCache = null;
+      paintEditor();
+    })
+    .catch(() => {});
   if (editorInitialized) {
     // A switch is a coalescer boundary. Flush the old tab before selecting the
     // new one so a quick click cannot replace an unreported edit with the new
@@ -2975,21 +2993,61 @@ function setAgentStateLabel(label, ready = false) {
   nodes.agentState.closest(".agent-pill")?.classList.toggle("ready", ready);
 }
 
+function editorTokens(code, language) {
+  if (
+    editorTokenCache?.code !== code ||
+    editorTokenCache?.language !== language
+  ) {
+    editorTokenCache = { code, language, ...tokenize(code, language) };
+  }
+  return editorTokenCache;
+}
+
+// Input and selectionchange can arrive in the same frame. Read the latest
+// buffer once at paint time, rather than parse every intermediate edit.
+function scheduleEditorPaint() {
+  if (editorPaintFrame !== null) return;
+  editorPaintFrame = requestAnimationFrame(() => {
+    editorPaintFrame = null;
+    paintEditor();
+  });
+}
+
 /// Repaints the syntax layer and the gutter behind the textarea.
 ///
 /// One read of the buffer rather than two, and the gutter is rebuilt only when
 /// the line count actually moves. Typing inside a line is most of what a
 /// candidate does and none of it changes the numbers down the side.
 ///
-/// The highlight pass above it is unconditional and is the larger cost: a
-/// full-buffer regex and an `innerHTML` assignment per keystroke. Coalescing
-/// the whole repaint onto `requestAnimationFrame` is what would fix that, and
-/// it would change when the paint lands, so it is not folded in here.
-function paintEditor() {
+function paintEditor(showMatch = document.activeElement === nodes.editor) {
+  // Focus, blur and language switches paint immediately and supersede queued
+  // input, so a stale callback cannot repaint after focus leaves the editor.
+  if (editorPaintFrame !== null) {
+    cancelAnimationFrame(editorPaintFrame);
+    editorPaintFrame = null;
+  }
   const code = currentCode();
+  const brackets = showMatch
+    ? matchingBrackets(
+        code,
+        nodes.editor.selectionStart,
+        nodes.editor.selectionEnd,
+        state.language,
+        editorTokens,
+      )
+    : null;
+  if (
+    paintedEditor?.code === code &&
+    paintedEditor.language === state.language &&
+    paintedEditor.brackets?.[0] === brackets?.[0] &&
+    paintedEditor.brackets?.[1] === brackets?.[1]
+  )
+    return;
+  paintedEditor = { code, language: state.language, brackets };
   nodes.editorHighlight.firstElementChild.innerHTML = highlight(
     code,
     state.language,
+    brackets,
   );
   const lines = code.split("\n").length;
   if (lines !== paintedLineCount) {

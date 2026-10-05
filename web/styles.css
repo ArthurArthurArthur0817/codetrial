@@ -978,6 +978,11 @@ p {
   color: #569cd6;
 }
 
+.matching-bracket {
+  background: #264f78;
+  outline: 1px solid #a6cfff;
+}
+
 .test-drawer {
   border-top: 1px solid var(--hairline);
   background: var(--surface);

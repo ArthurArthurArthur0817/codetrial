@@ -29,12 +29,13 @@ after(async () => {
 /// A page on the interview screen with an empty editor, no room joined. The
 /// editor is enabled as soon as bindEvents runs; nothing under test needs a
 /// live session, so this never waits on one.
-async function editorPage(t) {
+async function editorPage(t, configure = async () => {}) {
   if (!browser) {
     t.skip("playwright chromium unavailable");
     return null;
   }
   const page = await browser.newPage();
+  await configure(page);
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto(`${base}/interview.html?problem=chargeback-pair-match`, {
@@ -177,6 +178,283 @@ test("the highlight overlay resolves the textarea's font metrics, in a real brow
     );
     assert.deepEqual(overlay, editor);
   } finally {
+    await page.close();
+  }
+});
+
+test("matching brackets follow the caret without editing or losing undo", async (t) => {
+  const ctx = await editorPage(t);
+  if (!ctx) return;
+  const { page, errors } = ctx;
+  const marks = page.locator("#editor-highlight .matching-bracket");
+  try {
+    await page.keyboard.type("(");
+    await marks.first().waitFor();
+    assert.deepEqual(await marks.allTextContents(), ["(", ")"]);
+    await page.keyboard.insertText("value");
+    await page.keyboard.press("Home");
+    await page.waitForFunction(
+      () => document.querySelectorAll(".matching-bracket").length === 2,
+    );
+    assert.deepEqual(await caretState(page), {
+      value: "(value)",
+      start: 0,
+      end: 0,
+    });
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("ArrowRight");
+    await page.waitForFunction(
+      () => document.querySelectorAll(".matching-bracket").length === 0,
+    );
+    assert.deepEqual(await caretState(page), {
+      value: "(value)",
+      start: 2,
+      end: 2,
+    });
+    await page.evaluate(() =>
+      document.querySelector("#editor").setSelectionRange(0, 7),
+    );
+    await page.waitForFunction(
+      () => document.querySelectorAll(".matching-bracket").length === 0,
+    );
+    await page.keyboard.press("ControlOrMeta+Z");
+    assert.equal((await caretState(page)).value, "()");
+    await page.evaluate(() =>
+      document.querySelector("#editor").setSelectionRange(0, 0),
+    );
+    await page.waitForFunction(
+      () => document.querySelectorAll(".matching-bracket").length === 2,
+    );
+    await page.evaluate(() => document.querySelector("#editor").blur());
+    await page.waitForFunction(
+      () => document.querySelectorAll(".matching-bracket").length === 0,
+    );
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+});
+
+test("nested matching ignores quoted brackets and tracks programmatic selection", async (t) => {
+  const ctx = await editorPage(t);
+  if (!ctx) return;
+  const { page, errors } = ctx;
+  const code = '{ call("}", items[0]); /* ] */ }';
+  try {
+    await page.evaluate(() => {
+      document.querySelector('[data-language="javascript"]').click();
+      document.querySelector("#editor").focus();
+    });
+    await page.keyboard.press("ControlOrMeta+A");
+    await page.keyboard.press("Delete");
+    await page.keyboard.insertText(code);
+    await page.evaluate(() =>
+      document.querySelector("#editor").setSelectionRange(0, 0),
+    );
+    await page.waitForFunction(
+      () => document.querySelectorAll(".matching-bracket").length === 2,
+    );
+    assert.deepEqual(
+      await page.locator(".matching-bracket").allTextContents(),
+      ["{", "}"],
+    );
+    await page.evaluate(() => {
+      const editor = document.querySelector("#editor");
+      const position = editor.value.indexOf("[");
+      editor.setSelectionRange(position, position);
+    });
+    await page.waitForFunction(
+      () => document.querySelector(".matching-bracket")?.textContent === "[",
+    );
+    assert.deepEqual(
+      await page.locator(".matching-bracket").allTextContents(),
+      ["[", "]"],
+    );
+    await page.evaluate(() =>
+      document.querySelector("#editor").setSelectionRange(8, 8),
+    );
+    await page.waitForFunction(
+      () => document.querySelectorAll(".matching-bracket").length === 0,
+    );
+    assert.equal((await caretState(page)).value, code);
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+});
+
+test("blur clears matching brackets before activeElement changes", async (t) => {
+  const ctx = await editorPage(t);
+  if (!ctx) return;
+  const { page, errors } = ctx;
+  try {
+    await page.keyboard.type("(");
+    await page.locator(".matching-bracket").first().waitFor();
+    const state = await page.evaluate(() => {
+      const editor = document.querySelector("#editor");
+      // Reproduce browsers that dispatch blur before updating activeElement.
+      editor.dispatchEvent(new FocusEvent("blur"));
+      return {
+        stillActive: document.activeElement === editor,
+        marks: document.querySelectorAll(".matching-bracket").length,
+      };
+    });
+    assert.deepEqual(state, { stillActive: true, marks: 0 });
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+});
+
+test("caret and focus changes reuse ranges until code or language changes", async (t) => {
+  const ctx = await editorPage(t, async (page) => {
+    await page.route("**/tokenizer.js", async (route) => {
+      const response = await route.fetch();
+      const source = await response.text();
+      const declaration =
+        "export function tokenize(code, language, parse = parseSyntax) {";
+      assert.ok(source.includes(declaration));
+      await route.fulfill({
+        response,
+        body: source.replace(
+          declaration,
+          declaration +
+            "\n(window.tokenizations ??= []).push({code, language});",
+        ),
+      });
+    });
+  });
+  if (!ctx) return;
+  const { page, errors } = ctx;
+  try {
+    await page.evaluate(async () => {
+      document.querySelector('[data-language="javascript"]').click();
+      await (await import("/syntax-parser.js")).prepareLanguage("javascript");
+      document.querySelector("#editor").focus();
+    });
+    await page.keyboard.press("ControlOrMeta+A");
+    await page.keyboard.insertText("(value)");
+    await page.locator(".matching-bracket").first().waitFor();
+    await page.evaluate(() => {
+      window.overlayPaints = 0;
+      new MutationObserver((records) => {
+        window.overlayPaints += records.length;
+      }).observe(document.querySelector("#editor-highlight code"), {
+        childList: true,
+      });
+    });
+    await page.keyboard.press("Home");
+    await page.keyboard.press("End");
+    await page.evaluate(() => new Promise(requestAnimationFrame));
+    assert.equal(await page.evaluate(() => window.overlayPaints), 0);
+    await page.evaluate(() => {
+      const editor = document.querySelector("#editor");
+      editor.blur();
+      editor.focus();
+    });
+    await page.keyboard.press("ControlOrMeta+A");
+    await page.evaluate(() => {
+      window.overlayPaints = 0;
+    });
+    await page.keyboard.insertText("(other)");
+    await page.locator(".matching-bracket").first().waitFor();
+    await page.evaluate(() => new Promise(requestAnimationFrame));
+    assert.equal(await page.evaluate(() => window.overlayPaints), 1);
+    await page.evaluate(async () => {
+      document.querySelector('[data-language="python"]').click();
+      await (await import("/syntax-parser.js")).prepareLanguage("python");
+      document.querySelector("#editor").focus();
+    });
+    await page.keyboard.press("ControlOrMeta+A");
+    await page.keyboard.insertText("(other)");
+    await page.locator(".matching-bracket").first().waitFor();
+    assert.deepEqual(
+      await page.evaluate(() =>
+        window.tokenizations.filter(({ code }) =>
+          ["(value)", "(other)"].includes(code),
+        ),
+      ),
+      [
+        { code: "(value)", language: "javascript" },
+        { code: "(other)", language: "javascript" },
+        { code: "(other)", language: "python" },
+      ],
+    );
+    const burst = await page.evaluate(async () => {
+      const editor = document.querySelector("#editor");
+      window.tokenizations = [];
+      window.overlayPaints = 0;
+      for (const code of ["(first)", "(second)", "(latest)"]) {
+        editor.value = code;
+        editor.setSelectionRange(code.length - 1, code.length - 1);
+        editor.dispatchEvent(new Event("input", { bubbles: true }));
+        document.dispatchEvent(new Event("selectionchange"));
+      }
+      const synchronousParses = window.tokenizations.length;
+      await new Promise(requestAnimationFrame);
+      return {
+        synchronousParses,
+        tokenizations: window.tokenizations,
+        paints: window.overlayPaints,
+        text: document.querySelector("#editor-highlight code").textContent,
+        marks: [...document.querySelectorAll(".matching-bracket")].map(
+          (node) => node.textContent,
+        ),
+        value: editor.value,
+        caret: editor.selectionStart,
+      };
+    });
+    assert.deepEqual(burst, {
+      synchronousParses: 0,
+      tokenizations: [{ code: "(latest)", language: "python" }],
+      paints: 1,
+      text: "(latest)",
+      marks: ["(", ")"],
+      value: "(latest)",
+      caret: 7,
+    });
+    assert.deepEqual(errors, []);
+  } finally {
+    await page.close();
+  }
+});
+
+test("a loaded grammar replaces cached fallback ranges without an edit", async (t) => {
+  let releaseGrammar;
+  const grammarReady = new Promise((resolve) => {
+    releaseGrammar = resolve;
+  });
+  const ctx = await editorPage(t, async (page) => {
+    await page.route("**/tree-sitter-javascript.wasm", async (route) => {
+      await grammarReady;
+      await route.continue();
+    });
+  });
+  if (!ctx) return;
+  const { page, errors } = ctx;
+  const code = "function f() {} /[()]/.test(value);";
+  try {
+    await page.evaluate(() => {
+      document.querySelector('[data-language="javascript"]').click();
+      document.querySelector("#editor").focus();
+    });
+    await page.keyboard.press("ControlOrMeta+A");
+    await page.keyboard.insertText(code);
+    await page.evaluate(() => {
+      const editor = document.querySelector("#editor");
+      const position = editor.value.indexOf("[()") + 1;
+      editor.setSelectionRange(position, position);
+    });
+    // The fallback treats the slash after a declaration as division.
+    await page.locator(".matching-bracket").first().waitFor();
+    releaseGrammar();
+    await page.waitForFunction(
+      () => document.querySelectorAll(".matching-bracket").length === 0,
+    );
+    assert.equal((await caretState(page)).value, code);
+    assert.deepEqual(errors, []);
+  } finally {
+    releaseGrammar();
     await page.close();
   }
 });

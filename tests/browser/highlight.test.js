@@ -178,3 +178,20 @@ test("an unknown language falls back instead of throwing", () => {
   assert.match(html, /tok-keyword/);
   roundTrips("const x = 1;", "brainfuck");
 });
+
+test("matching bracket spans preserve escaping, syntax colors, and newlines", () => {
+  const code = '(value < 2 && "<script>")\n';
+  const html = highlight(code, "cpp", [0, code.indexOf(")")]);
+  assert.equal((html.match(/class="matching-bracket"/g) || []).length, 2);
+  assert.match(html, /class="tok-string"/);
+  assert.match(html, /&lt;script&gt;/);
+  assert.equal(textOf(html), code + "\n");
+  assert.equal(highlight(code, "cpp", null), highlight(code, "cpp"));
+});
+
+test("matching brackets remain visible inside template interpolation", () => {
+  const code = "`value: ${(value)}`";
+  const html = highlight(code, "javascript", [10, 16]);
+  assert.equal((html.match(/class="matching-bracket"/g) || []).length, 2);
+  assert.equal(textOf(html), code);
+});
