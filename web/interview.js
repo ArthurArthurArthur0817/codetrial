@@ -651,7 +651,8 @@ function bindEvents() {
   nodes.transcriptTab.addEventListener("click", () => selectTab("transcript"));
   nodes.mic.addEventListener("click", toggleMicrophone);
   // A candidate whose machine or network interrupts them still needs a way to
-  // stop the clock, and the pause is recorded so the gap is visible in the
+  // stop the interviewer talking into an empty room. The deadline keeps running
+  // (see tickTimer), and the pause is recorded so the gap is visible in the
   // report rather than passing as thinking time.
   nodes.pause.hidden = false;
   nodes.pause.addEventListener("click", togglePause);

@@ -836,6 +836,133 @@ fn browser_check_loads_credentials_for_external_rust_server() {
     );
 }
 
+/// Runs browser-check.sh against stubbed cargo, curl and node, and returns
+/// its output, the order the stubs were called in, and the build line the
+/// script should have issued.
+#[cfg(unix)]
+fn run_browser_check_with_stub_cargo(build_fails: bool) -> (std::process::Output, String, String) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = unique_temp_path("browser-check-build", "");
+    let scripts = root.join("scripts");
+    let bin = root.join("bin");
+    fs::create_dir_all(&scripts).unwrap();
+    fs::create_dir_all(&bin).unwrap();
+    fs::copy("scripts/browser-check.sh", scripts.join("browser-check.sh")).unwrap();
+    fs::copy(
+        "scripts/session-cookie.sh",
+        scripts.join("session-cookie.sh"),
+    )
+    .unwrap();
+
+    for (path, source) in [
+        (scripts.join("fetch-vendor.sh"), "#!/bin/sh\nexit 0\n"),
+        (
+            bin.join("cargo"),
+            r#"#!/bin/sh
+echo "$*" >> "$CHECK_ROOT/events"
+if [ "$1" = build ] && [ "${BUILD_FAILS:-}" ]; then
+    echo compiler-failed >&2
+    exit 42
+fi
+"#,
+        ),
+        // Ready once the server has been launched, which under `set -e` means
+        // the build before it succeeded.
+        (
+            bin.join("curl"),
+            "#!/bin/sh\necho curl >> \"$CHECK_ROOT/events\"\ngrep -q '^run ' \"$CHECK_ROOT/events\"\n",
+        ),
+        (
+            bin.join("node"),
+            "#!/bin/sh\necho driver >> \"$CHECK_ROOT/events\"\n",
+        ),
+    ] {
+        fs::write(&path, source).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    let mut command = Command::new("sh");
+    command
+        .arg(scripts.join("browser-check.sh"))
+        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+        .env("CHECK_ROOT", &root)
+        .env("BROWSER_CHECK_AGENT", "home")
+        .env("BROWSER_CHECK_FLOW", "avatar")
+        .env("BROWSER_CHECK_SESSION_COOKIE", "codetrial_session=test")
+        .env("PLAYWRIGHT_PATH", "stub")
+        .env("PORT", "3100")
+        .env_remove("CODETRIAL_WEB_URL");
+    if build_fails {
+        command.env("BUILD_FAILS", "1");
+    }
+    let output = command.output().unwrap();
+    let events = fs::read_to_string(root.join("events")).unwrap_or_default();
+
+    // The same target `cargo run` launches, so the launch has nothing left to
+    // compile inside the readiness deadline.
+    let build = format!(
+        "build --manifest-path {}/Cargo.toml --bin codetrial\n",
+        root.display()
+    );
+    fs::remove_dir_all(root).unwrap();
+    (output, events, build)
+}
+
+#[test]
+#[cfg(unix)]
+fn browser_check_builds_before_waiting_for_server() {
+    let (output, events, build) = run_browser_check_with_stub_cargo(false);
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(events.starts_with(&build), "{events}");
+    assert!(events.contains("\nrun "), "{events}");
+    assert!(events.contains("driver\n"), "{events}");
+}
+
+#[test]
+#[cfg(unix)]
+fn browser_check_stops_on_a_failed_build() {
+    let (output, events, build) = run_browser_check_with_stub_cargo(true);
+
+    assert_eq!(output.status.code(), Some(42), "{output:?}");
+    assert_eq!(events, build);
+    assert!(String::from_utf8_lossy(&output.stderr).contains("compiler-failed"));
+}
+
+#[test]
+#[cfg(unix)]
+fn browser_check_rejects_unknown_agent_before_building() {
+    use std::os::unix::fs::PermissionsExt;
+
+    // A cargo that records being called, so the test fails if the build ever
+    // moves ahead of the refusal. The env-only flag keeps a refusal that went
+    // missing from going on to fetch, build and launch for real.
+    let bin = unique_temp_path("browser-check-agent", "");
+    fs::create_dir_all(&bin).unwrap();
+    let cargo = bin.join("cargo");
+    fs::write(&cargo, "#!/bin/sh\ntouch \"$(dirname \"$0\")/called\"\n").unwrap();
+    fs::set_permissions(&cargo, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let output = Command::new("sh")
+        .arg("scripts/browser-check.sh")
+        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+        .env("BROWSER_CHECK_AGENT", "bogus")
+        .env("BROWSER_CHECK_FLOW", "avatar")
+        .env("BROWSER_CHECK_VALIDATE_ENV_ONLY", "1")
+        .output()
+        .expect("browser check should run");
+    let built = bin.join("called").exists();
+    fs::remove_dir_all(bin).unwrap();
+
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("BROWSER_CHECK_AGENT must be"));
+    assert!(
+        !built,
+        "an unknown agent should be refused before cargo runs"
+    );
+}
+
 #[test]
 fn browser_check_prints_server_log_on_node_failure() {
     let script = fs::read_to_string("scripts/browser-check.sh").unwrap();
