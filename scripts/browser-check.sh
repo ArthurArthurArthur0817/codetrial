@@ -6,10 +6,10 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 BROWSER_CHECK_AGENT=${BROWSER_CHECK_AGENT:-home}
 
 # Flows: voice (default), report, barge, avatar, soak. `avatar` is dispatched
-# before the agent mode, so it needs no credentials and ignores
-# BROWSER_CHECK_AGENT. `soak` is the long-conversation acceptance: it holds one
-# interview past the Live API's connection cap and judges the handover onto a
-# new socket, so it is the one flow whose duration is worth naming.
+# before the agent mode, so it needs no credentials and runs the same under any
+# valid BROWSER_CHECK_AGENT. `soak` is the long-conversation acceptance: it
+# holds one interview past the Live API's connection cap and judges the handover
+# onto a new socket, so it is the one flow whose duration is worth naming.
 BROWSER_CHECK_FLOW=${BROWSER_CHECK_FLOW:-voice}
 case $BROWSER_CHECK_FLOW in
     voice | report | barge | avatar | soak) ;;
@@ -136,6 +136,10 @@ case $BROWSER_CHECK_AGENT in
                 "$LIVEKIT_URL" "$LIVEKIT_API_KEY" "$LIVEKIT_API_SECRET" "$GOOGLE_API_KEY" > "$CONFIG_PATH"
         fi
         ;;
+    *)
+        echo "BROWSER_CHECK_AGENT must be home, offline, rust, or dispatch." >&2
+        exit 2
+        ;;
 esac
 
 if [ "${BROWSER_CHECK_VALIDATE_ENV_ONLY:-}" ]; then
@@ -169,9 +173,31 @@ if [ -z "$PLAYWRIGHT_PATH" ]; then
     exit 3
 fi
 
+# Ahead of the build, so a barge run on a machine that cannot make its audio is
+# refused before it spends a cold compile.
+if [ "$BROWSER_CHECK_FLOW" = "barge" ] && [ -z "$BARGE_AUDIO_FILE" ]; then
+    if ! command -v say > /dev/null 2>&1 || ! command -v ffmpeg > /dev/null 2>&1; then
+        echo "BROWSER_CHECK_FLOW=barge requires BROWSER_CHECK_BARGE_AUDIO_FILE, or macOS say plus ffmpeg." >&2
+        exit 2
+    fi
+    say -o "$TMP/barge.aiff" "I need to interrupt now. I am still here. Please stop and listen."
+    ffmpeg -hide_banner -loglevel error \
+        -f lavfi -t 6 -i anullsrc=r=48000:cl=mono \
+        -i "$TMP/barge.aiff" \
+        -filter_complex "[0:a][1:a]concat=n=2:v=0:a=1,apad=pad_dur=15" \
+        -ar 48000 -ac 1 "$TMP/barge.wav"
+    BARGE_AUDIO_FILE="$TMP/barge.wav"
+fi
+
 if [ "${CODETRIAL_WEB_URL:-}" ]; then
     BASE_URL=${CODETRIAL_WEB_URL%/}
 else
+
+    # A cold build can take minutes. Keep it outside the server's readiness
+    # deadline, and ahead of choosing a port that could be taken meanwhile, so
+    # compiler errors reach the caller before anything is launched.
+    cargo build --manifest-path "$ROOT/Cargo.toml" --bin codetrial
+
     PORT=${PORT:-}
     if [ -z "$PORT" ]; then
         PORT=$(node -e "const s=require('net').createServer();s.listen(0,'127.0.0.1',()=>{console.log(s.address().port);s.close();});")
@@ -212,32 +238,18 @@ else
                 cargo run --quiet --manifest-path "$ROOT/Cargo.toml" -- web --config "$CONFIG_PATH" --web-addr "127.0.0.1:$PORT" --web-dir "$ROOT/web" \
                 > "$SERVER_LOG" 2>&1 &
             ;;
-        *)
-            echo "BROWSER_CHECK_AGENT must be home, offline, rust, or dispatch." >&2
-            exit 2
-            ;;
     esac
     SERVER_PID=$!
-fi
-
-if [ "$BROWSER_CHECK_FLOW" = "barge" ] && [ -z "$BARGE_AUDIO_FILE" ]; then
-    if ! command -v say > /dev/null 2>&1 || ! command -v ffmpeg > /dev/null 2>&1; then
-        echo "BROWSER_CHECK_FLOW=barge requires BROWSER_CHECK_BARGE_AUDIO_FILE, or macOS say plus ffmpeg." >&2
-        exit 2
-    fi
-    say -o "$TMP/barge.aiff" "I need to interrupt now. I am still here. Please stop and listen."
-    ffmpeg -hide_banner -loglevel error \
-        -f lavfi -t 6 -i anullsrc=r=48000:cl=mono \
-        -i "$TMP/barge.aiff" \
-        -filter_complex "[0:a][1:a]concat=n=2:v=0:a=1,apad=pad_dur=15" \
-        -ar 48000 -ac 1 "$TMP/barge.wav"
-    BARGE_AUDIO_FILE="$TMP/barge.wav"
 fi
 
 i=0
 until curl -fsS "$BASE_URL" > /dev/null 2>&1; do
     i=$((i + 1))
     if [ "$i" -gt 60 ]; then
+
+        # A server that is still starting under `cargo run --quiet` has written
+        # nothing yet, and a bare exit 1 is all CI showed when one ran out.
+        echo "$BASE_URL did not answer within 60 seconds." >&2
         if [ -s "$SERVER_LOG" ]; then
             cat "$SERVER_LOG" >&2
         fi

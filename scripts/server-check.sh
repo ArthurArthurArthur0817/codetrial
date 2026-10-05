@@ -32,6 +32,12 @@ trap cleanup EXIT INT TERM
 if [ "${CODETRIAL_WEB_URL:-}" ]; then
     BASE_URL=${CODETRIAL_WEB_URL%/}
 else
+
+    # A cold build can take minutes. Keep it outside the server's readiness
+    # deadline, and ahead of choosing a port that could be taken meanwhile, so
+    # compiler errors reach the caller before anything is launched.
+    cargo build --manifest-path "$ROOT/Cargo.toml" --bin codetrial
+
     PORT=${PORT:-}
     if [ -z "$PORT" ]; then
         PORT=$(node -e "const s=require('net').createServer();s.listen(0,'127.0.0.1',()=>{console.log(s.address().port);s.close();});")
@@ -55,6 +61,7 @@ i=0
 while ! curl -fsS "$BASE_URL" > "$TMP/home.html" 2> /dev/null; do
     i=$((i + 1))
     if [ "$i" -gt 60 ]; then
+        echo "$BASE_URL did not answer within 60 seconds." >&2
         if [ -s "$SERVER_LOG" ]; then
             cat "$SERVER_LOG" >&2
         fi

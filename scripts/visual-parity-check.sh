@@ -39,6 +39,11 @@ if [ -z "$PLAYWRIGHT_PATH" ]; then
     exit 1
 fi
 
+# A cold build can take minutes. Keep it outside the server's readiness
+# deadline, and ahead of choosing a port that could be taken meanwhile, so
+# compiler errors reach the caller before anything is launched.
+cargo build --manifest-path "$ROOT/Cargo.toml" --bin codetrial
+
 PORT=${PORT:-}
 if [ -z "$PORT" ]; then
     PORT=$(node -e "const s=require('net').createServer();s.listen(0,'127.0.0.1',()=>{console.log(s.address().port);s.close();});")
@@ -63,6 +68,7 @@ i=0
 until curl -fsS "$BASE_URL" > /dev/null 2>&1; do
     i=$((i + 1))
     if [ "$i" -gt 90 ]; then
+        echo "$BASE_URL did not answer within 90 seconds." >&2
         cat "$SERVER_LOG" >&2
         exit 1
     fi
