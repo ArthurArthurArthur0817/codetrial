@@ -11,7 +11,7 @@
 
 use std::time::Duration;
 
-use crate::config::AgentConfig;
+use crate::config::{AgentConfig, livekit_http_base};
 use crate::token::livekit_room_admin_token;
 
 use super::DUPLICATE_AGENT_ISOLATION_ATTEMPTS;
@@ -197,31 +197,6 @@ pub(crate) async fn validate_livekit_credentials(
     Err(format!(
         "LiveKit ListRooms failed: {status} {reason}{ellipsis}"
     ))
-}
-
-/// The RoomService origin for a LiveKit URL: the same host, over the scheme an
-/// HTTP client will send.
-///
-/// The rewrite goes through `livekit_scheme` rather than matching the two
-/// websocket schemes here, because `validate_livekit_url` accepts a scheme in
-/// any case and this has to rewrite every spelling that accepts. A pasted
-/// `WSS://` used to survive unchanged, and reqwest refuses any scheme but http
-/// and https before the request leaves the process, so credentials that were
-/// good came back as credentials that did not work.
-///
-/// The query and the fragment come off, because the Twirp path is appended
-/// to what this returns and validation accepts both. A configured
-/// `?region=eu` took the method name into the query rather than to the
-/// service. The path itself is kept: a LiveKit behind a reverse proxy at
-/// `https://host/livekit` serves RoomService under that prefix.
-fn livekit_http_base(url: &str) -> String {
-    let trimmed = url.trim();
-    let trimmed = trimmed.split(['?', '#']).next().unwrap_or(trimmed);
-    let trimmed = trimmed.trim_end_matches('/');
-    match crate::config::livekit_scheme(trimmed) {
-        Some((scheme, _, http)) => format!("{http}{}", &trimmed[scheme.len()..]),
-        None => trimmed.to_string(),
-    }
 }
 
 fn parse_room_service_response(
