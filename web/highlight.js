@@ -274,16 +274,27 @@ function languageSpec(language) {
 
 /// Returns HTML for `code`. Every branch escapes, so candidate code can never
 /// introduce markup into the page.
-export function highlight(code, language) {
+export function highlight(code, language, brackets = []) {
   const spec = languageSpec(language);
   const regex = pattern(spec);
   regex.lastIndex = 0;
 
+  const renderSlice = (start, end) => {
+    let text = "";
+    for (const index of brackets ?? []) {
+      if (index < start || index >= end) continue;
+      text += escapeHtml(code.slice(start, index));
+      text += `<span class="matching-bracket">${escapeHtml(code[index])}</span>`;
+      start = index + 1;
+    }
+    return text + escapeHtml(code.slice(start, end));
+  };
+
   let html = "";
   let last = 0;
   for (const match of code.matchAll(regex)) {
-    html += escapeHtml(code.slice(last, match.index));
-    const text = escapeHtml(match[0]);
+    html += renderSlice(last, match.index);
+    const text = renderSlice(match.index, match.index + match[0].length);
     const { comment, string, number, identifier } = match.groups;
     if (comment !== undefined) {
       html += `<span class="tok-comment">${text}</span>`;
@@ -300,7 +311,7 @@ export function highlight(code, language) {
     }
     last = match.index + match[0].length;
   }
-  html += escapeHtml(code.slice(last));
+  html += renderSlice(last, code.length);
 
   // A trailing newline would otherwise collapse, leaving the last line of the
   // overlay one row above the textarea's caret.

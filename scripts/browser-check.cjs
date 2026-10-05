@@ -291,6 +291,13 @@ async function checkEditorNewlines(page) {
       { value: expected, start: caret, end: caret },
       name,
     );
+    // Input paints on the next animation frame, so read the overlay only
+    // after it reflects the edit. This still times out if rendering breaks.
+    await page.waitForFunction(
+      (text) =>
+        document.querySelector("#editor-highlight code").textContent === text,
+      expected,
+    );
     assert.equal(
       await page.locator("#editor-highlight code").textContent(),
       expected,

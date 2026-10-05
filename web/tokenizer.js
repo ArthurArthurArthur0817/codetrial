@@ -1,11 +1,17 @@
 import { parseSyntax } from "./syntax-parser.js";
 
 const SYNTAX_REGIONS = {
-  python: { strings: new Set(["string"]) },
+  python: {
+    strings: new Set(["string"]),
+    templates: {
+      string: "interpolation",
+      format_specifier: "format_expression",
+    },
+  },
   javascript: {
     strings: new Set(["string"]),
     regexp: "regex",
-    template: "template_string",
+    templates: { template_string: "template_substitution" },
     comments: new Set(["comment", "html_comment", "hash_bang_line"]),
   },
   c: { strings: new Set(["string_literal", "char_literal"]) },
@@ -475,27 +481,21 @@ function syntaxRegions(language, root) {
         end: node.endIndex,
         kind: "comment",
       });
-    } else if (rules.strings.has(node.type)) {
-      regions.push({
-        start: node.startIndex,
-        end: node.endIndex,
-        kind: "string",
-      });
-    } else if (node.type === rules.regexp) {
-      regions.push({
-        start: node.startIndex,
-        end: node.endIndex,
-        kind: "regexp",
-      });
-    } else if (node.type === rules.template) {
+    } else if (rules.templates && Object.hasOwn(rules.templates, node.type)) {
       let start = node.startIndex;
       for (const child of node.namedChildren) {
-        if (child.type !== "template_substitution") continue;
+        if (child.type !== rules.templates[node.type]) continue;
         regions.push({ start, end: child.startIndex, kind: "string" });
         visit(child);
         start = child.endIndex;
       }
       regions.push({ start, end: node.endIndex, kind: "string" });
+    } else if (rules.strings.has(node.type) || node.type === rules.regexp) {
+      regions.push({
+        start: node.startIndex,
+        end: node.endIndex,
+        kind: node.type === rules.regexp ? "regexp" : "string",
+      });
     } else {
       for (const child of node.namedChildren) visit(child);
     }

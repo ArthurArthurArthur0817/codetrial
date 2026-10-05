@@ -322,6 +322,23 @@ test("existing highlighted quotes and comments are classified in every language"
   }
 });
 
+test("Python f-string interpolations are code while doubled braces stay text", () => {
+  assert.deepEqual(parts('f"{{literal}} {items[0]}"', "python").parts, [
+    ["string", 'f"{{literal}} '],
+    ["code", "{items[0]}"],
+    ["string", '"'],
+  ]);
+  assert.deepEqual(parts('f"{{items[0]}}"', "python").parts, [
+    ["string", 'f"{{items[0]}}"'],
+  ]);
+  const code = `f"{items['[']}"`;
+  assert.ok(
+    parts(code, "python").parts.some(
+      ([kind, text]) => kind === "string" && text === "'['",
+    ),
+  );
+});
+
 test("constructs from another language stay ordinary code", () => {
   for (const [language, code] of [
     ["python", "/* marker */"],

@@ -51,6 +51,50 @@ export function indentNewline(value, start, end, language, parse) {
 
 const BRACKET_CLOSERS = new Set(Object.values(BRACKET_PAIRS));
 
+// Prefer the bracket after the caret when two pairs meet, as in `)(`.
+// A stray closer leaves enclosing pairs intact; crossed pairs break the chain.
+export function matchingBrackets(
+  value,
+  start,
+  end,
+  language,
+  getTokens = tokenize,
+) {
+  if (start !== end) return null;
+  const isBracket = (character) =>
+    Object.hasOwn(BRACKET_PAIRS, character) || BRACKET_CLOSERS.has(character);
+  if (!isBracket(value[start]) && !isBracket(value[start - 1])) return null;
+  let beforeCaret = null;
+  const stack = [];
+  let openerCounts = {};
+  for (const token of getTokens(value, language).tokens) {
+    if (token.kind !== "code") continue;
+    for (let index = token.start; index < token.end; index += 1) {
+      const character = value[index];
+      if (Object.hasOwn(BRACKET_PAIRS, character)) {
+        stack.push(index);
+        const closer = BRACKET_PAIRS[character];
+        openerCounts[closer] = (openerCounts[closer] ?? 0) + 1;
+      } else if (BRACKET_CLOSERS.has(character)) {
+        const opener = stack.at(-1);
+        if (BRACKET_PAIRS[value[opener]] !== character) {
+          if (openerCounts[character]) {
+            stack.length = 0;
+            openerCounts = {};
+          }
+        } else {
+          stack.pop();
+          openerCounts[character] -= 1;
+          if (opener === start || index === start) return [opener, index];
+          if (opener === start - 1 || index === start - 1)
+            beforeCaret = [opener, index];
+        }
+      }
+    }
+  }
+  return beforeCaret;
+}
+
 export function isBracketOpenerKeystroke(event) {
   return (
     event.inputType === "insertText" && Object.hasOwn(BRACKET_PAIRS, event.data)
