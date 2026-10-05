@@ -1,7 +1,7 @@
 use crate::agent::{
-    InterviewGrounding, InterviewLoop, InterviewProfile, Problem, build_instructions_for_plan,
-    get_problem, greeting, interview_grounding_json, interview_profile_json,
-    sanitize_interview_grounding, sanitize_interview_profile,
+    InterviewGrounding, InterviewLoop, InterviewMode, InterviewProfile, Problem,
+    build_instructions_for_plan, get_problem, greeting, interview_grounding_json,
+    interview_profile_json, sanitize_interview_grounding, sanitize_interview_profile,
 };
 use crate::config::{AgentConfig, MAX_DURATION_MIN, MIN_DURATION_MIN};
 
@@ -12,7 +12,14 @@ pub const TOPIC_TEST_RESULTS: &str = "test_results";
 pub const TOPIC_REPORT: &str = "report";
 pub const TOPIC_TRANSCRIPTION: &str = "lk.transcription";
 
+/// The board image's data stream. A topic of its own rather than a packet on
+/// one of the topics above, because a board is tens of kilobytes of JPEG and
+/// `publish_data` carries a single packet: it travels as a LiveKit byte
+/// stream, which chunks it over the same data channel.
+pub const TOPIC_BOARD_IMAGE: &str = "board_image";
+
 pub const TOOL_READ_EDITOR: &str = "read_editor";
+pub const TOOL_READ_BOARD: &str = "read_board";
 pub const TOOL_LOG_HINT: &str = "log_hint";
 pub const TOOL_RECORD_FRAMEWORK_EVIDENCE: &str = "record_framework_evidence";
 pub const TOOL_END_INTERVIEW: &str = "end_interview";
@@ -27,6 +34,7 @@ pub struct RuntimeBootstrap<'a> {
     pub problem: &'static Problem,
     pub duration_min: u32,
     pub interview_loop: InterviewLoop,
+    pub interview_mode: InterviewMode,
     pub coding_minutes: u32,
     pub behavioral_minutes: u32,
     pub profile: InterviewProfile,
@@ -38,6 +46,13 @@ pub struct RuntimeBootstrap<'a> {
     pub context_compression: Option<crate::config::GeminiContextCompression>,
     /// Whether candidate video frames go to Gemini, which is what makes the
     /// setup's media resolution worth sending.
+    ///
+    /// Never at a whiteboard, whatever the operator enabled. The board reaches
+    /// Gemini as a realtime image on the same stream a camera frame does, and
+    /// `read_board` tells the model to look at the newest one, so a camera
+    /// frame every few seconds would replace the board it was just told to
+    /// read. The low media resolution the camera asks for would also blur the
+    /// handwriting.
     pub candidate_video: bool,
     pub start_sensitivity: &'a str,
     pub end_sensitivity: Option<&'a str>,
@@ -51,6 +66,7 @@ pub struct RuntimeOptions {
     pub grounding: InterviewGrounding,
     pub interview_loop: InterviewLoop,
     pub examples_hidden: bool,
+    pub interview_mode: InterviewMode,
 }
 
 pub fn bootstrap<'a>(
@@ -80,6 +96,7 @@ pub fn bootstrap_with_rounds<'a>(
         grounding,
         interview_loop,
         examples_hidden,
+        interview_mode,
     } = options;
     let problem = get_problem(problem_id);
     let duration_min = duration_min.clamp(MIN_DURATION_MIN, MAX_DURATION_MIN);
@@ -93,6 +110,7 @@ pub fn bootstrap_with_rounds<'a>(
         problem,
         duration_min,
         interview_loop,
+        interview_mode,
         coding_minutes,
         behavioral_minutes,
         instructions: build_instructions_for_plan(
@@ -102,6 +120,7 @@ pub fn bootstrap_with_rounds<'a>(
             &grounding,
             interview_loop,
             examples_hidden,
+            interview_mode,
         ),
         profile,
         grounding,
@@ -110,10 +129,10 @@ pub fn bootstrap_with_rounds<'a>(
         voice: &config.gemini_voice,
         silence_ms: config.gemini_silence_ms,
         context_compression: config.gemini_context_compression,
-        candidate_video: config.gemini_candidate_video_enabled,
+        candidate_video: config.gemini_candidate_video_enabled && !interview_mode.is_whiteboard(),
         start_sensitivity: &config.gemini_start_sensitivity,
         end_sensitivity: config.gemini_end_sensitivity.as_deref(),
-        greeting: greeting(),
+        greeting: greeting(interview_mode),
     }
 }
 

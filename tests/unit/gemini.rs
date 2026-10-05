@@ -7,6 +7,12 @@ use super::*;
 use crate::config::load_from_pairs;
 use crate::runtime::bootstrap;
 
+/// An editor interview's report material: the editor's rules, nothing attached.
+const EDITOR: ReportMaterial<'static> = ReportMaterial {
+    mode: InterviewMode::Coding,
+    boards: &[],
+};
+
 #[tokio::test]
 async fn interim_failures_update_shared_cooldowns_without_retrying() {
     for status in [429, 401, 503, 400] {
@@ -306,11 +312,10 @@ async fn report_transport_fixture_with_body(
     let result = generate_report_transport(
         &keys,
         &url,
-        "prompt",
+        &generate_report_request("prompt", EDITOR, GENERATION_SEED),
         &mut budget,
         backoff,
         "test-room",
-        GENERATION_SEED,
     )
     .await;
     server.abort();
@@ -418,11 +423,10 @@ async fn a_key_ruled_out_during_the_backoff_is_not_retried() {
     let result = generate_report_transport(
         &keys,
         &url,
-        "prompt",
+        &generate_report_request("prompt", EDITOR, GENERATION_SEED),
         &mut budget,
         REPORT_RETRY_BACKOFF,
         "test-room",
-        GENERATION_SEED,
     )
     .await;
     server.abort();
@@ -947,8 +951,8 @@ fn report_retry_backoff_doubles_from_the_first_wait() {
 
 #[test]
 fn report_requests_are_session_local_and_never_reuse_personalized_output() {
-    let first = generate_report_request("session-a private evidence", GENERATION_SEED);
-    let second = generate_report_request("session-b private evidence", GENERATION_SEED);
+    let first = generate_report_request("session-a private evidence", EDITOR, GENERATION_SEED);
+    let second = generate_report_request("session-b private evidence", EDITOR, GENERATION_SEED);
     assert_ne!(first, second);
     assert!(first.to_string().contains("session-a private evidence"));
     assert!(!first.to_string().contains("session-b private evidence"));
@@ -972,6 +976,7 @@ pub(crate) async fn generate_report_at(
     let calls = ReportCalls {
         keys,
         url: url.to_string(),
+        material: EDITOR,
         budget: ReportCallBudget::new(),
         backoff,
         run,
@@ -1551,6 +1556,8 @@ async fn a_misrecognized_turn_neither_appears_in_nor_decides_the_report() {
     let final_code = "class Solution:\n    def matchDisputedCharge(self, nums: list[int], target: int) -> list[int]:\n        seen = {}\n        for i, amount in enumerate(nums):\n            if target - amount in seen:\n                return [seen[target - amount], i]\n            seen[amount] = i\n        return []\n";
     let prompt = crate::agent::report_prompt(crate::agent::ReportPromptInput {
         problem,
+        interview_mode: InterviewMode::Coding,
+        board_attached: false,
         transcript: &transcript,
         rolling_assessment: "",
         final_code,
@@ -1583,6 +1590,7 @@ async fn a_misrecognized_turn_neither_appears_in_nor_decides_the_report() {
         &GeminiKeys::single(&key),
         &model,
         &prompt,
+        EDITOR,
         problem,
         false,
         ReportRun {
@@ -1859,6 +1867,57 @@ fn live_setup_uses_native_audio_voice_tools_and_transcription() {
     );
 }
 
+/// A whiteboard session is offered a different first tool and a different set
+/// of evidence sources, and neither is a matter of wording: a model shown
+/// `read_editor` in an interview that has no editor calls it, and the only
+/// answer costs a turn of the candidate's time.
+#[test]
+fn a_whiteboard_session_is_offered_the_board_and_not_the_editor() {
+    let config = live_config(&[]);
+    let boot = crate::runtime::bootstrap_with_rounds(
+        &config,
+        "interview-board",
+        Some("two-sum"),
+        45,
+        crate::runtime::RuntimeOptions {
+            interview_mode: InterviewMode::Whiteboard,
+            ..Default::default()
+        },
+    );
+
+    let setup = &live_setup_message(&boot, None)["setup"];
+    let tools = setup["tools"][0]["functionDeclarations"]
+        .as_array()
+        .expect("the declarations are a list");
+    let names = tools
+        .iter()
+        .map(|tool| tool["name"].as_str().expect("a tool has a name"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        names,
+        vec![
+            TOOL_READ_BOARD,
+            TOOL_LOG_HINT,
+            TOOL_RECORD_FRAMEWORK_EVIDENCE,
+            TOOL_END_INTERVIEW
+        ]
+    );
+
+    // The editor's two sources are gone rather than merely unused. Left in the
+    // enum they are an invitation to record an observation from a test run that
+    // cannot have happened.
+    assert_eq!(
+        tools[2]["parameters"]["properties"]["source"]["enum"],
+        json!(["candidate_speech", "board_snapshot", "session_timing"])
+    );
+    assert!(
+        setup["systemInstruction"]["parts"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("shared whiteboard")
+    );
+}
+
 /// The empty object above asks for handles; this is what spends one. A
 /// setup that drops the handle reconnects into a session with no history,
 /// which the candidate hears as the interviewer starting the interview
@@ -2105,18 +2164,65 @@ fn report_generation_request_matches_python_report_model_config() {
         "https://generativelanguage.googleapis.com/v1beta/models/gemini-report:generateContent"
     );
 
-    let request = generate_report_request("score this", GENERATION_SEED);
+    let request = generate_report_request("score this", EDITOR, GENERATION_SEED);
     assert_eq!(request["contents"][0]["parts"][0]["text"], "score this");
 
     // The constant half goes first, as the system instruction, so every report
     // call and every repair of one opens on the same prefix.
     assert_eq!(
         request["systemInstruction"]["parts"][0]["text"],
-        crate::agent::report_system_instruction()
+        crate::agent::report_system_instruction(InterviewMode::Coding)
     );
     assert_eq!(
-        generate_report_request("another session", GENERATION_SEED)["systemInstruction"],
+        generate_report_request("another session", EDITOR, GENERATION_SEED)["systemInstruction"],
         request["systemInstruction"]
+    );
+    assert_eq!(
+        request["contents"][0]["parts"].as_array().map(Vec::len),
+        Some(1),
+        "an editor interview attaches nothing"
+    );
+
+    // Every phase image rides the same request, preceded by its server-owned
+    // label. The prompt comes last, after all of the evidence it describes.
+    let with_board = generate_report_request(
+        "score this",
+        ReportMaterial {
+            mode: InterviewMode::Whiteboard,
+            boards: &[
+                ("Example checkpoint", &[0xff, 0xd8, 0xff]),
+                ("Final board", &[0xff, 0xd8, 0x00]),
+            ],
+        },
+        GENERATION_SEED,
+    );
+
+    // Graded by the whiteboard's rules, which outrank the brief: an editor's
+    // "empty editor caps this below 30" there would fail every board.
+    assert_eq!(
+        with_board["systemInstruction"]["parts"][0]["text"],
+        crate::agent::report_system_instruction(InterviewMode::Whiteboard)
+    );
+    assert_eq!(
+        with_board["contents"][0]["parts"][0]["text"],
+        "Example checkpoint:"
+    );
+    assert_eq!(
+        with_board["contents"][0]["parts"][1]["inlineData"],
+        json!({ "mimeType": "image/jpeg", "data": "/9j/" })
+    );
+    assert_eq!(
+        with_board["contents"][0]["parts"][2]["text"],
+        "Final board:"
+    );
+    assert_eq!(
+        with_board["contents"][0]["parts"][3]["inlineData"],
+        json!({ "mimeType": "image/jpeg", "data": "/9gA" })
+    );
+    assert_eq!(with_board["contents"][0]["parts"][4]["text"], "score this");
+    assert_eq!(
+        with_board["generationConfig"], request["generationConfig"],
+        "the attachment changes nothing about how the report is generated"
     );
     assert_eq!(
         request["generationConfig"]["responseMimeType"],
@@ -2768,7 +2874,7 @@ fn the_interim_review_asks_for_bounded_prose_and_no_thinking() {
     );
 
     // The report's own config still goes through the shared envelope unchanged.
-    let report = generate_report_request("write the debrief", GENERATION_SEED);
+    let report = generate_report_request("write the debrief", EDITOR, GENERATION_SEED);
     assert_eq!(
         report["generationConfig"]["responseMimeType"],
         "application/json"
@@ -3378,9 +3484,8 @@ async fn quota_regeneration_waits_until_the_whole_key_rotation_can_make_a_call()
         generate_report_once(
             &selected,
             &url,
-            "same frozen prompt",
+            &generate_report_request("same frozen prompt", EDITOR, GENERATION_SEED),
             "quota-regeneration",
-            GENERATION_SEED,
         )
         .await
         .unwrap(),
@@ -3472,11 +3577,10 @@ async fn concurrent_quota_exhaustion_keeps_its_delay_after_a_report_503() {
     let error = generate_report_transport(
         &keys,
         &url,
-        "frozen prompt",
+        &generate_report_request("frozen prompt", EDITOR, GENERATION_SEED),
         &mut budget,
         Duration::ZERO,
         "concurrent-quota",
-        GENERATION_SEED,
     )
     .await
     .unwrap_err();

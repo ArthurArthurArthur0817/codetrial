@@ -1,4 +1,6 @@
-use codetrial::agent::{InterviewGrounding, InterviewLoop, InterviewProfile, Seniority};
+use codetrial::agent::{
+    InterviewGrounding, InterviewLoop, InterviewMode, InterviewProfile, Seniority,
+};
 use codetrial::config::{
     DEFAULT_GEMINI_LIVE_MODEL, DEFAULT_GEMINI_REPORT_MODEL, DEFAULT_GEMINI_SILENCE_MS,
     DEFAULT_GEMINI_START_SENSITIVITY, DEFAULT_GEMINI_VOICE, load_from_pairs,
@@ -107,6 +109,7 @@ fn bootstrap_owns_validated_round_plan_and_budgets() {
             profile: InterviewProfile::default(),
             grounding: InterviewGrounding::default(),
             interview_loop: InterviewLoop::CodingOnly,
+            interview_mode: InterviewMode::Coding,
             ..RuntimeOptions::default()
         },
     );
@@ -125,6 +128,7 @@ fn bootstrap_owns_validated_round_plan_and_budgets() {
             profile: InterviewProfile::default(),
             grounding: InterviewGrounding::default(),
             interview_loop: InterviewLoop::CodingBehavioral,
+            interview_mode: InterviewMode::Coding,
             ..RuntimeOptions::default()
         },
     );
@@ -213,4 +217,33 @@ fn bootstrap_carries_the_configured_endpointing_window() {
     assert_eq!(default.silence_ms, DEFAULT_GEMINI_SILENCE_MS);
     assert_eq!(default.start_sensitivity, DEFAULT_GEMINI_START_SENSITIVITY);
     assert_eq!(default.end_sensitivity, None, "left at the API's own value");
+}
+
+/// The board reaches Gemini on the stream a camera frame does, so a whiteboard
+/// interview never forwards the camera, even where the operator enabled it.
+#[test]
+fn a_whiteboard_interview_keeps_the_camera_off_the_board_stream() {
+    let enabled = load_from_pairs([
+        ("LIVEKIT_URL", "wss://example.livekit.cloud"),
+        ("LIVEKIT_API_KEY", "devkey"),
+        ("LIVEKIT_API_SECRET", "devsecret"),
+        ("GOOGLE_API_KEY", "google"),
+        ("CODETRIAL_GEMINI_CANDIDATE_VIDEO_ENABLED", "true"),
+    ])
+    .unwrap();
+    let held_at = |interview_mode| {
+        bootstrap_with_rounds(
+            &enabled,
+            "interview-fixed",
+            Some("two-sum"),
+            45,
+            RuntimeOptions {
+                interview_mode,
+                ..RuntimeOptions::default()
+            },
+        )
+        .candidate_video
+    };
+    assert!(held_at(InterviewMode::Coding));
+    assert!(!held_at(InterviewMode::Whiteboard));
 }

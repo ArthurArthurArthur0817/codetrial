@@ -348,3 +348,54 @@ uses the full local transcript and editor. The credentialed probes that compare
 arms and check recall are the ignored tests in `tests/unit/livekit/cost.rs`,
 outside the credential-free gate; their file header lists the environment they
 need.
+
+## What a whiteboard interview adds
+
+Measured at 1947b11 on `gemini-3.1-flash-live-preview`, problem `two-sum`, a
+20-minute coding + behavioral loop, three interviews per surface with the arms
+alternating, each about five minutes. Headless Chromium drove every interview
+through LiveKit with a microphone that fell silent after the preflight; the
+editor arm typed code and the whiteboard arm drew eight figures, 30 seconds
+apart. The counts are the server's own `live_turn_usage` lines, read with
+`scripts/analyze-gemini-usage.py`.
+
+| Opening | Prompt tokens, first generation | Runs |
+|---|---|---|
+| Editor | 5,431 | 3 of 3 identical |
+| Whiteboard | 5,408 | 3 of 3 identical |
+
+Per text, counted with `countTokens` on `gemini-3.1-flash-lite`. The parts sum
+to the live difference exactly (47 - 56 - 14 = -23):
+
+| Text | Editor | Whiteboard | Difference | Billed |
+|---|---|---|---|---|
+| System instructions | 4,408 | 4,455 | +47 | every generation |
+| Tool declarations | 429 | 373 | -56 | every generation |
+| Greeting | 170 | 156 | -14 | every generation |
+
+The fixed overhead is therefore 23 tokens below the editor's: the whiteboard
+instructions are longer, and `read_board` is declared in fewer tokens than
+`read_editor`.
+
+What grows is the board. Each board reaches the Live socket as a realtime image
+and is counted at 60 image tokens whatever is drawn on it; JPEGs from 17 to
+37 KB at the 1600x1000 export all counted 60. Boards stay in the context:
+`prompt_image_tokens` rises by 60 for every board sent, and by the end of each
+whiteboard session 8 to 10 boards were held, 480 to 600 tokens on every later
+generation until the sliding window trims them. Across a session that was 2.9
+to 4.2% of the prompt tokens. The page publishes a board a second after the
+last stroke, or at the end of a stroke once one has waited four seconds, and
+the server forwards at most one a second.
+
+`countTokens` prices the same JPEG as an inline image at 1,093 tokens, so it
+does not predict what a board costs on the Live socket. It does price the report
+request, which attaches one board per completed phase and the final board when
+it changed afterwards, each once.
+
+Two cautions when reading these logs. An observation whose turn called a tool
+carries the prompts of both of its generations, the call and the reply after
+the answer, so those rows read about double, image tokens included, and the
+analyzer's `mean_growth_per_observation` inherits that. Whole-session totals are
+not comparable between the arms either, because a silent synthetic candidate
+triggers an editor review on every code change in one arm and silence nudges in
+the other.

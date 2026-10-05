@@ -12,14 +12,22 @@ use tokio_tungstenite::{
     MaybeTlsStream, WebSocketStream, connect_async, tungstenite::protocol::Message,
 };
 
+use crate::agent::InterviewMode;
 use crate::percent_encode_component;
 use crate::runtime::{
-    RuntimeBootstrap, TOOL_END_INTERVIEW, TOOL_LOG_HINT, TOOL_READ_EDITOR,
+    RuntimeBootstrap, TOOL_END_INTERVIEW, TOOL_LOG_HINT, TOOL_READ_BOARD, TOOL_READ_EDITOR,
     TOOL_RECORD_FRAMEWORK_EVIDENCE,
 };
 
 mod credentials;
 pub use credentials::GeminiKeys;
+
+/// What every image this process sends Gemini is encoded as: a camera frame, a
+/// whiteboard on the live socket, and the board attached to a report request.
+/// One spelling, because the three are read by one API and a fourth caller
+/// that guessed a different one would be refused at the wire rather than here.
+pub const GEMINI_IMAGE_MIME_TYPE: &str = "image/jpeg";
+
 use credentials::{
     ApiFailure, ApiSurface, CredentialFailure, credential_failure, failure_from_reason,
 };
@@ -698,10 +706,16 @@ pub(crate) async fn check_live_session_at(
 /// this one hands the model back its own invalid output, and the transport
 /// inside it retries a call that never produced any. The candidate is waiting,
 /// so both stay small and `REPORT_TIMEOUT` bounds them together.
+///
+/// `material.boards` are the phase checkpoints the report is graded from, and
+/// they ride every call this makes: the repairs resend the prompt, and a repair
+/// that dropped the pictures would ask the reviewer to fix a report it can no
+/// longer see the evidence for.
 pub(crate) async fn generate_report_with_keys(
     keys: &GeminiKeys,
     model: &str,
     prompt: &str,
+    material: ReportMaterial<'_>,
     problem: &crate::agent::Problem,
     behavioral_round_opened: bool,
     run: ReportRun<'_>,
@@ -710,6 +724,7 @@ pub(crate) async fn generate_report_with_keys(
         ReportCalls {
             keys,
             url: gemini_generate_content_url(model),
+            material,
             budget: ReportCallBudget::new(),
             backoff: REPORT_RETRY_BACKOFF,
             run,
@@ -763,9 +778,20 @@ trait ReportTransport {
     fn answer_refused(&mut self) {}
 }
 
+/// What a report call grades besides its prompt: the surface the interview was
+/// held at, which picks the rules the reviewer scores by, and what was drawn
+/// on it. Together because every call in the chain needs both, and a repair
+/// that resent one without the other would grade a board by an editor's rules.
+#[derive(Clone, Copy)]
+pub(crate) struct ReportMaterial<'a> {
+    pub mode: InterviewMode,
+    pub boards: &'a [(&'a str, &'a [u8])],
+}
+
 struct ReportCalls<'a> {
     keys: &'a GeminiKeys,
     url: String,
+    material: ReportMaterial<'a>,
     budget: ReportCallBudget,
     backoff: Duration,
     run: ReportRun<'a>,
@@ -776,15 +802,20 @@ impl ReportTransport for ReportCalls<'_> {
         &mut self,
         prompt: &str,
     ) -> impl Future<Output = Result<String, Box<dyn std::error::Error + Send + Sync>>> + Send {
-        generate_report_transport(
-            self.keys,
-            &self.url,
-            prompt,
-            &mut self.budget,
-            self.backoff,
-            self.run.scope,
-            self.run.seed,
-        )
+        // Built once per call rather than once per attempt: every retry sends
+        // the same request, the encoded boards included.
+        let request = generate_report_request(prompt, self.material, self.run.seed);
+        async move {
+            generate_report_transport(
+                self.keys,
+                &self.url,
+                &request,
+                &mut self.budget,
+                self.backoff,
+                self.run.scope,
+            )
+            .await
+        }
     }
 
     fn answer_refused(&mut self) {
@@ -981,11 +1012,10 @@ fn salvage_report(
 async fn generate_report_transport(
     keys: &GeminiKeys,
     url: &str,
-    prompt: &str,
+    request: &Value,
     budget: &mut ReportCallBudget,
     first_backoff: Duration,
     scope: &str,
-    seed: i64,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let mut api_key = keys.select_report()?;
 
@@ -995,7 +1025,7 @@ async fn generate_report_transport(
     loop {
         let call = budget.spend()?;
         let what = http_usage_label("report", scope, call, failures);
-        let error = match generate_report_once(&api_key, url, prompt, &what, seed).await {
+        let error = match generate_report_once(&api_key, url, request, &what).await {
             Ok(report) => return Ok(report),
             Err(error) => error,
         };
@@ -1344,18 +1374,10 @@ async fn generate_content_once(
 async fn generate_report_once(
     api_key: &str,
     url: &str,
-    prompt: &str,
+    request: &Value,
     what: &str,
-    seed: i64,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    generate_content_once(
-        api_key,
-        url,
-        &generate_report_request(prompt, seed),
-        REPORT_ATTEMPT_TIMEOUT,
-        what,
-    )
-    .await
+    generate_content_once(api_key, url, request, REPORT_ATTEMPT_TIMEOUT, what).await
 }
 
 pub(crate) async fn open_live_session_at(
@@ -1560,8 +1582,22 @@ fn redact_api_keys(text: &str, api_keys: &[String]) -> String {
 /// A coding-only session is not offered `end_interview` at all: only the
 /// timer or the candidate ends it, and a tool the platform always refuses
 /// only invites a goodbye before the refusal arrives.
-pub fn live_tool_declarations(interview_loop: crate::agent::InterviewLoop) -> Value {
-    let mut tools = vec![
+///
+/// The reading tool and the evidence sources follow the mode, and they follow
+/// it here rather than being offered together and refused later. A model that
+/// is shown `read_editor` in a whiteboard interview calls it, and the only
+/// honest answer is that there is no editor, which costs a turn of the
+/// candidate's time to say.
+pub fn live_tool_declarations(
+    interview_loop: crate::agent::InterviewLoop,
+    mode: InterviewMode,
+) -> Value {
+    let read_tool = if mode.is_whiteboard() {
+        json!({
+            "name": TOOL_READ_BOARD,
+            "description": "Put the candidate's latest whiteboard in front of you again, with how much is on it, when it was drawn and the minutes left."
+        })
+    } else {
         json!({
             "name": TOOL_READ_EDITOR,
             "description": "The editor's language and numbered code, the latest test run and the minutes left. Read only code the current question needs that no event or tool answer has shown you; start at a known relevant line rather than refilling the whole editor.",
@@ -1571,10 +1607,38 @@ pub fn live_tool_declarations(interview_loop: crate::agent::InterviewLoop) -> Va
                     "fromLine": { "type": "INTEGER", "description": "The line to start from, when a cut answer names one." }
                 }
             }
-        }),
+        })
+    };
+
+    // Each surface's tools name only the work that surface has: a hint fitted
+    // to an editor, or evidence found on a test run, sends a whiteboard
+    // interviewer looking for something that does not exist.
+    let (hint_description, evidence_description) = if mode.is_whiteboard() {
+        (
+            "Record a hint: requested true before one they asked for, then give the clue it returns, fitted to their board, which it puts in front of you again; requested false after any other.",
+            "Record REACTO or STAR evidence present in their speech or on their board.",
+        )
+    } else {
+        (
+            "Record a hint: requested true before one they asked for, then give the clue it returns with their editor; requested false after any other.",
+            "Record REACTO or STAR evidence present in their speech, an editor snapshot or a test event.",
+        )
+    };
+    let evidence_sources = if mode.is_whiteboard() {
+        json!(["candidate_speech", "board_snapshot", "session_timing"])
+    } else {
+        json!([
+            "candidate_speech",
+            "editor_snapshot",
+            "test_event",
+            "session_timing"
+        ])
+    };
+    let mut tools = vec![
+        read_tool,
         json!({
             "name": TOOL_LOG_HINT,
-            "description": "Record a hint: requested true before one they asked for, then give the clue it returns with their editor; requested false after any other.",
+            "description": hint_description,
             "parameters": {
                 "type": "OBJECT",
                 "properties": {
@@ -1585,7 +1649,7 @@ pub fn live_tool_declarations(interview_loop: crate::agent::InterviewLoop) -> Va
         }),
         json!({
             "name": TOOL_RECORD_FRAMEWORK_EVIDENCE,
-            "description": "Record REACTO or STAR evidence present in their speech, an editor snapshot or a test event.",
+            "description": evidence_description,
 
             // Schema.Type is an enum, so these are its value names, not free
             // text. Lowercase happens to be accepted here and is rejected on
@@ -1595,7 +1659,7 @@ pub fn live_tool_declarations(interview_loop: crate::agent::InterviewLoop) -> Va
                 "type": "OBJECT",
                 "properties": {
                     "phase": { "type": "STRING", "enum": ["repeat", "example", "algorithm", "coding", "test", "optimizations", "situation", "task", "action", "result"] },
-                    "source": { "type": "STRING", "enum": ["candidate_speech", "editor_snapshot", "test_event", "session_timing"] },
+                    "source": { "type": "STRING", "enum": evidence_sources },
                     "kind": { "type": "STRING", "enum": ["observed", "inferred", "skipped"] },
                     "confidence": { "type": "INTEGER", "minimum": 0, "maximum": 100 },
                     "summary": { "type": "STRING", "description": "Short evidence-grounded summary without scores or private rubric text." }
@@ -1739,7 +1803,7 @@ fn live_setup_message(boot: &RuntimeBootstrap<'_>, resume: Option<&str>) -> Valu
                     { "text": boot.instructions }
                 ]
             },
-            "tools": [{ "functionDeclarations": live_tool_declarations(boot.interview_loop) }],
+            "tools": [{ "functionDeclarations": live_tool_declarations(boot.interview_loop, boot.interview_mode) }],
 
             // Both fields are documented as hints, not locks, and they shape
             // only the transcript the notes, the report and recovery read: the
@@ -1862,9 +1926,9 @@ fn tool_response_message(answers: &[(GeminiFunctionCall, Value)]) -> Value {
     })
 }
 
-fn generate_report_request(prompt: &str, seed: i64) -> Value {
-    content_request(
-        &crate::agent::report_system_instruction(),
+fn generate_report_request(prompt: &str, material: ReportMaterial<'_>, seed: i64) -> Value {
+    let mut request = content_request(
+        &crate::agent::report_system_instruction(material.mode),
         prompt,
         json!({
             "responseMimeType": "application/json",
@@ -1885,7 +1949,24 @@ fn generate_report_request(prompt: &str, seed: i64) -> Value {
             "temperature": 0.3,
             "seed": seed
         }),
-    )
+    );
+    let parts = request["contents"][0]["parts"]
+        .as_array_mut()
+        .expect("content_request always builds an array of parts");
+    let prompt = parts
+        .pop()
+        .expect("content_request always appends the prompt");
+    for (label, image) in material.boards {
+        parts.push(json!({ "text": format!("{label}:") }));
+        parts.push(json!({
+            "inlineData": {
+                "mimeType": GEMINI_IMAGE_MIME_TYPE,
+                "data": STANDARD.encode(image)
+            }
+        }));
+    }
+    parts.push(prompt);
+    request
 }
 
 async fn wait_for_setup_complete(
