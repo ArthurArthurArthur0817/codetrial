@@ -775,6 +775,34 @@ test("captions size to the turn and retire when nobody is speaking", () => {
   );
 });
 
+// A node test has no layout engine, so it cannot see whether the stage
+// clears Run tests. It pins the two halves that decide where the stage sits
+// instead: the stylesheet takes its top from --jim-stage-top, and the page
+// measures the toolbar, which can wrap to two rows, rather than assuming it
+// is one row tall. That catches either half being reverted; whether the two
+// actually stay apart is only visible in a browser.
+test("the stage sits below the measured toolbar, not a constant", () => {
+  const css = read("web/styles.css");
+  const stage = css.slice(css.indexOf(".jim-stage {"));
+  const rule = stage.slice(0, stage.indexOf("}"));
+  assert.match(rule, /top: var\(--jim-stage-top, /);
+
+  const place = functionBody(script, "placeJimStageBelowToolbar");
+  assert.match(place, /getBoundingClientRect\(\)\.bottom/);
+  assert.match(place, /--jim-stage-top/);
+  assert.match(place, /ResizeObserver/);
+  // After initWhiteboard, and given the toolbar on show: the whiteboard
+  // removes the editor panel, and an observed toolbar that leaves the page
+  // measures as zero and pulls the stage over the whiteboard's own toolbar.
+  const init = functionBody(script, "init");
+  const call = init.indexOf("placeJimStageBelowToolbar(");
+  assert.ok(call > init.indexOf("initWhiteboard()"), "placed before the board");
+  assert.match(
+    init.slice(call),
+    /^placeJimStageBelowToolbar\(\s*whiteboard \? nodes\.boardToolbar : nodes\.editorToolbar,?\s*\)/,
+  );
+});
+
 test("avatar analyser reads Jim and never the candidate", () => {
   assertIncludesCompact(
     script,

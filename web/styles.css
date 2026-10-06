@@ -530,14 +530,18 @@ p {
   margin-top: 1rem;
 }
 
-/* Floating, not docked. Fixed to the editor's top-right and clear of the
-   toolbar, so it never covers Run tests and never competes with the sidebar
-   for width. pointer-events are off for the stage and back on only for the
-   Hide avatar control and captions, so the panel itself never swallows a click
-   meant for the editor. */
+/* Floating, not docked. Fixed to the editor's top-right, so it never
+   competes with the sidebar for width. Its top is the measured bottom of the
+   toolbar on show (the editor's, or the whiteboard's), which interview.js
+   keeps in --jim-stage-top: a toolbar that wraps to two rows pushes the stage
+   down instead of letting it cover Run tests, and 4.25rem is only the
+   fallback before the first measurement.
+   pointer-events are off for the stage and back on only for the Hide avatar
+   control and captions, so the panel itself never swallows a click meant for
+   the editor. */
 .jim-stage {
   position: fixed;
-  top: 4.25rem;
+  top: var(--jim-stage-top, 4.25rem);
   right: 1.5rem;
   z-index: 5;
   width: 168px;

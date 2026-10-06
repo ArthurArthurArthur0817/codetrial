@@ -294,13 +294,19 @@ imports it, the node tests stop being able to run at all.
 
 The avatar floats over the editor's top-right (`#jim-stage`, fixed), not in the
 sidebar. The sidebar already carries the problem, timer, status pill, captions,
-controls and the Meet panel; adding a face made it crowded, and the point of
-the avatar is that the candidate glances at it while working, so it belongs
-where their eyes already are. The stage takes no pointer events, so it can
-never swallow a click meant for the editor; the Hide avatar button and the
-captions re-enable them for themselves. Below 1200px wide the avatar and its
-button are hidden rather than allowed to cover code, and the captions move to
-the bottom corner.
+controls and the Meet panel; adding a face made it crowded, and the point of the
+avatar is that the candidate glances at it while working, so it belongs where
+their eyes already are. Its top follows the toolbar on show rather than a
+constant: `interview.js` measures the bottom of the editor's toolbar, or the
+whiteboard's in whiteboard mode, and keeps it in `--jim-stage-top`, re-measuring
+through a `ResizeObserver`, so a toolbar that wraps to a second row moves the
+stage down with it, and the toolbar's controls (Run tests in the editor, the
+drawing tools at the board) stay visible at every width the avatar is shown. The
+stylesheet's `4.25rem` is only the fallback before that first measurement. The
+stage takes no pointer events, so it can never swallow a click meant for the
+editor; the Hide avatar button and the captions re-enable them for themselves.
+Below 1200px wide the avatar and its button are hidden rather than allowed to
+cover code, and the captions move to the bottom corner.
 
 Every VRM loads in a T-pose and the format ships no idle animation, so
 `loadVrm` drops the upper arms once at load. This is model-independent: without
