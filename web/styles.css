@@ -478,8 +478,8 @@ p {
    meant for the editor. */
 .jim-stage {
   position: fixed;
-  top: 4.25rem;
-  right: 1.5rem;
+  top: 0.5rem;
+  right: 1rem;
   z-index: 5;
   width: 168px;
   pointer-events: none;
@@ -876,6 +876,7 @@ p {
      with it, or a three-digit line number overflows it at the largest size,
      but never drops below 3.25rem, or a four-digit one is clipped at the
      smallest. */
+  position: relative;
   --editor-font-size: 0.875rem;
   --editor-gutter: max(3.25rem, calc(var(--editor-font-size) * 3.72));
   position: relative;
