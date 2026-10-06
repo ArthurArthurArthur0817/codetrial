@@ -1055,7 +1055,7 @@ function reportDebrief(raw) {
   };
 }
 
-function reportTopics(raw) {
+export function reportTopics(raw) {
   if (raw?.topics === undefined) return undefined;
   return Array.isArray(raw?.topics)
     ? raw.topics
