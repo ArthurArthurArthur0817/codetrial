@@ -192,6 +192,9 @@ const EDITOR_FONT_SIZE_KEY = "codetrial:editorFontSize";
 const EDITOR_FONT_SIZES = ["0.75", "0.875", "1", "1.125", "1.25", "1.5"];
 const DEFAULT_EDITOR_FONT_SIZE = "0.875";
 
+/// In px, between the editor toolbar's bottom and the top of Jim's stage.
+const JIM_STAGE_TOOLBAR_GAP_PX = 6;
+
 // From /runtime-config.js, which is the only thing allowed to name what the
 // server does. A literal here would be a second answer to "does this server
 // record", and the wrong one would show a candidate no notice.
@@ -501,6 +504,7 @@ const nodes = {
   meetOutputNote: document.querySelector("#meet-output-note"),
   editorPanel: document.querySelector(".editor-panel"),
   boardPanel: document.querySelector("#board-panel"),
+  boardToolbar: document.querySelector(".board-toolbar"),
   board: document.querySelector("#board"),
   boardPens: document.querySelector("#board-pens"),
   boardEraser: document.querySelector("#board-eraser"),
@@ -511,6 +515,7 @@ const nodes = {
   jimAvatar: document.querySelector("#jim-avatar"),
   jimAvatarNote: document.querySelector("#jim-avatar-note"),
   jimStage: document.querySelector("#jim-stage"),
+  editorToolbar: document.querySelector(".editor-toolbar"),
   hideAvatar: document.querySelector("#hide-avatar"),
   jimAvatarStatus: document.querySelector("#jim-avatar-status"),
 };
@@ -550,6 +555,9 @@ async function init() {
   setLanguage("python");
   bindEvents();
   if (whiteboard) initWhiteboard();
+  placeJimStageBelowToolbar(
+    whiteboard ? nodes.boardToolbar : nodes.editorToolbar,
+  );
   // After bindEvents, so the callback cannot beat the row it edits: everything
   // above here is synchronous, and a `then` runs no earlier than the next
   // microtask.
@@ -3235,6 +3243,28 @@ function applyEditorFontSize(stored) {
     "aria-disabled",
     String(index === EDITOR_FONT_SIZES.length - 1),
   );
+}
+
+/// Keeps Jim's stage under the toolbar the page shows: the editor's, or the
+/// whiteboard's once `initWhiteboard` has removed the editor panel. Called
+/// after that, because an observed toolbar that leaves the page measures as
+/// zero and would pull the stage to the top. Either toolbar can wrap to a
+/// second row, and a fixed `top` cleared only the first, so Run tests ended up
+/// under the avatar. The stage is `position: fixed`, so the toolbar's viewport
+/// bottom is the offset it needs. Observed rather than read per frame; the
+/// fallback is the resize listener it replaces, as in `initAvatarStage`.
+function placeJimStageBelowToolbar(toolbar) {
+  if (!toolbar) return;
+  const place = () => {
+    const bottom = Math.ceil(toolbar.getBoundingClientRect().bottom);
+    document.documentElement.style.setProperty(
+      "--jim-stage-top",
+      `${bottom + JIM_STAGE_TOOLBAR_GAP_PX}px`,
+    );
+  };
+  if (window.ResizeObserver) new window.ResizeObserver(place).observe(toolbar);
+  else window.addEventListener("resize", place);
+  place();
 }
 
 function editorFontSize() {
