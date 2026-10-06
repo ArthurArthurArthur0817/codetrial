@@ -477,7 +477,7 @@ p {
    Hide avatar control and captions, so the panel itself never swallows a click
    meant for the editor. */
 .jim-stage {
-  position: fixed;
+  position: absolute;
   top: 0.5rem;
   right: 1rem;
   z-index: 5;
