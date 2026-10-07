@@ -1914,6 +1914,7 @@ function setLanguage(language) {
       if (state.language !== language) return;
       // Replace fallback ranges when the grammar finishes loading.
       editorTokenCache = null;
+      paintedEditor = null;
       paintEditor();
     })
     .catch(() => {});
@@ -3214,6 +3215,7 @@ function paintEditor(showMatch = document.activeElement === nodes.editor) {
     code,
     state.language,
     brackets,
+    editorTokens(code, state.language).tokens,
   );
   const lines = code.split("\n").length;
   if (lines !== paintedLineCount) {
