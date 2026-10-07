@@ -180,14 +180,18 @@ p {
 }
 
 .random-picker {
-  display: grid;
-  grid-template-columns: max-content 1fr;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 1rem;
+  gap: 0.5rem 1rem;
   margin-top: 0.5rem;
 }
 
+/* Beside the button wherever the line gets a readable width, which keeps the
+   lobby on one 1280x800 screen, and below the button on a phone. A fixed grid
+   column shrank to a word or two there and, below 360px, ran off the page. */
 .random-picker .recommendation {
+  flex: 1 1 12rem;
   margin: 0;
 }
 

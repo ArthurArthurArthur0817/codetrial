@@ -370,6 +370,52 @@ lobbyTest(
   { viewport: { width: 1280, height: 800 } },
 );
 
+// The row the test above budgets for, at both ends of it. A fixed column beside
+// the button shrank below one word of a title on a phone and pushed the page
+// wider than the window; this title overflowed even at 375px.
+lobbyTest(
+  "the selected problem drops below the button only when it cannot fit beside it",
+  async (page) => {
+    await lobby(page);
+    await page.click("details.problem-picker summary");
+    await page.click(
+      `[data-problem="${pageOf("find-first-and-last-position-of-element-in-sorted-array")}"]`,
+    );
+    await page.click("details.problem-picker summary");
+
+    for (const [width, beside] of [
+      [320, false],
+      [375, false],
+      [1280, true],
+    ]) {
+      await page.setViewportSize({ width, height: 800 });
+      const layout = await page.evaluate(() => {
+        const button = document
+          .querySelector("#random-problem")
+          .getBoundingClientRect();
+        const line = document
+          .querySelector("#recommendation")
+          .getBoundingClientRect();
+        return {
+          scrollWidth: document.documentElement.scrollWidth,
+          clientWidth: document.documentElement.clientWidth,
+          beside: line.top < button.bottom,
+        };
+      });
+      assert.equal(
+        layout.scrollWidth,
+        layout.clientWidth,
+        `the lobby scrolls sideways at ${width}px`,
+      );
+      assert.equal(
+        layout.beside,
+        beside,
+        `at ${width}px the line should sit ${beside ? "beside" : "below"} the button`,
+      );
+    }
+  },
+);
+
 lobbyTest(
   "topic and difficulty filters narrow the problem cards together",
   async (page) => {
