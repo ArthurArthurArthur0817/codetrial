@@ -10,8 +10,9 @@ cleanup()
 trap cleanup EXIT INT TERM
 
 if [ "${REPORT_PARITY_CHECK_VALIDATE_FIXTURES_ONLY:-}" ]; then
-    PY_CAPTURE="$ROOT/tests/golden/report-python.json" node << 'NODE'
+    PY_CAPTURE="$ROOT/tests/golden/report-python.json" CASE_COUNTS_MODULE="$ROOT/scripts/judge-case-counts.cjs" node << 'NODE'
 const fs = require("fs");
+const { reportCaseCounts } = require(process.env.CASE_COUNTS_MODULE);
 const capture = JSON.parse(fs.readFileSync(process.env.PY_CAPTURE, "utf8"));
 function assert(condition, message) {
   if (!condition) {
@@ -20,7 +21,7 @@ function assert(condition, message) {
   }
 }
 assert(capture.problemTitle === "Two Sum", "report reference problem mismatch");
-assert(capture.testResultText && capture.testResultText !== "Couldn't run your code", "report reference missing test result");
+assert(reportCaseCounts(capture.testResultText).passed === 0, "report reference should have zero passing cases");
 assert(Array.isArray(capture.reportKeys), "report reference missing keys");
 for (const key of ["codingScore", "communicationScore", "decision", "summary", "codingFeedback", "communicationFeedback", "hintsUsed"]) {
   assert(capture.reportKeys.includes(key), `report reference missing ${key}`);
@@ -49,8 +50,9 @@ run_capture()
 
 run_capture "$TMP/rust.json"
 
-PY_CAPTURE="$ROOT/tests/golden/report-python.json" RUST_CAPTURE="$TMP/rust.json" WEB_ROOT="$ROOT/web" node << 'NODE'
+PY_CAPTURE="$ROOT/tests/golden/report-python.json" RUST_CAPTURE="$TMP/rust.json" WEB_ROOT="$ROOT/web" CASE_COUNTS_MODULE="$ROOT/scripts/judge-case-counts.cjs" node << 'NODE'
 const fs = require("fs");
+const { reportCaseCounts, validateReportCaseCount } = require(process.env.CASE_COUNTS_MODULE);
 const python = JSON.parse(fs.readFileSync(process.env.PY_CAPTURE, "utf8"));
 const rust = JSON.parse(fs.readFileSync(process.env.RUST_CAPTURE, "utf8"));
 // The Python reference was captured when the heading was the published title.
@@ -85,9 +87,11 @@ assert(rust.problemTitle === scenario, "rust problem mismatch");
 // The title above and the heading it matched are read from the same map, so
 // they agree even when the map has the published title in it.
 assert(rust.problemTitle !== python.problemTitle, "rust interview shows the published title");
-assert(python.testResultText === rust.testResultText, "test result mismatch");
-assert(python.testResultText !== "Couldn't run your code", "test run setup failed");
+// The saved total is historical; only the live total follows the current judge.
+const referenceResults = reportCaseCounts(python.testResultText);
+const liveResults = validateReportCaseCount(rust.testResultText, "two-sum");
+assert(referenceResults.passed === liveResults.passed, "passing test count mismatch");
 assert(Array.isArray(python.reportKeys), "python reference missing report keys");
 assert(python.reportKeys.join(",") === shape(rust.report, "rust"), "report key mismatch");
-console.log(`report parity comparison passed: problem=${python.problemTitle} tests=${python.testResultText} rustDecision=${rust.report.decision} rustScores=${rust.report.codingScore}/${rust.report.communicationScore}`);
+console.log(`report parity comparison passed: problem=${python.problemTitle} tests=${rust.testResultText} rustDecision=${rust.report.decision} rustScores=${rust.report.codingScore}/${rust.report.communicationScore}`);
 NODE
