@@ -127,7 +127,15 @@ import {
   startRecording,
   withdrawRecordingConsent,
 } from "./recording-state.js";
-import { assignedId as randomId, saveReportHistory } from "./history.js";
+import {
+  assignedId as randomId,
+  reportIsPersisted,
+  saveReportHistory,
+} from "./history.js";
+import {
+  createBeforeUnloadGuard,
+  shouldWarnBeforeUnload,
+} from "./before-unload.js";
 import {
   createFacePresenceDetector,
   facePresenceVerdict,
@@ -384,6 +392,9 @@ const state = {
   // derived from it rather than accumulated, so throttling and suspend cannot
   // bend it.
   endsAt: 0,
+  // True only after the latest report save confirms a local or account copy
+  // the Past attempts flow can reopen.
+  reportPersisted: false,
   phase: "live",
   transcript: null, // createTranscriptView, built in init once nodes exist
   latestSummary: null,
@@ -426,6 +437,17 @@ const state = {
   // What face presence last had to say, kept so the interviewer taking the
   // element over defers that warning instead of discarding it.
 };
+
+const beforeUnloadGuard = createBeforeUnloadGuard(window);
+
+function updateBeforeUnloadGuard() {
+  beforeUnloadGuard.setEnabled(
+    shouldWarnBeforeUnload({
+      endsAt: state.endsAt,
+      reportPersisted: state.reportPersisted,
+    }),
+  );
+}
 
 const nodes = {
   title: document.querySelector("#problem-title"),
@@ -596,6 +618,7 @@ async function init() {
   await connect(preflight, presenting);
   publishCode();
   state.endsAt = Date.now() + durationMin * 60 * 1000;
+  updateBeforeUnloadGuard();
   tickTimer();
   setInterval(tickTimer, 1000);
 }
@@ -1303,7 +1326,13 @@ async function connect(preflight, presenting = false) {
 async function connectLiveKit(connection, preflight, presenting = false) {
   const livekit = window.LivekitClient;
   if (!livekit?.Room) throw new Error("LiveKit browser SDK is unavailable.");
-  const room = new livekit.Room({ adaptiveStream: true, dynacast: true });
+  const room = new livekit.Room({
+    adaptiveStream: true,
+    dynacast: true,
+    // LiveKit disconnects during beforeunload, before the candidate has chosen
+    // whether to leave. CodeTrial waits for pagehide below instead.
+    disconnectOnPageLeave: false,
+  });
 
   const receivedReports = new Set();
   room.on(
@@ -1639,6 +1668,7 @@ function restoreEndingOverlay() {
 
 function finalizeRecoveryOnPageHide() {
   if (state.phase === "report_recovery") reportRecovery.finish();
+  void state.room?.disconnect?.().catch?.(() => {});
 }
 
 window.addEventListener("pagehide", finalizeRecoveryOnPageHide);
@@ -2782,6 +2812,7 @@ function leaveRoom() {
     return;
   }
   if (state.reportReceiving) return;
+  beforeUnloadGuard.dispose();
   stopEndingClock();
   void state.room?.disconnect?.();
   stopAvatar();
@@ -2911,7 +2942,11 @@ function renderReportSaveStatus(result) {
   nodes.report.querySelector("#done").disabled = false;
 }
 
-function saveHistory(report = state.report) {
+// Overlapping saves may finish out of order. Only the newest one may decide
+// whether the current report is safe to leave behind.
+let saveGeneration = 0;
+
+async function saveHistory(report = state.report) {
   // The interview id travels with the report so the replay page can put the
   // two beside each other. Reports are keyed by their own id and recordings by
   // theirs, and without this the only thing relating them is the clock.
@@ -2935,7 +2970,18 @@ function saveHistory(report = state.report) {
     interviewLoop,
     report,
   };
-  return saveReportHistory(entry);
+  // A later save may replace an earlier report under this same id. Keep the
+  // warning active until this save itself confirms that Past attempts can
+  // reopen the current copy.
+  const generation = ++saveGeneration;
+  state.reportPersisted = false;
+  updateBeforeUnloadGuard();
+  const result = await saveReportHistory(entry);
+  if (generation === saveGeneration && reportIsPersisted(result)) {
+    state.reportPersisted = true;
+    updateBeforeUnloadGuard();
+  }
+  return result;
 }
 
 function downloadReport() {

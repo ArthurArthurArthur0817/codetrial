@@ -13,6 +13,7 @@ import {
   readLocalHistory,
   readReviewHistory,
   renameLocalHistory,
+  reportIsPersisted,
   reviewHistoryKey,
   saveReportHistory,
 } from "../../web/history.js";
@@ -71,7 +72,9 @@ test("interview history routes through the shared persistence helper", () => {
     script,
     /import \{[^}]*\bsaveReportHistory\b[^}]*\} from "\.\/history\.js"/,
   );
-  assert.match(saveHistory, /return saveReportHistory\(entry\)/);
+  assert.match(saveHistory, /await saveReportHistory\(entry\)/);
+  assert.match(saveHistory, /reportIsPersisted\(result\)/);
+  assert.match(saveHistory, /state\.reportPersisted = true/);
   for (const name of ["receiveReport", "showReport"]) {
     const body = functionBody(script, name);
     assert.match(body, /renderReport\(\)/);
@@ -93,6 +96,20 @@ test("interview history routes through the shared persistence helper", () => {
     functionBody(script, "renderReport"),
     /nodes\.ending\.hidden = true/,
   );
+});
+
+test("only a report copy available to Past attempts counts as persisted", () => {
+  assert.equal(reportIsPersisted({ local: "saved", account: "failed" }), true);
+  assert.equal(reportIsPersisted({ local: "failed", account: "saved" }), true);
+  assert.equal(
+    reportIsPersisted({ local: "failed", account: "skipped" }),
+    false,
+  );
+  assert.equal(
+    reportIsPersisted({ local: "failed", account: "failed" }),
+    false,
+  );
+  assert.equal(reportIsPersisted(null), false);
 });
 
 test("a completed test run keeps pause and round locks", () => {
