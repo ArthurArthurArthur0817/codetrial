@@ -250,6 +250,11 @@ export async function saveReportHistory(
   return { local, account };
 }
 
+/// At least one copy the Past attempts flow can read was written successfully.
+export function reportIsPersisted(result) {
+  return result?.local === "saved" || result?.account === "saved";
+}
+
 // Account saves of one report id, in the order they were asked for. A report
 // saved again under its id -- an outcome over the provisional failure it
 // replaces -- otherwise raced the first save's session check, and whichever
