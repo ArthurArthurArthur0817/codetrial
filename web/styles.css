@@ -14,6 +14,30 @@
      which repaints on every keystroke, and a backdrop-filter under it re-ran a
      blur pass per repaint for an effect 82% opaque paint already hid. */
   --float-surface: #24241f;
+
+  /* Editor-only colors, independent of the page's fixed dark scheme. Their
+     defaults keep the editor rendering exactly as before; the light values
+     live on .editor-stack[data-theme="light"] below. */
+  --code-bg: #1e1e1e;
+  --code-text: #d4d4d4;
+  --code-gutter: #181816;
+  --code-caret: #f4f4f0;
+  --code-selection: #264f78;
+  /* Selected text needs its own color: --ink is a light page color that would
+     stay light on a light selection background in the light theme. */
+  --code-selection-ink: var(--ink);
+  --code-match-outline: #a6cfff;
+  /* The gutter's own text and divider, defaulting to the page's dark-scheme
+     --muted and --hairline so the dark theme is unchanged; the light theme
+     below overrides both, since neither page variable meets 4.5:1 against a
+     light gutter background. */
+  --code-gutter-ink: var(--muted);
+  --code-gutter-border: var(--hairline);
+  --tok-keyword: #569cd6;
+  --tok-string: #ce9178;
+  --tok-comment: #6a9955;
+  --tok-number: #b5cea8;
+  --tok-literal: #569cd6;
 }
 
 * {
@@ -406,6 +430,14 @@ p {
 .font-size-button[aria-disabled="true"] {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+/* The light-theme toggle's label stays fixed (see applyEditorTheme), so
+   sighted users need this instead of changing text to see which theme is
+   current. */
+#editor-theme-toggle[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--ink);
 }
 
 .history {
@@ -944,7 +976,53 @@ p {
   position: relative;
   flex: 1;
   min-height: 25rem;
-  background: #1e1e1e;
+  background: var(--code-bg);
+}
+
+/* VS Code Light+ colors, scoped to the editor stack only: the rest of the
+   page (avatar, captions, overlays) stays on the fixed dark scheme. An
+   explicit choice, stored or just clicked, always wins here regardless of
+   the system theme. */
+.editor-stack[data-theme="light"] {
+  --code-bg: #ffffff;
+  --code-text: #1f1f1f;
+  --code-gutter: #f3f3f3;
+  --code-caret: #000000;
+  --code-selection: #add6ff;
+  --code-selection-ink: #1f1f1f;
+  --code-match-outline: #0000ff;
+  --code-gutter-ink: #595959;
+  --code-gutter-border: #dddddd;
+  --tok-keyword: #0000ff;
+  --tok-string: #a31515;
+  --tok-comment: #008000;
+  --tok-number: #098658;
+  --tok-literal: #0000ff;
+}
+
+/* The same values, for no stored and no clicked choice: applied by the
+   browser from the first paint, before interview.js has run at all, so a
+   candidate on a light system never sees a flash of the dark default. JS
+   only ever sets data-theme for an explicit choice; :not([data-theme="dark"])
+   also matches an explicit data-theme="light", which just repeats the block
+   above rather than conflicting with it. */
+@media (prefers-color-scheme: light) {
+  .editor-stack:not([data-theme="dark"]) {
+    --code-bg: #ffffff;
+    --code-text: #1f1f1f;
+    --code-gutter: #f3f3f3;
+    --code-caret: #000000;
+    --code-selection: #add6ff;
+    --code-selection-ink: #1f1f1f;
+    --code-match-outline: #0000ff;
+    --code-gutter-ink: #595959;
+    --code-gutter-border: #dddddd;
+    --tok-keyword: #0000ff;
+    --tok-string: #a31515;
+    --tok-comment: #008000;
+    --tok-number: #098658;
+    --tok-literal: #0000ff;
+  }
 }
 
 /* The overlay and the textarea must agree on every metric that affects where a
@@ -968,7 +1046,7 @@ p {
 
 #editor-highlight {
   pointer-events: none;
-  color: #d4d4d4;
+  color: var(--code-text);
   overflow: hidden;
 }
 
@@ -986,9 +1064,9 @@ p {
   margin: 0;
   padding: 1rem 0.5rem;
   overflow: hidden;
-  color: var(--muted);
-  background: #181816;
-  border-right: 1px solid var(--hairline);
+  color: var(--code-gutter-ink);
+  background: var(--code-gutter);
+  border-right: 1px solid var(--code-gutter-border);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: var(--editor-font-size);
   line-height: 1.5;
@@ -1008,7 +1086,7 @@ p {
   background: transparent;
   /* Transparent glyphs: the overlay supplies the visible, colored ones. */
   color: transparent;
-  caret-color: #f4f4f0;
+  caret-color: var(--code-caret);
 }
 
 #editor::-webkit-scrollbar {
@@ -1017,33 +1095,33 @@ p {
 
 /* Make textarea text visible when its selection background hides the syntax layer. */
 #editor::selection {
-  background: #264f78;
-  color: var(--ink);
+  background: var(--code-selection);
+  color: var(--code-selection-ink);
 }
 
 .tok-keyword {
-  color: #569cd6;
+  color: var(--tok-keyword);
 }
 
 .tok-string {
-  color: #ce9178;
+  color: var(--tok-string);
 }
 
 .tok-comment {
-  color: #6a9955;
+  color: var(--tok-comment);
 }
 
 .tok-number {
-  color: #b5cea8;
+  color: var(--tok-number);
 }
 
 .tok-literal {
-  color: #569cd6;
+  color: var(--tok-literal);
 }
 
 .matching-bracket {
-  background: #264f78;
-  outline: 1px solid #a6cfff;
+  background: var(--code-selection);
+  outline: 1px solid var(--code-match-outline);
 }
 
 .test-drawer {

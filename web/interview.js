@@ -186,6 +186,7 @@ const CODE_PUBLISH_DEBOUNCE_MS = 300;
 const FRAMEWORK_HINT_MS = 12000;
 const HIDE_EXAMPLES_KEY = "codetrial:hideExamples";
 const EDITOR_FONT_SIZE_KEY = "codetrial:editorFontSize";
+const EDITOR_THEME_KEY = "codetrial:editorTheme";
 /// In rem. A fixed ladder rather than a free number, so a stored value is
 /// either one of these or ignored, and every size the page can show is one the
 /// browser check has seen keep the three editor layers in line.
@@ -460,6 +461,7 @@ const nodes = {
   editorStack: document.querySelector(".editor-stack"),
   editorFontSmaller: document.querySelector("#editor-font-smaller"),
   editorFontLarger: document.querySelector("#editor-font-larger"),
+  editorThemeToggle: document.querySelector("#editor-theme-toggle"),
   compileDisclosure: document.querySelector(".compile-disclosure"),
   run: document.querySelector("#run-tests"),
   candidateCaseInput: document.querySelector("#candidate-case-input"),
@@ -550,6 +552,7 @@ async function init() {
   renderRuntimeConfig();
   nodes.hideExamples.checked = readStored(HIDE_EXAMPLES_KEY) === "1";
   applyEditorFontSize(readStored(EDITOR_FONT_SIZE_KEY));
+  applyEditorTheme(readStored(EDITOR_THEME_KEY));
   renderProblem();
   applyLanguages(null);
   setLanguage("python");
@@ -777,6 +780,24 @@ function bindEvents() {
       );
     });
   }
+  nodes.editorThemeToggle.addEventListener("click", () => {
+    // Off the effective theme, not the attribute: with no explicit choice
+    // yet, dataset.theme is unset while the editor can already be light from
+    // the CSS media query, and comparing the attribute directly would toggle
+    // back to the theme already on screen.
+    const current = resolveEditorTheme(nodes.editorStack.dataset.theme);
+    const theme = current === "light" ? "dark" : "light";
+    applyEditorTheme(theme);
+    writeStored(EDITOR_THEME_KEY, theme);
+  });
+  // The CSS media query repaints the editor itself on a system theme change
+  // with no reload, but aria-pressed is JS state and would otherwise go
+  // stale until the next click. Re-applying with the current attribute is a
+  // no-op under an explicit choice, since that already overrides the system
+  // theme, and only moves aria-pressed when there was none.
+  matchMedia("(prefers-color-scheme: light)").addEventListener("change", () =>
+    applyEditorTheme(nodes.editorStack.dataset.theme),
+  );
   // The overlay does not scroll on its own; it follows the textarea.
   nodes.editor.addEventListener("scroll", () => {
     nodes.editorHighlight.scrollTop = nodes.editor.scrollTop;
@@ -3242,6 +3263,37 @@ function applyEditorFontSize(stored) {
   nodes.editorFontLarger.setAttribute(
     "aria-disabled",
     String(index === EDITOR_FONT_SIZES.length - 1),
+  );
+}
+
+/// Sets data-theme only for an explicit choice; the CSS media query in
+/// styles.css carries the no-choice default so the first paint already
+/// matches the system theme, before this runs at all (init() waits on
+/// loadProblem first) and however the system theme changes afterward. The
+/// toggle's own label is cosmetic, so it still reads matchMedia once here
+/// rather than subscribing to its change event.
+function resolveEditorTheme(stored) {
+  return stored === "light" || stored === "dark"
+    ? stored
+    : matchMedia("(prefers-color-scheme: light)").matches
+      ? "light"
+      : "dark";
+}
+
+function applyEditorTheme(stored) {
+  if (stored === "light" || stored === "dark") {
+    nodes.editorStack.dataset.theme = stored;
+  } else {
+    delete nodes.editorStack.dataset.theme;
+  }
+  const theme = resolveEditorTheme(stored);
+  // A fixed name with aria-pressed reporting state, rather than a name that
+  // itself changes: the latter had light mode announce as "Dark mode,
+  // pressed", since the label named the action while aria-pressed named the
+  // state.
+  nodes.editorThemeToggle.setAttribute(
+    "aria-pressed",
+    String(theme === "light"),
   );
 }
 
