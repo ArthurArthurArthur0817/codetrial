@@ -850,6 +850,11 @@ jobs:
             code=$(status "$probe")
             [ "$code" = 200 ] || { echo "embedded $probe answered $code, not 200" >&2; exit 1; }
           done
+          voice_type=$(curl -fsS -o "$empty/test-voice.wav" -w '%{content_type}' \
+            http://127.0.0.1:18999/audio/test-voice.wav)
+          [ "$voice_type" = audio/wav ] \
+            || { echo "embedded test voice has type $voice_type, not audio/wav" >&2; exit 1; }
+          cmp web/audio/test-voice.wav "$empty/test-voice.wav"
           [ "$(status /.git/config)" = 404 ] \
             || { echo "a dotfile was served" >&2; exit 1; }
 

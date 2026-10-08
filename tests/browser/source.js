@@ -220,6 +220,7 @@ const STATIC_CONTENT_TYPES = {
   ".html": "text/html",
   ".css": "text/css",
   ".wasm": "application/wasm",
+  ".wav": "audio/wav",
 };
 
 /// A static file server over `web/`, the way the browser sees it once

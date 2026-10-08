@@ -5,6 +5,20 @@
 
 use super::{EmbeddedWeb, embedded_etag, is_refused_segment, static_candidates};
 
+#[test]
+fn test_voice_is_served_as_wave_audio() {
+    assert_eq!(
+        super::content_type(std::path::Path::new("audio/test-voice.wav"))
+            .unwrap()
+            .to_str()
+            .unwrap(),
+        "audio/wav"
+    );
+    let sample = EmbeddedWeb::get("audio/test-voice.wav").expect("shipped test voice");
+    assert!(sample.data.starts_with(b"RIFF"));
+    assert_eq!(&sample.data[8..12], b"WAVE");
+}
+
 /// Normalization is tested here rather than through a served request
 /// because a served request cannot see it. `EmbeddedWeb::get` matches keys
 /// exactly only in release; a debug or test build reads the same names off

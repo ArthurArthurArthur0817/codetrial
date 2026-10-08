@@ -347,12 +347,15 @@
               <span class="step-mark" aria-hidden="true"></span
               ><strong>Output</strong> —
               <span id="audio-output-state" aria-live="polite"
-                >play a short tone.</span
+                >play a test sound and confirm you heard it.</span
               >
             </p>
             <div class="audio-check-actions">
               <button id="audio-test-tone" class="pill-button" type="button">
                 Play test tone
+              </button>
+              <button id="audio-test-speech" class="pill-button" type="button">
+                Can't hear the tone?
               </button>
               <button
                 id="audio-heard"
@@ -363,6 +366,18 @@
                 I heard it
               </button>
             </div>
+            <audio
+              id="audio-test-voice"
+              src="./audio/test-voice.wav"
+              preload="none"
+              hidden
+            ></audio>
+            <p class="muted small">
+              If the tone is silent, try the test voice. Playback noise
+              reduction or audio enhancements may filter test sounds. If both
+              are silent, check your output device and volume, or try turning
+              those effects off in your audio settings.
+            </p>
           </div>
 
           <div class="audio-check-step" id="audio-step-mic">

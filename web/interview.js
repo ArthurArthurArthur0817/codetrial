@@ -505,6 +505,8 @@ const nodes = {
   report: document.querySelector("#report-modal"),
   audioCheck: document.querySelector("#audio-check"),
   audioTestTone: document.querySelector("#audio-test-tone"),
+  audioTestSpeech: document.querySelector("#audio-test-speech"),
+  audioTestVoice: document.querySelector("#audio-test-voice"),
   audioHeard: document.querySelector("#audio-heard"),
   audioMeterFill: document.querySelector("#audio-meter-fill"),
   audioStatus: document.querySelector("#audio-check-status"),
@@ -966,7 +968,7 @@ function paintPreflight(state, hint) {
   nodes.audioStatus.textContent = hint || state.message;
   nodes.audioOutputState.textContent = state.steps.output
     ? "Confirmed"
-    : "play a short tone.";
+    : "play a test sound and confirm you heard it.";
   nodes.cameraState.textContent = state.cameraSkipped
     ? `Not used (${state.cameraSkipReason}).`
     : state.steps.camera
@@ -988,8 +990,8 @@ function paintPreflight(state, hint) {
 }
 
 /// Resolves once the candidate has proven output, microphone, and camera.
-/// The tone doubles as the user gesture browsers require before
-/// any audio plays, so confirming it also unblocks the interviewer's voice.
+/// Confirming output supplies the user gesture browsers require before
+/// the interviewer's voice plays, whether the candidate heard tone or speech.
 function runAudioCheck() {
   return new Promise((resolve) => {
     const mediaDevices = navigator.mediaDevices;
@@ -1097,6 +1099,8 @@ function runAudioCheck() {
     // so a request still pending when this runs never lights the camera.
     const stopChecks = () => {
       finished = true;
+      nodes.audioTestVoice.pause();
+      nodes.audioTestVoice.currentTime = 0;
       meter.stop();
       pool.cancelRetry();
       faceCheck.close();
@@ -1138,6 +1142,7 @@ function runAudioCheck() {
     };
 
     nodes.audioTestTone.addEventListener("click", async () => {
+      nodes.audioTestVoice.pause();
       if (!(await unblockOutput())) {
         showHint("The browser is still blocking audio. Click the tone again.");
         return;
@@ -1152,6 +1157,37 @@ function runAudioCheck() {
       hint = null;
       nodes.audioTestTone.textContent = "Play it again";
       refresh();
+    });
+
+    // Playback-side noise reduction can remove a pure tone while preserving
+    // speech. A local sample needs no interview session or synthesis service,
+    // and playing it says nothing about whether the candidate actually heard it.
+    nodes.audioTestSpeech.addEventListener("click", async () => {
+      nodes.audioTestSpeech.disabled = true;
+      try {
+        nodes.audioTestVoice.pause();
+        nodes.audioTestVoice.currentTime = 0;
+        if (nodes.audioTestVoice.error) nodes.audioTestVoice.load();
+        await nodes.audioTestVoice.play();
+        if (finished) return;
+        nodes.audioTestSpeech.textContent = "Play speech again";
+        showHint('If you hear the test voice, click "I heard it".');
+      } catch (error) {
+        if (!finished && error?.name !== "AbortError") {
+          showHint(
+            "Could not play the test voice. Try again and check your audio settings.",
+          );
+        }
+      } finally {
+        if (!finished) nodes.audioTestSpeech.disabled = false;
+      }
+    });
+    nodes.audioTestVoice.addEventListener("error", () => {
+      if (!finished) {
+        showHint(
+          "Could not load the test voice. Try again and check your connection.",
+        );
+      }
     });
 
     // Bound to both events because a mouse click fires each of them and
