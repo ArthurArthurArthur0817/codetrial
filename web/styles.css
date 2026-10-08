@@ -33,6 +33,9 @@
      light gutter background. */
   --code-gutter-ink: var(--muted);
   --code-gutter-border: var(--hairline);
+  /* Indent guides sit under the code, so they stay fainter than it in both
+     themes. */
+  --code-guide: #404040;
   --tok-keyword: #569cd6;
   --tok-string: #ce9178;
   --tok-comment: #6a9955;
@@ -997,6 +1000,7 @@ p {
   --code-match-outline: #0000ff;
   --code-gutter-ink: #595959;
   --code-gutter-border: #dddddd;
+  --code-guide: #d3d3d3;
   --tok-keyword: #0000ff;
   --tok-string: #a31515;
   --tok-comment: #008000;
@@ -1021,6 +1025,7 @@ p {
     --code-match-outline: #0000ff;
     --code-gutter-ink: #595959;
     --code-gutter-border: #dddddd;
+    --code-guide: #d3d3d3;
     --tok-keyword: #0000ff;
     --tok-string: #a31515;
     --tok-comment: #008000;
@@ -1052,6 +1057,16 @@ p {
   pointer-events: none;
   color: var(--code-text);
   overflow: hidden;
+}
+
+/* An inline box paints its line only over the font's content area, which is
+   shorter than the 1.5 line height, so stacked guides would read as dashes.
+   An inline block is a full line tall and, aligned to the top, adds nothing
+   to the line box. */
+.indent-guide {
+  display: inline-block;
+  vertical-align: top;
+  box-shadow: inset 1px 0 0 var(--code-guide);
 }
 
 /* The user-agent stylesheet gives <code> its own monospace family, which

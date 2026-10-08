@@ -9,6 +9,7 @@ import {
   videoTrackReady,
 } from "./audio-check.js";
 import { highlight } from "./highlight.js";
+import { indentGuides } from "./indent-guides.js";
 import { prepareLanguage } from "./syntax-parser.js";
 import { tokenize } from "./tokenizer.js";
 import {
@@ -821,12 +822,7 @@ function bindEvents() {
   matchMedia("(prefers-color-scheme: light)").addEventListener("change", () =>
     applyEditorTheme(nodes.editorStack.dataset.theme),
   );
-  // The overlay does not scroll on its own; it follows the textarea.
-  nodes.editor.addEventListener("scroll", () => {
-    nodes.editorHighlight.scrollTop = nodes.editor.scrollTop;
-    nodes.editorHighlight.scrollLeft = nodes.editor.scrollLeft;
-    nodes.editorLines.scrollTop = nodes.editor.scrollTop;
-  });
+  nodes.editor.addEventListener("scroll", syncEditorScroll);
   document.addEventListener("selectionchange", () => {
     if (document.activeElement === nodes.editor) scheduleEditorPaint();
   });
@@ -3247,6 +3243,14 @@ function scheduleEditorPaint() {
   });
 }
 
+/// The overlay and the gutter do not scroll on their own; they follow the
+/// textarea.
+function syncEditorScroll() {
+  nodes.editorHighlight.scrollTop = nodes.editor.scrollTop;
+  nodes.editorHighlight.scrollLeft = nodes.editor.scrollLeft;
+  nodes.editorLines.scrollTop = nodes.editor.scrollTop;
+}
+
 /// Repaints the syntax layer and the gutter behind the textarea.
 ///
 /// One read of the buffer rather than two, and the gutter is rebuilt only when
@@ -3278,11 +3282,16 @@ function paintEditor(showMatch = document.activeElement === nodes.editor) {
   )
     return;
   paintedEditor = { code, language: state.language, brackets };
+  const classified = editorTokens(code, state.language);
+  // Kept with the tokens they are measured from, so a caret move that only
+  // shifts the bracket match reuses the guides instead of measuring again.
+  classified.guides ??= indentGuides(code, classified.tokens);
   nodes.editorHighlight.firstElementChild.innerHTML = highlight(
     code,
     state.language,
     brackets,
-    editorTokens(code, state.language).tokens,
+    classified.tokens,
+    classified.guides,
   );
   const lines = code.split("\n").length;
   if (lines !== paintedLineCount) {
@@ -3292,6 +3301,11 @@ function paintEditor(showMatch = document.activeElement === nodes.editor) {
       (_, index) => index + 1,
     ).join("\n");
   }
+  // The paint is deferred to the next frame, and a scroll event can run
+  // before it: Enter at the bottom of a long buffer scrolls the textarea
+  // while the layers still hold the old text, so their scrollTop clamps to the
+  // old height and every row sits one above its code until the next scroll.
+  syncEditorScroll();
 }
 
 /// Sets one custom property that the textarea, the highlight overlay and the
