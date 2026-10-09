@@ -124,7 +124,7 @@ export function mediaReadiness({
       steps,
       ready: false,
       blocker: "output",
-      message: "Play the test tone and confirm you heard it.",
+      message: "Play the test tone or voice and confirm you heard it.",
     };
   }
   return {

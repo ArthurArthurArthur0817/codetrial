@@ -521,10 +521,7 @@ async function clearMediaGate(page) {
   await gate.waitFor({ state: "visible", timeout: 30000 });
   await page.getByRole("button", { name: "Play test tone" }).click();
   await page.getByRole("button", { name: "I heard it" }).click();
-  if (
-    (await page.locator("#audio-step-output p").innerText()) !==
-    "Output — Confirmed"
-  ) {
+  if ((await page.locator("#audio-output-state").innerText()) !== "Confirmed") {
     throw new Error("output confirmation did not render immediately");
   }
   const join = page.getByRole("button", { name: "Start interview" });

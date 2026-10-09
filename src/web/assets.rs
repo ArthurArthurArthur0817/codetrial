@@ -498,6 +498,7 @@ pub(crate) fn content_type(path: &Path) -> Option<HeaderValue> {
         // served as anything but JavaScript is refused, not sniffed.
         Some("js" | "mjs") => "text/javascript; charset=utf-8",
         Some("json") => "application/json",
+        Some("wav") => "audio/wav",
 
         // `WebAssembly.instantiateStreaming` refuses anything that is not
         // `application/wasm`, and a body with no type at all is a coin toss for
