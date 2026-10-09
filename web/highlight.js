@@ -263,16 +263,45 @@ function highlightCode(code, spec, renderSlice) {
 
 /// Returns HTML for code. Every branch escapes candidate text.
 /// Supplied token ranges let callers reuse an existing classification.
-export function highlight(code, language, brackets = [], tokens) {
+///
+/// `indentation` is indentGuides()'s runs, each replacing a line's leading
+/// whitespace with its guides. A run is whitespace only, so it never holds a
+/// bracket and never meets a token or identifier boundary; one that would
+/// straddle a slice is left as plain text rather than split.
+export function highlight(
+  code,
+  language,
+  brackets = [],
+  tokens,
+  indentation = [],
+) {
   const selected = Object.hasOwn(LANGUAGES, language) ? language : "javascript";
   const spec = LANGUAGES[selected];
+  // Both are in buffer order, and slices are rendered in buffer order, so one
+  // cursor into the runs serves every slice.
+  let run = 0;
   const renderSlice = (start, end) => {
     let text = "";
     for (const index of brackets ?? []) {
       if (index < start || index >= end) continue;
-      text += escapeHtml(code.slice(start, index));
+      text += renderPlain(start, index);
       text += `<span class="matching-bracket">${escapeHtml(code[index])}</span>`;
       start = index + 1;
+    }
+    return text + renderPlain(start, end);
+  };
+  const renderPlain = (start, end) => {
+    let text = "";
+    while (run < indentation.length && indentation[run].start < start) run += 1;
+    while (
+      run < indentation.length &&
+      indentation[run].start < end &&
+      indentation[run].end <= end
+    ) {
+      const { start: from, end: to, html } = indentation[run];
+      text += escapeHtml(code.slice(start, from)) + html;
+      start = to;
+      run += 1;
     }
     return text + escapeHtml(code.slice(start, end));
   };

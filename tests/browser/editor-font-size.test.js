@@ -181,3 +181,44 @@ test("a stored size the page does not offer falls back to the default", async (t
     await page.close();
   }
 });
+
+// The repaint waits for the next frame and a scroll event does not, so Enter
+// at the bottom scrolls the textarea while the overlay still holds the old
+// text: its scrollTop clamps to the old height, and every row would sit one
+// above its code until something scrolled again. Headless Chromium does not
+// scroll a textarea to its caret, so the scroll a real browser makes is made
+// here, between the input and the frame that paints it.
+test("a scroll before the repaint leaves the overlay on its rows", async (t) => {
+  if (!browser) return t.skip("playwright chromium unavailable");
+  const page = await browser.newPage();
+  try {
+    await page.goto(`${base}/interview.html`, {
+      waitUntil: "domcontentloaded",
+    });
+    await openEditor(page);
+    await fillLongBuffer(page);
+    for (let line = 0; line < 3; line += 1) {
+      const scroll = await page.evaluate(
+        () =>
+          new Promise((settled) => {
+            const editor = document.querySelector("#editor");
+            editor.value += "\n";
+            editor.dispatchEvent(new Event("input", { bubbles: true }));
+            editor.scrollTop = editor.scrollHeight;
+            requestAnimationFrame(() =>
+              requestAnimationFrame(() =>
+                settled(
+                  ["#editor", "#editor-highlight", "#editor-lines"].map(
+                    (id) => document.querySelector(id).scrollTop,
+                  ),
+                ),
+              ),
+            );
+          }),
+      );
+      assert.deepEqual(scroll.slice(1), [scroll[0], scroll[0]], `line ${line}`);
+    }
+  } finally {
+    await page.close();
+  }
+});
